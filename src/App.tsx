@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AlertCircle } from 'lucide-react'
-import { jsPDF } from 'jspdf'
+import { BorderStyle, Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 import FileUpload from './components/FileUpload'
 import ClassSelector from './components/ClassSelector'
 import StudentList from './components/StudentList'
@@ -122,12 +122,6 @@ function App() {
   const handleExportClassOppfolgingsark = () => {
     if (selectedClasses.length === 0) return
 
-    const doc = new jsPDF({ unit: 'mm', format: 'a4' })
-    const pageW = 210
-    const pageH = 297
-    const marginX = 14
-    const usableW = pageW - marginX * 2
-
     const students = Array.from(
       new Map(
         data.absences
@@ -140,71 +134,107 @@ function App() {
       return a.navn.localeCompare(b.navn, 'nb-NO')
     })
 
+    const children: Array<Paragraph | Table> = []
+
     students.forEach((student, index) => {
-      if (index > 0) doc.addPage()
-
       const { kontaktlaerer, radgiver, subjects } = getStudentSheetData(student.className, student.navn)
-      let y = 16
 
-      const ensureSpace = (needed: number) => {
-        if (y + needed > pageH - 14) {
-          doc.addPage()
-          y = 16
-        }
-      }
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(14)
-      doc.text('Oppfølgingsark', marginX, y)
-      y += 7
-
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(10)
-      doc.text(`Elev: ${student.navn}`, marginX, y)
-      y += 6
-      doc.text(`Klasse: ${student.className}`, marginX, y)
-      y += 6
-      doc.text(`Kontaktlærer: ${kontaktlaerer}`, marginX, y)
-      y += 6
-      doc.text(`Rådgiver: ${radgiver}`, marginX, y)
-      y += 8
+      children.push(
+        new Paragraph({
+          text: 'Oppfølgingsark',
+          heading: HeadingLevel.HEADING_1,
+          pageBreakBefore: index > 0,
+        }),
+        new Paragraph({ children: [new TextRun({ text: `Elev: ${student.navn}` })] }),
+        new Paragraph({ children: [new TextRun({ text: `Klasse: ${student.className}` })] }),
+        new Paragraph({ children: [new TextRun({ text: `Kontaktlærer: ${kontaktlaerer}` })] }),
+        new Paragraph({ children: [new TextRun({ text: `Rådgiver: ${radgiver}` })] }),
+        new Paragraph({ text: '' })
+      )
 
       subjects.forEach(subject => {
-        ensureSpace(42)
-        doc.setDrawColor(203, 213, 225)
-        doc.setLineWidth(0.2)
-        doc.rect(marginX, y, usableW, 36)
-        doc.setFont('helvetica', 'bold')
-        doc.setFontSize(11)
         const teacherText = subject.teacher ? ` (Lærer: ${subject.teacher})` : ''
-        const headerLines = doc.splitTextToSize(`${subject.subject}${teacherText}`, usableW - 6)
-        doc.text(headerLines, marginX + 3, y + 6)
-        const headerLineCount = Array.isArray(headerLines) ? headerLines.length : 1
-        const infoY = y + 6 + headerLineCount * 4
-        doc.setFont('helvetica', 'normal')
-        doc.setFontSize(9)
-        doc.text(
-          `Fravær: ${subject.percentageAbsence.toFixed(1)}%   |   Karakter: ${subject.grade ?? '-'}   |   Varsler: ${subject.warningCount}`,
-          marginX + 3,
-          infoY
+        const infoText = `Fravær: ${subject.percentageAbsence.toFixed(1)}%   |   Karakter: ${subject.grade ?? '-'}   |   Varsler: ${subject.warningCount}`
+        children.push(
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: [
+              new TableRow({
+                children: [
+                  new TableCell({
+                    borders: {
+                      top: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                      bottom: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                      left: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                      right: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                    },
+                    children: [
+                      new Paragraph({ children: [new TextRun({ text: `${subject.subject}${teacherText}`, bold: true })] }),
+                      new Paragraph({ text: infoText }),
+                      new Paragraph({ text: '' }),
+                      new Paragraph({ text: '' }),
+                      new Paragraph({ text: '' }),
+                    ],
+                  }),
+                ],
+              }),
+            ],
+          }),
+          new Paragraph({ text: '' })
         )
-        const boxY = infoY + 3
-        const boxH = y + 36 - boxY - 3
-        doc.rect(marginX + 3, boxY, usableW - 6, boxH)
-        y += 42
       })
 
-      ensureSpace(54)
-      doc.setDrawColor(203, 213, 225)
-      doc.setLineWidth(0.2)
-      doc.rect(marginX, y, usableW, 48)
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(11)
-      doc.text('Andre notater', marginX + 3, y + 6)
-      doc.rect(marginX + 3, y + 9, usableW - 6, 36)
+      children.push(
+        new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: [
+            new TableRow({
+              children: [
+                new TableCell({
+                  borders: {
+                    top: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                    bottom: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                    left: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                    right: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                  },
+                  children: [
+                    new Paragraph({ children: [new TextRun({ text: 'Andre notater', bold: true })] }),
+                    new Paragraph({ text: '' }),
+                    new Paragraph({ text: '' }),
+                    new Paragraph({ text: '' }),
+                    new Paragraph({ text: '' }),
+                    new Paragraph({ text: '' }),
+                    new Paragraph({ text: '' }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+        })
+      )
     })
 
-    doc.save(`oppfolgingsark_${selectedClasses.join('-')}_${new Date().toISOString().slice(0, 10)}.pdf`)
+    const doc = new Document({
+      styles: {
+        default: {
+          document: {
+            run: {
+              font: 'Calibri',
+            },
+          },
+        },
+      },
+      sections: [{ children }],
+    })
+
+    void Packer.toBlob(doc).then(blob => {
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `oppfolgingsark_${selectedClasses.join('-')}_${new Date().toISOString().slice(0, 10)}.docx`
+      a.click()
+      URL.revokeObjectURL(url)
+    })
   }
 
   return (
