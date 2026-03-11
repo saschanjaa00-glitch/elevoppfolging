@@ -97,12 +97,7 @@ function App() {
                       <button
                         onClick={() =>
                           setSelectedClasses([
-                            '3STA',
-                            '3B',
-                            '3C',
-                            '3D',
-                            '3E',
-                            '3F',
+                            '3STA', '3STB', '3STC', '3STD', '3STE', '3STF',
                           ])
                         }
                         className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
@@ -112,12 +107,7 @@ function App() {
                       <button
                         onClick={() =>
                           setSelectedClasses([
-                            '1STA',
-                            '1B',
-                            '1C',
-                            '1D',
-                            '1E',
-                            '1F',
+                            '1STA', '1STB', '1STC', '1STD', '1STE', '1STF',
                           ])
                         }
                         className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
@@ -127,15 +117,9 @@ function App() {
                       <button
                         onClick={() =>
                           setSelectedClasses([
-                            '1STA',
-                            '2STA',
-                            '3STA',
-                            '1TID',
-                            '2TID',
-                            '3TID',
-                            '1TMT',
-                            '2TMT',
-                            '3TMT',
+                            '1STA', '2STA', '3STA',
+                            '1TID', '2TID', '3TID',
+                            '1TMT', '2TMT', '3TMT',
                           ])
                         }
                         className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
@@ -144,7 +128,9 @@ function App() {
                       </button>
                       <button
                         onClick={() =>
-                          setSelectedClasses(['1ID', '2ID', '3ID'])
+                          setSelectedClasses([
+                            '1IDA', '1IDB', '2IDA', '2IDB', '3IDA', '3IDB',
+                          ])
                         }
                         className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
                       >
@@ -153,12 +139,7 @@ function App() {
                       <button
                         onClick={() =>
                           setSelectedClasses([
-                            '2STA',
-                            '2B',
-                            '2C',
-                            '2D',
-                            '2E',
-                            '2F',
+                            '2STA', '2STB', '2STC', '2STD', '2STE', '2STF',
                           ])
                         }
                         className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"

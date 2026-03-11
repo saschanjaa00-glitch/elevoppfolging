@@ -121,10 +121,10 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
       .map(row => ({
         navn: getRowValue(row, ['elevnavn', 'navn', 'name', 'student']),
         class: getRowValue(row, ['klasse', 'class']),
-        subjectGroup: getRowValue(row, ['faggruppe', 'fagkode', 'code']),
+        subjectGroup: getRowValue(row, ['faggruppe']),
         warningType: getRowValue(row, ['type varsel', 'varseltype', 'type', 'varselbrev type']),
-        sentDate: getDateField(row, [['sendt'], ['sent'], ['date']]),
-        dateOfBirth: getDateField(row, [['fødselsdato'], ['fodselsdato'], ['birthdate'], ['født'], ['birth', 'date']]),
+        sentDate: getDateField(row, [['sendt'], ['sent']]),
+        dateOfBirth: getDateField(row, [['fdselsdato'], ['fodselsdato'], ['birthdate']]),
       }))
       .filter(r => r.navn && r.class)
   }
