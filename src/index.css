@@ -34,15 +34,49 @@
   }
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
+@media print {
+  @page {
+    size: A4;
+    margin: 15mm 12mm;
   }
-  a:hover {
-    color: #747bff;
+
+  body {
+    background: white !important;
+    font-size: 11px;
+    color: #000;
   }
-  button {
-    background-color: #f9f9f9;
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  /* Keep cards on one page when possible, break before if needed */
+  .student-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    border: 1px solid #cbd5e1 !important;
+    border-left: 4px solid #ef4444 !important;
+    border-radius: 6px !important;
+    padding: 10px !important;
+    margin-bottom: 8px !important;
+    box-shadow: none !important;
+    background: white !important;
+  }
+
+  .student-card-avbrudd {
+    border-left-color: #f59e0b !important;
+    opacity: 0.8 !important;
+  }
+
+  /* Print header */
+  .print-header {
+    display: block !important;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #0369a1;
   }
 }

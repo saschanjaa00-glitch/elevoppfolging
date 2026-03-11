@@ -28,7 +28,7 @@ function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-50">
       {/* Header */}
-      <header className="border-b border-slate-200 bg-white shadow-sm">
+      <header className="no-print border-b border-slate-200 bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
@@ -87,7 +87,7 @@ function App() {
             {/* Settings Panel */}
             {view === 'list' && (
               <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                <aside className="lg:col-span-1">
+                <aside className="lg:col-span-1 no-print">
                   {/* Presets */}
                   <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-4 mb-4">
                     <h3 className="text-sm font-semibold text-slate-900 mb-3">

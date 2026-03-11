@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import type { DataStore, StudentAbsenceSummary } from '../types'
-import { Eye, X } from 'lucide-react'
+import { Eye, X, Printer } from 'lucide-react'
 import StudentDetail from './StudentDetail'
+import { jsPDF } from 'jspdf'
 
 interface StudentListProps {
   data: DataStore
@@ -176,15 +177,162 @@ export default function StudentList({
     )
   }
 
+  const generatePDF = () => {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+    const pageW = 210
+    const pageH = 297
+    const marginX = 14
+    const usableW = pageW - marginX * 2
+    let y = 14
+
+    const checkPageBreak = (needed: number) => {
+      if (y + needed > pageH - 14) {
+        doc.addPage()
+        y = 14
+      }
+    }
+
+    // Header
+    doc.setFillColor(2, 132, 199)
+    doc.rect(0, 0, pageW, 18, 'F')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(13)
+    doc.setTextColor(255, 255, 255)
+    doc.text('Oppfølging — At-Risk Students', marginX, 11)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    doc.text(
+      `Classes: ${selectedClasses.join(', ')}   |   Threshold: ${threshold.toFixed(1)}%   |   ${atRiskStudents.length} students   |   ${new Date().toLocaleDateString('nb-NO')}`,
+      marginX, 16
+    )
+    y = 24
+    doc.setTextColor(0, 0, 0)
+
+    atRiskStudents.forEach(student => {
+      const subjectLines = student.subjects.reduce((acc, s) => {
+        return acc + 1 + groupWarnings(s.warnings).length
+      }, 0)
+      const cardHeight = 10 + subjectLines * 5 + 4
+
+      checkPageBreak(cardHeight + 3)
+
+      const cardY = y
+      const isAvbrudd = student.avbrudd
+
+      // Card background + left stripe
+      doc.setFillColor(isAvbrudd ? 255 : 255, isAvbrudd ? 251 : 255, isAvbrudd ? 235 : 255)
+      doc.rect(marginX, cardY, usableW, cardHeight, 'F')
+      doc.setFillColor(isAvbrudd ? 245 : 239, isAvbrudd ? 158 : 68, isAvbrudd ? 11 : 68)
+      doc.rect(marginX, cardY, 2.5, cardHeight, 'F')
+      doc.setDrawColor(203, 213, 225)
+      doc.setLineWidth(0.2)
+      doc.rect(marginX, cardY, usableW, cardHeight)
+
+      // Student name
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(10)
+      doc.setTextColor(15, 23, 42)
+      doc.text(student.navn, marginX + 5, cardY + 6)
+
+      // Class badge
+      let badgeX = marginX + 5 + doc.getTextWidth(student.navn) + 3
+      doc.setFillColor(241, 245, 249)
+      doc.roundedRect(badgeX, cardY + 2, doc.getTextWidth(student.className) + 4, 5, 1, 1, 'F')
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(7.5)
+      doc.setTextColor(71, 85, 105)
+      doc.text(student.className, badgeX + 2, cardY + 5.8)
+      badgeX += doc.getTextWidth(student.className) + 8
+
+      // Warning count badge
+      const warningCount = student.subjects.reduce((c, s) => c + s.warnings.length, 0)
+      if (warningCount > 0) {
+        const wLabel = `Varsler: ${warningCount}`
+        doc.setFillColor(254, 226, 226)
+        doc.roundedRect(badgeX, cardY + 2, doc.getTextWidth(wLabel) + 4, 5, 1, 1, 'F')
+        doc.setTextColor(185, 28, 28)
+        doc.text(wLabel, badgeX + 2, cardY + 5.8)
+        badgeX += doc.getTextWidth(wLabel) + 8
+      }
+
+      // 18+ badge
+      if (student.isAdult && warningCount > 0) {
+        doc.setFillColor(237, 233, 254)
+        doc.roundedRect(badgeX, cardY + 2, 12, 5, 1, 1, 'F')
+        doc.setFont('helvetica', 'bold')
+        doc.setTextColor(109, 40, 217)
+        doc.text('18+', badgeX + 2, cardY + 5.8)
+        badgeX += 15
+      }
+
+      // Avbrudd badge
+      if (isAvbrudd) {
+        const abLabel = 'Avbrudd'
+        doc.setFillColor(254, 215, 170)
+        doc.roundedRect(badgeX, cardY + 2, doc.getTextWidth(abLabel) + 4, 5, 1, 1, 'F')
+        doc.setFont('helvetica', 'normal')
+        doc.setTextColor(120, 53, 15)
+        doc.text(abLabel, badgeX + 2, cardY + 5.8)
+      }
+
+      // Subjects
+      let subY = cardY + 11
+      student.subjects.forEach(subjectEntry => {
+        const isHighRisk = subjectEntry.percentageAbsence > 10
+        const subjectLabel = `${subjectEntry.subject} — ${subjectEntry.percentageAbsence.toFixed(1)}%`
+        const maxLabelW = usableW - 14
+        const truncated = doc.splitTextToSize(subjectLabel, maxLabelW)[0]
+        const labelW = Math.min(doc.getTextWidth(subjectLabel) + 4, maxLabelW + 4)
+
+        doc.setFontSize(8)
+        doc.setFillColor(isHighRisk ? 254 : 255, isHighRisk ? 226 : 251, isHighRisk ? 226 : 235)
+        doc.roundedRect(marginX + 5, subY - 3.5, labelW, 5, 1, 1, 'F')
+        doc.setFont('helvetica', 'normal')
+        doc.setTextColor(isHighRisk ? 185 : 146, isHighRisk ? 28 : 64, isHighRisk ? 28 : 14)
+        doc.text(truncated, marginX + 7, subY)
+        subY += 5
+
+        groupWarnings(subjectEntry.warnings).forEach(([label, dates]) => {
+          doc.setFontSize(7.5)
+          doc.setFont('helvetica', 'normal')
+          doc.setTextColor(100, 116, 139)
+          doc.text(`${label}: ${dates.join(', ')}`, marginX + 10, subY)
+          subY += 4.5
+        })
+      })
+
+      y = cardY + cardHeight + 3
+    })
+
+    doc.save(`oppfolging_${selectedClasses.join('-')}_${new Date().toISOString().slice(0, 10)}.pdf`)
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      {/* Print header — only visible when printing */}
+      <div className="print-header hidden">
+        <h1 className="text-lg font-bold text-slate-900">Oppfølging — At-Risk Students</h1>
+        <p className="text-xs text-slate-600">
+          Classes: {selectedClasses.join(', ')} &nbsp;|&nbsp; Threshold: {threshold.toFixed(1)}% &nbsp;|&nbsp; {atRiskStudents.length} students &nbsp;|&nbsp; {new Date().toLocaleDateString('nb-NO')}
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between no-print">
         <h2 className="text-xl font-bold text-slate-900">
           At-Risk Students ({atRiskStudents.length})
         </h2>
-        <span className="text-sm text-slate-600">
-          Threshold: {threshold.toFixed(1)}%
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-slate-600">
+            Threshold: {threshold.toFixed(1)}%
+          </span>
+          <button
+            onClick={generatePDF}
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors"
+          >
+            <Printer className="w-4 h-4" />
+            Export PDF
+          </button>
+        </div>
       </div>
 
       <div className="space-y-3">
@@ -197,11 +345,11 @@ export default function StudentList({
           )
 
           return (
-            <div key={cardKey}>
+            <div key={cardKey} className="student-card-wrapper">
               <div
-                className={`card p-4 border-l-4 transition-all ${
+                className={`student-card card p-4 border-l-4 transition-all ${
                   student.avbrudd
-                    ? 'opacity-60 border-l-amber-400 bg-amber-50'
+                    ? 'student-card-avbrudd opacity-60 border-l-amber-400 bg-amber-50'
                     : 'border-l-red-500'
                 }`}
               >
@@ -287,7 +435,7 @@ export default function StudentList({
                     onClick={() =>
                       setExpandedKey(isExpanded ? null : cardKey)
                     }
-                    className="ml-4 px-3 py-2 bg-sky-100 text-sky-700 rounded hover:bg-sky-200 transition-colors flex items-center space-x-1 shrink-0"
+                    className="no-print ml-4 px-3 py-2 bg-sky-100 text-sky-700 rounded hover:bg-sky-200 transition-colors flex items-center space-x-1 shrink-0"
                   >
                     {isExpanded ? (
                       <X className="w-4 h-4" />
@@ -301,7 +449,7 @@ export default function StudentList({
                 </div>
               </div>
               {isExpanded && (
-                <div className="border border-t-0 border-slate-200 rounded-b-lg overflow-hidden">
+                <div className="no-print border border-t-0 border-slate-200 rounded-b-lg overflow-hidden">
                   <StudentDetail
                     data={data}
                     selectedClass={student.className}
