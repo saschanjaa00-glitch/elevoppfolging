@@ -46,8 +46,8 @@ export default function ClassSelector({
   return (
     <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-slate-900">Classes</h3>
-        <span className="text-xs text-slate-500">{selectedClasses.length} selected</span>
+        <h3 className="text-sm font-semibold text-slate-900">Klasser</h3>
+        <span className="text-xs text-slate-500">{selectedClasses.length} valgt</span>
       </div>
 
       <div className="flex gap-2 mb-4">
@@ -56,14 +56,14 @@ export default function ClassSelector({
           onClick={() => onClassChange(classes)}
           className="px-2 py-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors"
         >
-          Select All
+          Velg alle
         </button>
         <button
           type="button"
           onClick={() => onClassChange([])}
           className="px-2 py-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors"
         >
-          Clear
+          Tøm
         </button>
       </div>
 

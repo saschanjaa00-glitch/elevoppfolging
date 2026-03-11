@@ -196,9 +196,9 @@ export default function StudentList({
             <span className="text-2xl">✓</span>
           </div>
         </div>
-        <p className="text-slate-600 text-lg font-medium">Great news!</p>
+        <p className="text-slate-600 text-lg font-medium">Gode nyheter!</p>
         <p className="text-slate-500">
-          No students exceed the {threshold.toFixed(1)}% absence threshold
+          Ingen elever overstiger fraværsgrensen på {threshold.toFixed(1)}%
         </p>
       </div>
     )
@@ -225,11 +225,11 @@ export default function StudentList({
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(13)
     doc.setTextColor(255, 255, 255)
-    doc.text('Oppfølging — At-Risk Students', marginX, 11)
+    doc.text('Oppfølging - Risikoutsatte elever', marginX, 11)
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(8)
     doc.text(
-      `Classes: ${selectedClasses.join(', ')}   |   Threshold: ${threshold.toFixed(1)}%   |   ${atRiskStudents.length} students   |   ${new Date().toLocaleDateString('nb-NO')}`,
+      `Klasser: ${selectedClasses.join(', ')}   |   Grense: ${threshold.toFixed(1)}%   |   ${atRiskStudents.length} elever   |   ${new Date().toLocaleDateString('nb-NO')}`,
       marginX, 16
     )
     y = 24
@@ -338,26 +338,26 @@ export default function StudentList({
     <div className="space-y-4">
       {/* Print header — only visible when printing */}
       <div className="print-header hidden">
-        <h1 className="text-lg font-bold text-slate-900">Oppfølging — At-Risk Students</h1>
+        <h1 className="text-lg font-bold text-slate-900">Oppfølging - Risikoutsatte elever</h1>
         <p className="text-xs text-slate-600">
-          Classes: {selectedClasses.join(', ')} &nbsp;|&nbsp; Threshold: {threshold.toFixed(1)}% &nbsp;|&nbsp; {atRiskStudents.length} students &nbsp;|&nbsp; {new Date().toLocaleDateString('nb-NO')}
+          Klasser: {selectedClasses.join(', ')} &nbsp;|&nbsp; Grense: {threshold.toFixed(1)}% &nbsp;|&nbsp; {atRiskStudents.length} elever &nbsp;|&nbsp; {new Date().toLocaleDateString('nb-NO')}
         </p>
       </div>
 
       <div className="flex items-center justify-between no-print">
         <h2 className="text-xl font-bold text-slate-900">
-          At-Risk Students ({atRiskStudents.length})
+          Risikoutsatte elever ({atRiskStudents.length})
         </h2>
         <div className="flex items-center gap-3">
           <span className="text-sm text-slate-600">
-            Threshold: {threshold.toFixed(1)}%
+            Grense: {threshold.toFixed(1)}%
           </span>
           <button
             onClick={generatePDF}
             className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors"
           >
             <Printer className="w-4 h-4" />
-            Export PDF
+            Eksporter PDF
           </button>
         </div>
       </div>
@@ -402,7 +402,7 @@ export default function StudentList({
                             : 'bg-slate-100 text-slate-600'
                         }`}
                       >
-                        Warnings found: {warningTypesCount}
+                        Varsler funnet: {warningTypesCount}
                       </span>
                       {warningTypesCount > 0 && student.isAdult && (
                         <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-bold">
@@ -456,7 +456,7 @@ export default function StudentList({
                             )}
                             {subjectEntry.warnings.length === 0 && (
                               <div className="text-xs text-slate-400 pl-2">
-                                No warning found for this subject
+                                Ingen varsel funnet for dette faget
                               </div>
                             )}
                           </div>
@@ -477,7 +477,7 @@ export default function StudentList({
                       <Eye className="w-4 h-4" />
                     )}
                     <span className="text-sm font-medium">
-                      {isExpanded ? 'Close' : 'Details'}
+                      {isExpanded ? 'Lukk' : 'Detaljer'}
                     </span>
                   </button>
                 </div>

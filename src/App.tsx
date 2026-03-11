@@ -42,7 +42,7 @@ function App() {
               <h1 className="text-2xl font-bold text-slate-900">Oppfølging</h1>
             </div>
             <p className="text-sm text-slate-600">
-              Student Absence & Performance Tracker
+              Fraværs- og oppfølgingsverktøy for elever
             </p>
           </div>
         </div>
@@ -63,7 +63,7 @@ function App() {
                 }}
                 className="ml-auto px-4 py-2 text-slate-600 hover:text-slate-900 font-medium transition-colors"
               >
-                Upload New Files
+                Last opp nye filer
               </button>
             </div>
 
@@ -187,11 +187,11 @@ function App() {
                     {/* Student search */}
                     <div>
                       <label className="block text-sm font-medium text-slate-900 mb-2">
-                        Search Student
+                        Søk elev
                       </label>
                       <input
                         type="text"
-                        placeholder="Name..."
+                        placeholder="Navn..."
                         value={studentSearch}
                         onChange={e => setStudentSearch(e.target.value)}
                         className="w-full sm:w-72 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
@@ -209,7 +209,7 @@ function App() {
                             : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
                         }`}
                       >
-                        {missingWarningsOnly ? '⚠ Missing warnings only' : '⚠ Show missing warnings only'}
+                        {missingWarningsOnly ? '⚠ Kun manglende varsler' : '⚠ Vis kun manglende varsler'}
                       </button>
                     </div>
 
@@ -217,8 +217,8 @@ function App() {
                     <div className="flex flex-wrap items-end gap-6">
                       <div className={data.grades.length === 0 ? 'opacity-40 pointer-events-none' : ''}>
                         <label className={`block text-sm font-medium mb-2 ${fullRapport ? 'text-slate-400' : 'text-slate-900'}`}>
-                          Low Grade Filter
-                          {data.grades.length === 0 && <span className="ml-2 text-xs font-normal text-slate-500">(no grade file imported)</span>}
+                          Filter for lav karakter
+                          {data.grades.length === 0 && <span className="ml-2 text-xs font-normal text-slate-500">(ingen karakterfil importert)</span>}
                         </label>
                         <div className={`flex gap-2 ${fullRapport ? 'opacity-40 pointer-events-none' : ''}`}>
                           {(['IV', '1', '2'] as const).map(opt => (
@@ -290,7 +290,7 @@ function App() {
                       </button>
                       <div className={`w-full sm:w-72 ${ !thresholdEnabled ? 'opacity-40 pointer-events-none' : '' }`}>
                         <label className="block text-sm font-medium text-slate-900 mb-1">
-                          Absence Threshold (%)
+                          Fraværsgrense (%)
                         </label>
                         <div className="flex items-center space-x-2">
                           <input
@@ -329,8 +329,7 @@ function App() {
                     <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-12 text-center">
                       <AlertCircle className="w-12 h-12 text-slate-400 mx-auto mb-4" />
                       <p className="text-slate-600">
-                        Please select one or more classes to view the student
-                        list
+                        Velg én eller flere klasser for å vise elevlisten
                       </p>
                     </div>
                   )}

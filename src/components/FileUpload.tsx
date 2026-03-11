@@ -204,13 +204,13 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
       }
 
       if (data.absences.length === 0) {
-        setError('No valid absence data found')
+        setError('Fant ingen gyldige fraværsdata')
         return
       }
 
       onDataImport(data)
     } catch (err) {
-      setError('Error processing files: ' + (err instanceof Error ? err.message : String(err)))
+      setError('Feil ved behandling av filer: ' + (err instanceof Error ? err.message : String(err)))
     } finally {
       setLoading(false)
     }
@@ -226,10 +226,10 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
         </div>
 
         <h2 className="text-2xl font-bold text-center text-slate-900 mb-2">
-          Import Absence Data
+          Importer fraværsdata
         </h2>
         <p className="text-center text-slate-600 mb-6">
-          Drag and drop your Excel files or click to upload
+          Dra og slipp Excel-filer eller klikk for å laste opp
         </p>
 
         <div
@@ -258,10 +258,10 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
           />
           <label htmlFor="file-input" className="cursor-pointer">
             <p className="font-medium text-slate-900">
-              {loading ? 'Processing...' : 'Click to select files or drag here'}
+              {loading ? 'Behandler...' : 'Klikk for å velge filer eller dra dem hit'}
             </p>
             <p className="text-sm text-slate-600 mt-1">
-              XLSX, XLS, or CSV files
+              XLSX-, XLS- eller CSV-filer
             </p>
           </label>
         </div>
@@ -270,14 +270,14 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
           <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-lg">
             <p className="text-red-700 font-medium">{error}</p>
             <p className="text-sm text-red-600 mt-2">
-              Ensure files contain: Navn, Klasse, Fagnavn, H1+H2 % udok. fravær, H1+H2 timer udok. fravær, Lærer (Absence file) and Navn, Faggruppe, Varseltype, Sendt, Fødselsdato (Warning file)
+              Kontroller at filene inneholder: Navn, Klasse, Fagnavn, H1+H2 % udok. fravær, H1+H2 timer udok. fravær, Lærer (fraværsfil) og Navn, Faggruppe, Varseltype, Sendt, Fødselsdato (varselfil)
             </p>
           </div>
         )}
 
         <div className="mt-8 grid grid-cols-2 gap-4 text-sm">
           <div className="bg-slate-50 rounded-lg p-4">
-            <h4 className="font-semibold text-slate-900 mb-2">Absence File</h4>
+            <h4 className="font-semibold text-slate-900 mb-2">Fraværsfil</h4>
             <ul className="text-slate-600 space-y-1 text-xs">
               <li>• Navn</li>
               <li>• Klasse</li>
@@ -287,7 +287,7 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
             </ul>
           </div>
           <div className="bg-slate-50 rounded-lg p-4">
-            <h4 className="font-semibold text-slate-900 mb-2">Warning File</h4>
+            <h4 className="font-semibold text-slate-900 mb-2">Varselfil</h4>
             <ul className="text-slate-600 space-y-1 text-xs">
               <li>• Navn</li>
               <li>• Faggruppe</li>

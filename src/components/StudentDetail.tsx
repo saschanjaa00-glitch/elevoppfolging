@@ -87,7 +87,7 @@ export default function StudentDetail({
   if (studentData.records.length === 0) {
     return (
       <div className="card p-8 text-center">
-        <p className="text-slate-600">Student data not found</p>
+        <p className="text-slate-600">Fant ikke elevdata</p>
       </div>
     )
   }
