@@ -18,14 +18,6 @@ interface StudentListProps {
 
 const LOW_GRADES = ['IV', '1', '2']
 
-const KONTAKTANSVARLIG_LAERER: Record<string, string[]> = {
-  Anja: ['3STA', '3STB', '3STC', '3STD', '3STE', '3STF'],
-  Christin: ['1STA', '1STB', '1STC', '1STD', '1STE', '1STF'],
-  Sigurd: ['1STA', '2STA', '3STA', '1TID', '2TID', '3TID', '1TMT', '2TMT', '3TMT'],
-  'Jørund': ['1IDA', '1IDB', '2IDA', '2IDB', '3IDA', '3IDB'],
-  Siri: ['2STA', '2STB', '2STC', '2STD', '2STE', '2STF'],
-}
-
 const RADGIVER: Record<string, string[]> = {
   Lasse: ['1IDA', '1IDB', '2IDA', '2IDB', '3IDA', '3IDB', '1TMT', '2TMT', '3TMT'],
   Trond: ['1TID', '2TID', '3TID', '1STA', '1STB', '1STC', '2STA', '2STB', '3STA', '3STB', '3STC'],
@@ -363,7 +355,7 @@ export default function StudentList({
     const usableW = pageW - marginX * 2
     let y = 16
 
-    const kontaktansvarlig = ownerForClass(student.className, KONTAKTANSVARLIG_LAERER)
+    const { allSubjectEntries, kontaktlaerer } = getAllSubjectEntries(student)
     const radgiver = ownerForClass(student.className, RADGIVER)
     const acroSupported =
       typeof (jsPDF as unknown as { AcroFormTextField?: unknown }).AcroFormTextField === 'function' &&
@@ -393,8 +385,6 @@ export default function StudentList({
       ;(doc as unknown as { addField: (f: unknown) => void }).addField(field)
     }
 
-    const allSubjectEntries = getAllSubjectEntries(student)
-
     const ensureSpace = (needed: number) => {
       if (y + needed > pageH - 14) {
         doc.addPage()
@@ -413,7 +403,7 @@ export default function StudentList({
     y += 6
     doc.text(`Klasse: ${student.className}`, marginX, y)
     y += 6
-    doc.text(`Kontaktansvarlig lærer: ${kontaktansvarlig}`, marginX, y)
+    doc.text(`Kontaktlærer: ${kontaktlaerer}`, marginX, y)
     y += 6
     doc.text(`Rådgiver: ${radgiver}`, marginX, y)
     y += 8
@@ -473,6 +463,26 @@ export default function StudentList({
       r => r.class === student.className && normalizeMatch(r.navn) === normalizeMatch(student.navn)
     )
 
+    const teacherCountsForStudent = new Map<string, number>()
+    studentRecords.forEach(r => {
+      const teacher = r.teacher?.trim()
+      if (!teacher) return
+      teacherCountsForStudent.set(teacher, (teacherCountsForStudent.get(teacher) ?? 0) + 1)
+    })
+    const kontaktlaerer =
+      Array.from(teacherCountsForStudent.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'Ukjent'
+
+    const classRecords = data.absences.filter(r => r.class === student.className)
+    const teacherCountsBySubjectGroup = new Map<string, Map<string, number>>()
+    classRecords.forEach(r => {
+      const sgKey = normalizeMatch(r.subjectGroup)
+      const teacher = r.teacher?.trim()
+      if (!sgKey || !teacher) return
+      if (!teacherCountsBySubjectGroup.has(sgKey)) teacherCountsBySubjectGroup.set(sgKey, new Map())
+      const counts = teacherCountsBySubjectGroup.get(sgKey)!
+      counts.set(teacher, (counts.get(teacher) ?? 0) + 1)
+    })
+
     const studentWarningMap = new Map<string, number>()
     data.warnings
       .filter(w => normalizeMatch(w.navn) === normalizeMatch(student.navn))
@@ -499,11 +509,15 @@ export default function StudentList({
       const warningCount = studentWarningMap.get(normalizeMatch(r.subjectGroup)) ?? 0
       const grade = studentGradeMap.get(normalizeMatch(r.subjectGroup))
 
+      const sgKey = normalizeMatch(r.subjectGroup)
+      const subjectTeacher = Array.from(teacherCountsBySubjectGroup.get(sgKey)?.entries() ?? [])
+        .sort((a, b) => b[1] - a[1])[0]?.[0] ?? r.teacher
+
       if (!existing || r.percentageAbsence > existing.percentageAbsence) {
         allSubjectsMap.set(key, {
           subject: r.subject,
           subjectGroup: r.subjectGroup,
-          teacher: r.teacher,
+          teacher: subjectTeacher,
           percentageAbsence: r.percentageAbsence,
           grade,
           warningCount,
@@ -511,21 +525,23 @@ export default function StudentList({
       }
     })
 
-    return Array.from(allSubjectsMap.values()).sort((a, b) =>
-      a.subject.localeCompare(b.subject, 'nb-NO')
-    )
+    return {
+      kontaktlaerer,
+      allSubjectEntries: Array.from(allSubjectsMap.values()).sort((a, b) =>
+        a.subject.localeCompare(b.subject, 'nb-NO')
+      ),
+    }
   }
 
   const generateOppfolgingsarkDocx = async (student: StudentAbsenceSummary) => {
-    const kontaktansvarlig = ownerForClass(student.className, KONTAKTANSVARLIG_LAERER)
+    const { allSubjectEntries, kontaktlaerer } = getAllSubjectEntries(student)
     const radgiver = ownerForClass(student.className, RADGIVER)
-    const allSubjectEntries = getAllSubjectEntries(student)
 
     const sections: Array<Paragraph | Table> = [
       new Paragraph({ text: 'Oppfølgingsark', heading: HeadingLevel.HEADING_1 }),
       new Paragraph({ children: [new TextRun({ text: `Elev: ${student.navn}` })] }),
       new Paragraph({ children: [new TextRun({ text: `Klasse: ${student.className}` })] }),
-      new Paragraph({ children: [new TextRun({ text: `Kontaktansvarlig lærer: ${kontaktansvarlig}` })] }),
+      new Paragraph({ children: [new TextRun({ text: `Kontaktlærer: ${kontaktlaerer}` })] }),
       new Paragraph({ children: [new TextRun({ text: `Rådgiver: ${radgiver}` })] }),
       new Paragraph({ text: '' }),
     ]
@@ -568,6 +584,15 @@ export default function StudentList({
     })
 
     const doc = new Document({
+      styles: {
+        default: {
+          document: {
+            run: {
+              font: 'Calibri',
+            },
+          },
+        },
+      },
       sections: [{ children: sections }],
     })
 
