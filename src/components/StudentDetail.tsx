@@ -1,0 +1,151 @@
+import { useMemo } from 'react'
+import type { DataStore } from '../types'
+
+interface StudentDetailProps {
+  data: DataStore
+  selectedClass: string
+  selectedStudent: string
+  threshold: number
+}
+
+export default function StudentDetail({
+  data,
+  selectedClass,
+  selectedStudent,
+  threshold,
+}: StudentDetailProps) {
+  const normalizeMatch = (value: string): string =>
+    value
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, '')
+
+  const groupWarnings = (warnings: Array<{ warningType: string; sentDate: string }>) => {
+    const parseDMY = (d: string) => {
+      const m = d.match(/^(\d{1,2})[.\/\-](\d{1,2})[.\/\-](\d{4})$/)
+      return m ? new Date(+m[3], +m[2] - 1, +m[1]).getTime() : 0
+    }
+    const getLabel = (wt: string) => {
+      const l = wt.toLowerCase()
+      if (l.includes('frav')) return 'Fravær'
+      if (l.includes('vurdering') || l.includes('grunnlag')) return 'Grunnlag'
+      return wt
+    }
+    const labelOrder = (l: string) =>
+      l === 'Fravær' ? 0 : l === 'Grunnlag' ? 1 : 2
+    const grouped = new Map<string, string[]>()
+    warnings.forEach(w => {
+      const label = getLabel(w.warningType)
+      if (!grouped.has(label)) grouped.set(label, [])
+      if (w.sentDate) grouped.get(label)!.push(w.sentDate)
+    })
+    grouped.forEach((dates, label) =>
+      grouped.set(
+        label,
+        [...dates].sort((a, b) => parseDMY(a) - parseDMY(b))
+      )
+    )
+    return Array.from(grouped.entries()).sort(
+      ([a], [b]) => labelOrder(a) - labelOrder(b)
+    )
+  }
+
+  const studentData = useMemo(() => {
+    const records = data.absences.filter(
+      a => a.class === selectedClass && a.navn === selectedStudent
+    )
+
+    const warnings = data.warnings.filter(
+      w => normalizeMatch(w.navn) === normalizeMatch(selectedStudent)
+    )
+
+    return { records, warnings }
+  }, [data, selectedClass, selectedStudent])
+
+  if (studentData.records.length === 0) {
+    return (
+      <div className="card p-8 text-center">
+        <p className="text-slate-600">Student data not found</p>
+      </div>
+    )
+  }
+
+  const subjectGroups = new Map<string, typeof studentData.records>()
+  studentData.records.forEach(record => {
+    if (!subjectGroups.has(record.subject)) {
+      subjectGroups.set(record.subject, [])
+    }
+    subjectGroups.get(record.subject)!.push(record)
+  })
+
+  const subjectSummaries = Array.from(subjectGroups.entries())
+    .map(([subject, records]) => {
+      const topRecord = records.reduce((max, current) =>
+        current.percentageAbsence > max.percentageAbsence ? current : max
+      )
+
+      const subjectWarnings = studentData.warnings
+        .filter(
+          w =>
+            normalizeMatch(w.subjectGroup) ===
+            normalizeMatch(topRecord.subjectGroup)
+        )
+        .map(w => ({ warningType: w.warningType, sentDate: w.sentDate }))
+
+      return {
+        subject,
+        records,
+        topRecord,
+        warnings: subjectWarnings,
+      }
+    })
+    .sort((a, b) => b.topRecord.percentageAbsence - a.topRecord.percentageAbsence)
+
+  return (
+    <div className="bg-white divide-y divide-slate-100 py-1">
+      {subjectSummaries.map(({ subject, topRecord: record, warnings }) => {
+        const isAtRisk = record.percentageAbsence > threshold
+        const isHighRisk = record.percentageAbsence > 15
+
+        return (
+          <div
+            key={subject}
+            className="flex items-start justify-between px-4 py-3 gap-4"
+          >
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-slate-900 truncate">{subject}</p>
+              <p className="text-xs text-slate-500">{record.teacher}</p>
+              {warnings.length > 0 && (
+                <div className="text-xs text-slate-600 mt-1 space-y-0.5">
+                  {groupWarnings(warnings).map(([label, dates]) => (
+                    <div key={label}>
+                      <span className="font-semibold">{label}:</span>{' '}
+                      {dates.join(', ')}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="text-right shrink-0">
+              <p
+                className={`text-base font-bold ${
+                  isHighRisk
+                    ? 'text-red-600'
+                    : isAtRisk
+                      ? 'text-amber-600'
+                      : 'text-green-600'
+                }`}
+              >
+                {record.percentageAbsence.toFixed(1)}%
+              </p>
+              <p className="text-xs text-slate-500">
+                {record.hoursAbsence.toFixed(0)}h
+              </p>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}

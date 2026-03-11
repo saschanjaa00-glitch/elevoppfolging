@@ -1,0 +1,18 @@
+Navn,Klasse,Fagnavn,H1+H2 % udok. fravær (X, M),H1+H2 timer udok. fravær (X, M),Lærer,Avbrudd
+"Ola Nordmann",1STA,Matematikk,8.5,12,Jon Andersen,No
+"Ola Nordmann",1STA,Norsk,6.2,8,Maria Johnsen,No
+"Ola Nordmann",1STA,Engelsk,9.1,14,Peter Hansen,No
+"Kari Svensen",1STA,Matematikk,15.3,22,Jon Andersen,No
+"Kari Svensen",1STA,Fysikk,12.7,18,Anna Sørensen,No
+"Per Larsen",1STA,Matematikk,5.1,7,Jon Andersen,No
+"Per Larsen",1STA,Kjemi,7.8,11,Erik Bergman,No
+"Anna Berg",1STA,Norsk,10.5,15,Maria Johnsen,No
+"Anna Berg",1STA,Engelsk,8.9,13,Peter Hansen,Yes
+"Thomas Olsen",2STA,Matematikk,16.2,25,Jon Andersen,No
+"Thomas Olsen",2STA,Programmering,12.3,18,Sofie Larsen,No
+"Ingrid Andersen",2STA,Matematikk,4.2,6,Jon Andersen,No
+"Ingrid Andersen",2STA,Biologi,6.8,10,Karen Nielsen,No
+"Jon Pettersen",2STA,Engelsk,11.5,17,Peter Hansen,No
+"Jon Pettersen",2STA,Engelsk,11.5,17,Peter Hansen,No
+"Emma Wold",2STA,Matematikk,9.3,14,Jon Andersen,No
+"Emma Wold",2STA,Norsk,7.1,10,Maria Johnsen,No
