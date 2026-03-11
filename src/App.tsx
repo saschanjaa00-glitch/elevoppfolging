@@ -3,7 +3,6 @@ import { AlertCircle } from 'lucide-react'
 import FileUpload from './components/FileUpload'
 import ClassSelector from './components/ClassSelector'
 import StudentList from './components/StudentList'
-import ReportExport from './components/ReportExport'
 import type { DataStore } from './types'
 import './index.css'
 
@@ -22,7 +21,6 @@ function App() {
   const [lowGradeFilter, setLowGradeFilter] = useState<string[]>([])
   const [fullRapport, setFullRapport] = useState<boolean>(false)
   const [fullRapportInclude2, setFullRapportInclude2] = useState<boolean>(false)
-  const [view, setView] = useState<'list' | 'report'>('list')
 
   const handleDataImport = (importedData: DataStore) => {
     setData(importedData)
@@ -56,33 +54,12 @@ function App() {
           <FileUpload onDataImport={handleDataImport} />
         ) : (
           <div className="space-y-6">
-            {/* Navigation Tabs */}
-            <div className="flex space-x-2 border-b border-slate-200">
-              <button
-                onClick={() => setView('list')}
-                className={`px-4 py-2 font-medium border-b-2 transition-colors ${
-                  view === 'list'
-                    ? 'border-sky-600 text-sky-600'
-                    : 'border-transparent text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Student List
-              </button>
-              <button
-                onClick={() => setView('report')}
-                className={`px-4 py-2 font-medium border-b-2 transition-colors ${
-                  view === 'report'
-                    ? 'border-sky-600 text-sky-600'
-                    : 'border-transparent text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Export Report
-              </button>
+            {/* Top bar */}
+            <div className="flex border-b border-slate-200 pb-2">
               <button
                 onClick={() => {
                   setData({ absences: [], warnings: [], grades: [] })
                   setSelectedClasses([])
-                  setView('list')
                 }}
                 className="ml-auto px-4 py-2 text-slate-600 hover:text-slate-900 font-medium transition-colors"
               >
@@ -91,13 +68,12 @@ function App() {
             </div>
 
             {/* Settings Panel */}
-            {view === 'list' && (
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                 <aside className="lg:col-span-1 no-print">
                   {/* Presets */}
                   <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-4 mb-4">
                     <h3 className="text-sm font-semibold text-slate-900 mb-3">
-                      Teacher Presets
+                      Avdelingsleder
                     </h3>
                     <div className="space-y-2">
                       <button
@@ -151,6 +127,50 @@ function App() {
                         className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
                       >
                         Siri
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-4 mb-4">
+                    <h3 className="text-sm font-semibold text-slate-900 mb-3">
+                      Rådgiver
+                    </h3>
+                    <div className="space-y-2">
+                      <button
+                        onClick={() =>
+                          setSelectedClasses([
+                            '1IDA', '1IDB', '2IDA', '2IDB', '3IDA', '3IDB',
+                            '1TMT', '2TMT', '3TMT',
+                          ])
+                        }
+                        className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
+                      >
+                        Lasse
+                      </button>
+                      <button
+                        onClick={() =>
+                          setSelectedClasses([
+                            '1TID', '2TID', '3TID',
+                            '1STA', '1STB', '1STC',
+                            '2STA', '2STB',
+                            '3STA', '3STB', '3STC',
+                          ])
+                        }
+                        className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
+                      >
+                        Trond
+                      </button>
+                      <button
+                        onClick={() =>
+                          setSelectedClasses([
+                            '1STD', '1STE', '1STF',
+                            '2STC', '2STD', '2STE', '2STF',
+                            '3STD', '3STE', '3STF',
+                          ])
+                        }
+                        className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
+                      >
+                        Trude
                       </button>
                     </div>
                   </div>
@@ -316,9 +336,7 @@ function App() {
                   )}
                 </section>
               </div>
-            )}
 
-            {view === 'report' && <ReportExport data={data} />}
           </div>
         )}
       </main>
