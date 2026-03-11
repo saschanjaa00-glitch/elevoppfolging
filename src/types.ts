@@ -26,6 +26,7 @@ export interface StudentAbsenceSummary {
   subjects: Array<{
     subject: string
     subjectGroup: string
+    teacher?: string
     percentageAbsence: number
     warnings: Array<{ warningType: string; sentDate: string }>
     grade?: string

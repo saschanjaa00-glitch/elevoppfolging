@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { DataStore, StudentAbsenceSummary } from '../types'
-import { Eye, X, Printer } from 'lucide-react'
+import { Eye, X, Printer, FileText } from 'lucide-react'
 import StudentDetail from './StudentDetail'
 import { jsPDF } from 'jspdf'
 
@@ -17,6 +17,20 @@ interface StudentListProps {
 
 const LOW_GRADES = ['IV', '1', '2']
 
+const KONTAKTANSVARLIG_LAERER: Record<string, string[]> = {
+  Anja: ['3STA', '3STB', '3STC', '3STD', '3STE', '3STF'],
+  Christin: ['1STA', '1STB', '1STC', '1STD', '1STE', '1STF'],
+  Sigurd: ['1STA', '2STA', '3STA', '1TID', '2TID', '3TID', '1TMT', '2TMT', '3TMT'],
+  'Jørund': ['1IDA', '1IDB', '2IDA', '2IDB', '3IDA', '3IDB'],
+  Siri: ['2STA', '2STB', '2STC', '2STD', '2STE', '2STF'],
+}
+
+const RADGIVER: Record<string, string[]> = {
+  Lasse: ['1IDA', '1IDB', '2IDA', '2IDB', '3IDA', '3IDB', '1TMT', '2TMT', '3TMT'],
+  Trond: ['1TID', '2TID', '3TID', '1STA', '1STB', '1STC', '2STA', '2STB', '3STA', '3STB', '3STC'],
+  Trude: ['1STD', '1STE', '1STF', '2STC', '2STD', '2STE', '2STF', '3STD', '3STE', '3STF'],
+}
+
 export default function StudentList({
   data,
   selectedClasses,
@@ -28,6 +42,11 @@ export default function StudentList({
   fullRapportInclude2,
 }: StudentListProps) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
+
+  const ownerForClass = (className: string, mapping: Record<string, string[]>) => {
+    const found = Object.entries(mapping).find(([, classes]) => classes.includes(className))
+    return found?.[0] ?? 'Ukjent'
+  }
 
   const normalizeMatch = (value: string): string =>
     value
@@ -133,7 +152,7 @@ export default function StudentList({
           maxPercentage: record.percentageAbsence,
           totalHours: record.hoursAbsence,
           subjects: includeSubject
-            ? [{ subject: record.subject, subjectGroup: record.subjectGroup, percentageAbsence: record.percentageAbsence, warnings, grade }]
+            ? [{ subject: record.subject, subjectGroup: record.subjectGroup, teacher: record.teacher, percentageAbsence: record.percentageAbsence, warnings, grade }]
             : [],
           avbrudd: record.avbrudd,
           hasWarnings: includeSubject ? hasSubjectWarning : false,
@@ -151,7 +170,7 @@ export default function StudentList({
             s => s.subjectGroup === record.subjectGroup && s.subject === record.subject
           )
           if (!subjectExists) {
-            summary.subjects.push({ subject: record.subject, subjectGroup: record.subjectGroup, percentageAbsence: record.percentageAbsence, warnings, grade })
+            summary.subjects.push({ subject: record.subject, subjectGroup: record.subjectGroup, teacher: record.teacher, percentageAbsence: record.percentageAbsence, warnings, grade })
           }
           if (hasSubjectWarning) summary.hasWarnings = true
         }
@@ -335,6 +354,121 @@ export default function StudentList({
     doc.save(`oppfolging_${selectedClasses.join('-')}_${new Date().toISOString().slice(0, 10)}.pdf`)
   }
 
+  const generateOppfolgingsark = (student: StudentAbsenceSummary) => {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+    const pageW = 210
+    const pageH = 297
+    const marginX = 14
+    const usableW = pageW - marginX * 2
+    let y = 16
+
+    const kontaktansvarlig = ownerForClass(student.className, KONTAKTANSVARLIG_LAERER)
+    const radgiver = ownerForClass(student.className, RADGIVER)
+
+    const studentRecords = data.absences.filter(
+      r => r.class === student.className && normalizeMatch(r.navn) === normalizeMatch(student.navn)
+    )
+
+    const studentWarningMap = new Map<string, number>()
+    data.warnings
+      .filter(w => normalizeMatch(w.navn) === normalizeMatch(student.navn))
+      .forEach(w => {
+        const key = normalizeMatch(w.subjectGroup)
+        studentWarningMap.set(key, (studentWarningMap.get(key) ?? 0) + 1)
+      })
+
+    const studentGradeMap = new Map<string, string>()
+    data.grades
+      .filter(g => normalizeMatch(g.navn) === normalizeMatch(student.navn))
+      .forEach(g => {
+        const halvar = g.halvår.toString().trim().toLowerCase()
+        if (halvar === '1' || halvar.includes('1')) {
+          const key = normalizeMatch(g.subjectGroup)
+          if (!studentGradeMap.has(key)) studentGradeMap.set(key, g.grade)
+        }
+      })
+
+    const allSubjectsMap = new Map<string, { subject: string; subjectGroup: string; teacher: string; percentageAbsence: number; grade?: string; warningCount: number }>()
+    studentRecords.forEach(r => {
+      const key = `${normalizeMatch(r.subject)}::${normalizeMatch(r.subjectGroup)}`
+      const existing = allSubjectsMap.get(key)
+      const warningCount = studentWarningMap.get(normalizeMatch(r.subjectGroup)) ?? 0
+      const grade = studentGradeMap.get(normalizeMatch(r.subjectGroup))
+
+      if (!existing || r.percentageAbsence > existing.percentageAbsence) {
+        allSubjectsMap.set(key, {
+          subject: r.subject,
+          subjectGroup: r.subjectGroup,
+          teacher: r.teacher,
+          percentageAbsence: r.percentageAbsence,
+          grade,
+          warningCount,
+        })
+      }
+    })
+
+    const allSubjectEntries = Array.from(allSubjectsMap.values()).sort((a, b) =>
+      a.subject.localeCompare(b.subject, 'nb-NO')
+    )
+
+    const ensureSpace = (needed: number) => {
+      if (y + needed > pageH - 14) {
+        doc.addPage()
+        y = 16
+      }
+    }
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(14)
+    doc.text('Oppfølgingsark', marginX, y)
+    y += 7
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    doc.text(`Elev: ${student.navn}`, marginX, y)
+    y += 6
+    doc.text(`Klasse: ${student.className}`, marginX, y)
+    y += 6
+    doc.text(`Kontaktansvarlig lærer: ${kontaktansvarlig}`, marginX, y)
+    y += 6
+    doc.text(`Rådgiver: ${radgiver}`, marginX, y)
+    y += 8
+
+    allSubjectEntries.forEach(subjectEntry => {
+      ensureSpace(58)
+
+      doc.setDrawColor(203, 213, 225)
+      doc.setLineWidth(0.2)
+      doc.rect(marginX, y, usableW, 52)
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(11)
+      const teacherText = subjectEntry.teacher ? ` (Lærer: ${subjectEntry.teacher})` : ''
+      const headerLines = doc.splitTextToSize(`${subjectEntry.subject}${teacherText}`, usableW - 6)
+      doc.text(headerLines, marginX + 3, y + 6)
+
+      const headerLineCount = Array.isArray(headerLines) ? headerLines.length : 1
+      const infoY = y + 6 + headerLineCount * 4
+
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(9)
+      doc.text(
+        `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}`,
+        marginX + 3,
+        infoY
+      )
+
+      // Stor skriveboks under hvert fag.
+      const boxY = infoY + 3
+      const boxH = y + 52 - boxY - 3
+      doc.rect(marginX + 3, boxY, usableW - 6, boxH)
+
+      y += 58
+    })
+
+    doc.save(`oppfolgingsark_${student.className}_${student.navn.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`)
+  }
+
   return (
     <div className="space-y-4">
       {/* Print header — only visible when printing */}
@@ -489,21 +623,30 @@ export default function StudentList({
                     </div>
                   </div>
 
-                  <button
-                    onClick={() =>
-                      setExpandedKey(isExpanded ? null : cardKey)
-                    }
-                    className="no-print ml-4 px-3 py-2 bg-sky-100 text-sky-700 rounded hover:bg-sky-200 transition-colors flex items-center space-x-1 shrink-0"
-                  >
-                    {isExpanded ? (
-                      <X className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
-                    <span className="text-sm font-medium">
-                      {isExpanded ? 'Lukk' : 'Detaljer'}
-                    </span>
-                  </button>
+                  <div className="no-print ml-4 flex flex-col gap-2 shrink-0">
+                    <button
+                      onClick={() => generateOppfolgingsark(student)}
+                      className="px-3 py-2 bg-emerald-100 text-emerald-800 rounded hover:bg-emerald-200 transition-colors flex items-center space-x-1"
+                    >
+                      <FileText className="w-4 h-4" />
+                      <span className="text-sm font-medium">Oppfølgingsark</span>
+                    </button>
+                    <button
+                      onClick={() =>
+                        setExpandedKey(isExpanded ? null : cardKey)
+                      }
+                      className="px-3 py-2 bg-sky-100 text-sky-700 rounded hover:bg-sky-200 transition-colors flex items-center space-x-1"
+                    >
+                      {isExpanded ? (
+                        <X className="w-4 h-4" />
+                      ) : (
+                        <Eye className="w-4 h-4" />
+                      )}
+                      <span className="text-sm font-medium">
+                        {isExpanded ? 'Lukk' : 'Detaljer'}
+                      </span>
+                    </button>
+                  </div>
                 </div>
               </div>
               {isExpanded && (
