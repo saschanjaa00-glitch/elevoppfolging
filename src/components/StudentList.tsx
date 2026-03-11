@@ -183,8 +183,9 @@ export default function StudentList({
         return true
       })
       .sort((a, b) => {
-        if (a.avbrudd !== b.avbrudd) return a.avbrudd ? 1 : -1
-        return b.maxPercentage - a.maxPercentage
+        const classCompare = a.className.localeCompare(b.className, 'nb-NO', { numeric: true })
+        if (classCompare !== 0) return classCompare
+        return a.navn.localeCompare(b.navn, 'nb-NO')
       })
   }, [studentSummaries, studentSearch, missingWarningsOnly, lowGradeFilter, fullRapport, fullRapportInclude2])
 
@@ -366,10 +367,24 @@ export default function StudentList({
         {atRiskStudents.map(student => {
           const cardKey = `${student.className}-${student.navn}`
           const isExpanded = expandedKey === cardKey
-          const warningTypesCount = student.subjects.reduce(
-            (count, subjectEntry) => count + subjectEntry.warnings.length,
-            0
+          const warningBreakdown = student.subjects.reduce(
+            (acc, subjectEntry) => {
+              subjectEntry.warnings.forEach(warning => {
+                const type = warning.warningType.toLowerCase()
+                if (type.includes('frav')) {
+                  acc.fravaer += 1
+                } else if (type.includes('vurdering') || type.includes('grunnlag')) {
+                  acc.grunnlag += 1
+                } else {
+                  acc.other += 1
+                }
+              })
+              return acc
+            },
+            { fravaer: 0, grunnlag: 0, other: 0 }
           )
+          const warningTypesCount =
+            warningBreakdown.fravaer + warningBreakdown.grunnlag + warningBreakdown.other
 
           return (
             <div key={cardKey} className="student-card-wrapper">
@@ -403,6 +418,13 @@ export default function StudentList({
                         }`}
                       >
                         Varsler funnet: {warningTypesCount}
+                        {warningTypesCount > 0 && (
+                          <>
+                            {' '}
+                            ({warningBreakdown.fravaer}+{warningBreakdown.grunnlag}
+                            {warningBreakdown.other > 0 ? `+${warningBreakdown.other}` : ''})
+                          </>
+                        )}
                       </span>
                       {warningTypesCount > 0 && student.isAdult && (
                         <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-bold">
@@ -427,7 +449,9 @@ export default function StudentList({
                               className={`w-fit px-2 py-0.5 rounded text-xs font-medium ${
                                 subjectEntry.percentageAbsence > 10
                                   ? 'bg-red-100 text-red-700'
-                                  : 'bg-amber-100 text-amber-700'
+                                  : subjectEntry.percentageAbsence >= 5
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-slate-100 text-slate-600'
                               }`}
                             >
                               {subjectEntry.subject} —{' '}
@@ -454,7 +478,7 @@ export default function StudentList({
                                 )}
                               </div>
                             )}
-                            {subjectEntry.warnings.length === 0 && (
+                            {subjectEntry.warnings.length === 0 && subjectEntry.percentageAbsence >= 5 && (
                               <div className="text-xs text-slate-400 pl-2">
                                 Ingen varsel funnet for dette faget
                               </div>
