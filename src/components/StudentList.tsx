@@ -3,6 +3,7 @@ import type { DataStore, StudentAbsenceSummary } from '../types'
 import { Eye, X, Printer, FileText } from 'lucide-react'
 import StudentDetail from './StudentDetail'
 import { jsPDF } from 'jspdf'
+import { BorderStyle, Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 
 interface StudentListProps {
   data: DataStore
@@ -364,7 +365,110 @@ export default function StudentList({
 
     const kontaktansvarlig = ownerForClass(student.className, KONTAKTANSVARLIG_LAERER)
     const radgiver = ownerForClass(student.className, RADGIVER)
+    const acroSupported =
+      typeof (jsPDF as unknown as { AcroFormTextField?: unknown }).AcroFormTextField === 'function' &&
+      typeof (doc as unknown as { addField?: unknown }).addField === 'function'
 
+    const addMultilineField = (fieldName: string, x: number, yPos: number, w: number, h: number) => {
+      if (!acroSupported) return
+      const JsPDFAny = jsPDF as unknown as {
+        AcroFormTextField: new () => {
+          fieldName: string
+          Rect: number[]
+          multiline: boolean
+          doNotScroll?: boolean
+          value: string
+          borderWidth: number
+          fontSize: number
+        }
+      }
+      const field = new JsPDFAny.AcroFormTextField()
+      field.fieldName = fieldName
+      field.Rect = [x, yPos, w, h]
+      field.multiline = true
+      field.doNotScroll = false
+      field.value = ''
+      field.borderWidth = 0
+      field.fontSize = 10
+      ;(doc as unknown as { addField: (f: unknown) => void }).addField(field)
+    }
+
+    const allSubjectEntries = getAllSubjectEntries(student)
+
+    const ensureSpace = (needed: number) => {
+      if (y + needed > pageH - 14) {
+        doc.addPage()
+        y = 16
+      }
+    }
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(14)
+    doc.text('Oppfølgingsark', marginX, y)
+    y += 7
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    doc.text(`Elev: ${student.navn}`, marginX, y)
+    y += 6
+    doc.text(`Klasse: ${student.className}`, marginX, y)
+    y += 6
+    doc.text(`Kontaktansvarlig lærer: ${kontaktansvarlig}`, marginX, y)
+    y += 6
+    doc.text(`Rådgiver: ${radgiver}`, marginX, y)
+    y += 8
+
+    if (acroSupported) {
+      doc.setFontSize(8)
+      doc.setTextColor(100, 116, 139)
+      doc.text('Felt under hvert fag er utfyllbare. Skriv over flere linjer ved behov.', marginX, y)
+      y += 6
+      doc.setTextColor(0, 0, 0)
+    }
+
+    allSubjectEntries.forEach(subjectEntry => {
+      ensureSpace(58)
+
+      doc.setDrawColor(203, 213, 225)
+      doc.setLineWidth(0.2)
+      doc.rect(marginX, y, usableW, 52)
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(11)
+      const teacherText = subjectEntry.teacher ? ` (Lærer: ${subjectEntry.teacher})` : ''
+      const headerLines = doc.splitTextToSize(`${subjectEntry.subject}${teacherText}`, usableW - 6)
+      doc.text(headerLines, marginX + 3, y + 6)
+
+      const headerLineCount = Array.isArray(headerLines) ? headerLines.length : 1
+      const infoY = y + 6 + headerLineCount * 4
+
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(9)
+      doc.text(
+        `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}`,
+        marginX + 3,
+        infoY
+      )
+
+      // Stor skriveboks under hvert fag.
+      const boxY = infoY + 3
+      const boxH = y + 52 - boxY - 3
+      doc.rect(marginX + 3, boxY, usableW - 6, boxH)
+      addMultilineField(
+        `oppfolging_${student.className}_${student.navn.replace(/\s+/g, '_')}_${normalizeMatch(subjectEntry.subjectGroup)}`,
+        marginX + 3,
+        boxY,
+        usableW - 6,
+        boxH
+      )
+
+      y += 58
+    })
+
+    doc.save(`oppfolgingsark_${student.className}_${student.navn.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`)
+  }
+
+  const getAllSubjectEntries = (student: StudentAbsenceSummary) => {
     const studentRecords = data.absences.filter(
       r => r.class === student.className && normalizeMatch(r.navn) === normalizeMatch(student.navn)
     )
@@ -407,66 +511,73 @@ export default function StudentList({
       }
     })
 
-    const allSubjectEntries = Array.from(allSubjectsMap.values()).sort((a, b) =>
+    return Array.from(allSubjectsMap.values()).sort((a, b) =>
       a.subject.localeCompare(b.subject, 'nb-NO')
     )
+  }
 
-    const ensureSpace = (needed: number) => {
-      if (y + needed > pageH - 14) {
-        doc.addPage()
-        y = 16
-      }
-    }
+  const generateOppfolgingsarkDocx = async (student: StudentAbsenceSummary) => {
+    const kontaktansvarlig = ownerForClass(student.className, KONTAKTANSVARLIG_LAERER)
+    const radgiver = ownerForClass(student.className, RADGIVER)
+    const allSubjectEntries = getAllSubjectEntries(student)
 
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(14)
-    doc.text('Oppfølgingsark', marginX, y)
-    y += 7
-
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(10)
-    doc.text(`Elev: ${student.navn}`, marginX, y)
-    y += 6
-    doc.text(`Klasse: ${student.className}`, marginX, y)
-    y += 6
-    doc.text(`Kontaktansvarlig lærer: ${kontaktansvarlig}`, marginX, y)
-    y += 6
-    doc.text(`Rådgiver: ${radgiver}`, marginX, y)
-    y += 8
+    const sections: Array<Paragraph | Table> = [
+      new Paragraph({ text: 'Oppfølgingsark', heading: HeadingLevel.HEADING_1 }),
+      new Paragraph({ children: [new TextRun({ text: `Elev: ${student.navn}` })] }),
+      new Paragraph({ children: [new TextRun({ text: `Klasse: ${student.className}` })] }),
+      new Paragraph({ children: [new TextRun({ text: `Kontaktansvarlig lærer: ${kontaktansvarlig}` })] }),
+      new Paragraph({ children: [new TextRun({ text: `Rådgiver: ${radgiver}` })] }),
+      new Paragraph({ text: '' }),
+    ]
 
     allSubjectEntries.forEach(subjectEntry => {
-      ensureSpace(58)
-
-      doc.setDrawColor(203, 213, 225)
-      doc.setLineWidth(0.2)
-      doc.rect(marginX, y, usableW, 52)
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(11)
       const teacherText = subjectEntry.teacher ? ` (Lærer: ${subjectEntry.teacher})` : ''
-      const headerLines = doc.splitTextToSize(`${subjectEntry.subject}${teacherText}`, usableW - 6)
-      doc.text(headerLines, marginX + 3, y + 6)
+      const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}`
 
-      const headerLineCount = Array.isArray(headerLines) ? headerLines.length : 1
-      const infoY = y + 6 + headerLineCount * 4
-
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(9)
-      doc.text(
-        `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}`,
-        marginX + 3,
-        infoY
+      sections.push(
+        new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: [
+            new TableRow({
+              children: [
+                new TableCell({
+                  borders: {
+                    top: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                    bottom: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                    left: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                    right: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                  },
+                  children: [
+                    new Paragraph({
+                      children: [new TextRun({ text: `${subjectEntry.subject}${teacherText}`, bold: true })],
+                    }),
+                    new Paragraph({ text: infoText }),
+                    new Paragraph({ text: '' }),
+                    new Paragraph({ text: '' }),
+                    new Paragraph({ text: '' }),
+                    new Paragraph({ text: '' }),
+                    new Paragraph({ text: '' }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+        })
       )
-
-      // Stor skriveboks under hvert fag.
-      const boxY = infoY + 3
-      const boxH = y + 52 - boxY - 3
-      doc.rect(marginX + 3, boxY, usableW - 6, boxH)
-
-      y += 58
+      sections.push(new Paragraph({ text: '' }))
     })
 
-    doc.save(`oppfolgingsark_${student.className}_${student.navn.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`)
+    const doc = new Document({
+      sections: [{ children: sections }],
+    })
+
+    const blob = await Packer.toBlob(doc)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `oppfolgingsark_${student.className}_${student.navn.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -630,6 +741,13 @@ export default function StudentList({
                     >
                       <FileText className="w-4 h-4" />
                       <span className="text-sm font-medium">Oppfølgingsark</span>
+                    </button>
+                    <button
+                      onClick={() => void generateOppfolgingsarkDocx(student)}
+                      className="px-3 py-2 bg-indigo-100 text-indigo-800 rounded hover:bg-indigo-200 transition-colors flex items-center space-x-1"
+                    >
+                      <FileText className="w-4 h-4" />
+                      <span className="text-sm font-medium">Oppfølgingsark DOCX</span>
                     </button>
                     <button
                       onClick={() =>
