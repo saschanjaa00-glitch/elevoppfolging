@@ -21,6 +21,16 @@ export default function StudentDetail({
       .replace(/[\u0300-\u036f]/g, '')
       .replace(/\s+/g, '')
 
+  const dateColor = (dateStr: string): string => {
+    const m = dateStr.match(/^(\d{1,2})[.\/\-](\d{1,2})[.\/\-]\d{4}$/)
+    if (!m) return ''
+    const month = parseInt(m[2])
+    if (month >= 8 && month <= 12) return 'text-blue-600 font-semibold'
+    if (month >= 1 && month <= 4) return 'text-green-600 font-semibold'
+    if (month >= 5 && month <= 6) return 'text-orange-500 font-semibold'
+    return ''
+  }
+
   const groupWarnings = (warnings: Array<{ warningType: string; sentDate: string }>) => {
     const parseDMY = (d: string) => {
       const m = d.match(/^(\d{1,2})[.\/\-](\d{1,2})[.\/\-](\d{4})$/)
@@ -123,7 +133,9 @@ export default function StudentDetail({
                   {groupWarnings(warnings).map(([label, dates]) => (
                     <div key={label}>
                       <span className="font-semibold">{label}:</span>{' '}
-                      {dates.join(', ')}
+                      {dates.map((d, i) => (
+                        <span key={i} className={dateColor(d)}>{d}{i < dates.length - 1 ? ', ' : ''}</span>
+                      ))}
                     </div>
                   ))}
                 </div>
