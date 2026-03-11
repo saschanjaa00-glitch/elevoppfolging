@@ -19,6 +19,7 @@ function App() {
   const [thresholdEnabled, setThresholdEnabled] = useState<boolean>(true)
   const [studentSearch, setStudentSearch] = useState<string>('')
   const [missingWarningsOnly, setMissingWarningsOnly] = useState<boolean>(false)
+  const [lowGradeFilter, setLowGradeFilter] = useState<'all' | 'IV' | '1' | '2'>('all')
   const [view, setView] = useState<'list' | 'report'>('list')
 
   const handleDataImport = (importedData: DataStore) => {
@@ -189,6 +190,26 @@ function App() {
                       </button>
                     </div>
 
+                    {/* Low grade filter */}
+                    <div>
+                      <label className="block text-sm font-medium text-slate-900 mb-2">Low Grade Filter</label>
+                      <div className="flex gap-2">
+                        {(['all', 'IV', '1', '2'] as const).map(opt => (
+                          <button
+                            key={opt}
+                            onClick={() => setLowGradeFilter(opt)}
+                            className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                              lowGradeFilter === opt
+                                ? 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700'
+                                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                            }`}
+                          >
+                            {opt === 'all' ? 'All' : opt}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     {/* Absence threshold */}
                     <div className="flex items-center gap-4">
                       <button
@@ -235,6 +256,7 @@ function App() {
                       threshold={thresholdEnabled ? absenceThreshold : 0}
                       studentSearch={studentSearch}
                       missingWarningsOnly={missingWarningsOnly}
+                      lowGradeFilter={lowGradeFilter}
                     />
                   )}
 

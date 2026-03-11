@@ -10,6 +10,7 @@ interface StudentListProps {
   threshold: number
   studentSearch: string
   missingWarningsOnly: boolean
+  lowGradeFilter: 'all' | 'IV' | '1' | '2'
 }
 
 export default function StudentList({
@@ -18,6 +19,7 @@ export default function StudentList({
   threshold,
   studentSearch,
   missingWarningsOnly,
+  lowGradeFilter,
 }: StudentListProps) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
 
@@ -145,16 +147,21 @@ export default function StudentList({
       .filter(s => s.subjects.length > 0)
       .filter(s => !searchNorm || s.navn.toLowerCase().includes(searchNorm))
       .map(s => {
-        if (!missingWarningsOnly) return s
-        const filtered = s.subjects.filter(sub => sub.warnings.length === 0)
-        return { ...s, subjects: filtered }
+        let subjects = s.subjects
+        if (missingWarningsOnly) subjects = subjects.filter(sub => sub.warnings.length === 0)
+        if (lowGradeFilter !== 'all') subjects = subjects.filter(sub => sub.grade === lowGradeFilter)
+        return { ...s, subjects }
       })
-      .filter(s => !missingWarningsOnly || s.subjects.length > 0)
+      .filter(s => {
+        if (missingWarningsOnly && s.subjects.length === 0) return false
+        if (lowGradeFilter !== 'all' && s.subjects.length === 0) return false
+        return true
+      })
       .sort((a, b) => {
         if (a.avbrudd !== b.avbrudd) return a.avbrudd ? 1 : -1
         return b.maxPercentage - a.maxPercentage
       })
-  }, [studentSummaries, studentSearch, missingWarningsOnly])
+  }, [studentSummaries, studentSearch, missingWarningsOnly, lowGradeFilter])
 
   if (atRiskStudents.length === 0) {
     return (
