@@ -4,12 +4,14 @@ interface ClassSelectorProps {
   data: DataStore
   selectedClasses: string[]
   onClassChange: (classNames: string[]) => void
+  onExportOppfolgingsark?: () => void
 }
 
 export default function ClassSelector({
   data,
   selectedClasses,
   onClassChange,
+  onExportOppfolgingsark,
 }: ClassSelectorProps) {
   const classes = Array.from(new Set(data.absences.map(a => a.class))).sort()
 
@@ -66,6 +68,21 @@ export default function ClassSelector({
           Tøm
         </button>
       </div>
+
+      {onExportOppfolgingsark && (
+        <button
+          type="button"
+          onClick={onExportOppfolgingsark}
+          disabled={selectedClasses.length === 0}
+          className={`w-full mb-4 px-3 py-2 text-sm font-medium rounded transition-colors ${
+            selectedClasses.length > 0
+              ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+              : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+          }`}
+        >
+          Oppfølgingsark for valgte klasser
+        </button>
+      )}
 
       <div className="grid grid-cols-3 gap-3">
         {columns.map(({ label, classes: group }) => (

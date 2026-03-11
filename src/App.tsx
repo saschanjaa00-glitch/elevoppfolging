@@ -1,10 +1,17 @@
 import { useState } from 'react'
 import { AlertCircle } from 'lucide-react'
+import { jsPDF } from 'jspdf'
 import FileUpload from './components/FileUpload'
 import ClassSelector from './components/ClassSelector'
 import StudentList from './components/StudentList'
 import type { DataStore } from './types'
 import './index.css'
+
+const RADGIVER: Record<string, string[]> = {
+  Lasse: ['1IDA', '1IDB', '2IDA', '2IDB', '3IDA', '3IDB', '1TMT', '2TMT', '3TMT'],
+  Trond: ['1TID', '2TID', '3TID', '1STA', '1STB', '1STC', '2STA', '2STB', '3STA', '3STB', '3STC'],
+  Trude: ['1STD', '1STE', '1STF', '2STC', '2STD', '2STE', '2STF', '3STD', '3STE', '3STF'],
+}
 
 function App() {
   const [data, setData] = useState<DataStore>({
@@ -28,6 +35,177 @@ function App() {
   }
 
   const hasData = data.absences.length > 0
+
+  const normalizeMatch = (value: string): string =>
+    value
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, '')
+
+  const ownerForClass = (className: string, mapping: Record<string, string[]>) => {
+    const found = Object.entries(mapping).find(([, classes]) => classes.includes(className))
+    return found?.[0] ?? 'Ukjent'
+  }
+
+  const getStudentSheetData = (className: string, navn: string) => {
+    const studentRecords = data.absences.filter(
+      r => r.class === className && normalizeMatch(r.navn) === normalizeMatch(navn)
+    )
+
+    const teacherCountsForStudent = new Map<string, number>()
+    studentRecords.forEach(record => {
+      const teacher = record.teacher?.trim()
+      if (!teacher) return
+      teacherCountsForStudent.set(teacher, (teacherCountsForStudent.get(teacher) ?? 0) + 1)
+    })
+    const kontaktlaerer =
+      Array.from(teacherCountsForStudent.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'Ukjent'
+
+    const subjectTeacherMap = new Map<string, string>()
+    const gradeMap = new Map<string, string>()
+    data.grades
+      .filter(g => normalizeMatch(g.navn) === normalizeMatch(navn))
+      .forEach(g => {
+        const subjectKey = normalizeMatch(g.subjectGroup)
+        if (g.subjectTeacher && subjectKey && !subjectTeacherMap.has(subjectKey)) {
+          subjectTeacherMap.set(subjectKey, g.subjectTeacher)
+        }
+        const halvar = g.halvår.toString().trim().toLowerCase()
+        if ((halvar === '1' || halvar.includes('1')) && !gradeMap.has(subjectKey)) {
+          gradeMap.set(subjectKey, g.grade)
+        }
+      })
+
+    const warningCountMap = new Map<string, number>()
+    data.warnings
+      .filter(w => normalizeMatch(w.navn) === normalizeMatch(navn))
+      .forEach(w => {
+        const key = normalizeMatch(w.subjectGroup)
+        warningCountMap.set(key, (warningCountMap.get(key) ?? 0) + 1)
+      })
+
+    const subjectsMap = new Map<string, {
+      subject: string
+      subjectGroup: string
+      teacher: string
+      percentageAbsence: number
+      grade?: string
+      warningCount: number
+    }>()
+
+    studentRecords.forEach(record => {
+      const key = `${normalizeMatch(record.subject)}::${normalizeMatch(record.subjectGroup)}`
+      const subjectGroupKey = normalizeMatch(record.subjectGroup)
+      const existing = subjectsMap.get(key)
+      if (!existing || record.percentageAbsence > existing.percentageAbsence) {
+        subjectsMap.set(key, {
+          subject: record.subject,
+          subjectGroup: record.subjectGroup,
+          teacher: subjectTeacherMap.get(subjectGroupKey) ?? record.teacher,
+          percentageAbsence: record.percentageAbsence,
+          grade: gradeMap.get(subjectGroupKey),
+          warningCount: warningCountMap.get(subjectGroupKey) ?? 0,
+        })
+      }
+    })
+
+    return {
+      kontaktlaerer,
+      radgiver: ownerForClass(className, RADGIVER),
+      subjects: Array.from(subjectsMap.values()).sort((a, b) =>
+        a.subject.localeCompare(b.subject, 'nb-NO')
+      ),
+    }
+  }
+
+  const handleExportClassOppfolgingsark = () => {
+    if (selectedClasses.length === 0) return
+
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+    const pageW = 210
+    const pageH = 297
+    const marginX = 14
+    const usableW = pageW - marginX * 2
+
+    const students = Array.from(
+      new Map(
+        data.absences
+          .filter(record => selectedClasses.includes(record.class))
+          .map(record => [`${record.class}::${normalizeMatch(record.navn)}`, { className: record.class, navn: record.navn }])
+      ).values()
+    ).sort((a, b) => {
+      const classCompare = a.className.localeCompare(b.className, 'nb-NO', { numeric: true })
+      if (classCompare !== 0) return classCompare
+      return a.navn.localeCompare(b.navn, 'nb-NO')
+    })
+
+    students.forEach((student, index) => {
+      if (index > 0) doc.addPage()
+
+      const { kontaktlaerer, radgiver, subjects } = getStudentSheetData(student.className, student.navn)
+      let y = 16
+
+      const ensureSpace = (needed: number) => {
+        if (y + needed > pageH - 14) {
+          doc.addPage()
+          y = 16
+        }
+      }
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(14)
+      doc.text('Oppfølgingsark', marginX, y)
+      y += 7
+
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+      doc.text(`Elev: ${student.navn}`, marginX, y)
+      y += 6
+      doc.text(`Klasse: ${student.className}`, marginX, y)
+      y += 6
+      doc.text(`Kontaktlærer: ${kontaktlaerer}`, marginX, y)
+      y += 6
+      doc.text(`Rådgiver: ${radgiver}`, marginX, y)
+      y += 8
+
+      subjects.forEach(subject => {
+        ensureSpace(42)
+        doc.setDrawColor(203, 213, 225)
+        doc.setLineWidth(0.2)
+        doc.rect(marginX, y, usableW, 36)
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(11)
+        const teacherText = subject.teacher ? ` (Lærer: ${subject.teacher})` : ''
+        const headerLines = doc.splitTextToSize(`${subject.subject}${teacherText}`, usableW - 6)
+        doc.text(headerLines, marginX + 3, y + 6)
+        const headerLineCount = Array.isArray(headerLines) ? headerLines.length : 1
+        const infoY = y + 6 + headerLineCount * 4
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(9)
+        doc.text(
+          `Fravær: ${subject.percentageAbsence.toFixed(1)}%   |   Karakter: ${subject.grade ?? '-'}   |   Varsler: ${subject.warningCount}`,
+          marginX + 3,
+          infoY
+        )
+        const boxY = infoY + 3
+        const boxH = y + 36 - boxY - 3
+        doc.rect(marginX + 3, boxY, usableW - 6, boxH)
+        y += 42
+      })
+
+      ensureSpace(54)
+      doc.setDrawColor(203, 213, 225)
+      doc.setLineWidth(0.2)
+      doc.rect(marginX, y, usableW, 48)
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(11)
+      doc.text('Andre notater', marginX + 3, y + 6)
+      doc.rect(marginX + 3, y + 9, usableW - 6, 36)
+    })
+
+    doc.save(`oppfolgingsark_${selectedClasses.join('-')}_${new Date().toISOString().slice(0, 10)}.pdf`)
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-50">
@@ -179,6 +357,7 @@ function App() {
                     data={data}
                     selectedClasses={selectedClasses}
                     onClassChange={setSelectedClasses}
+                    onExportOppfolgingsark={handleExportClassOppfolgingsark}
                   />
                 </aside>
 

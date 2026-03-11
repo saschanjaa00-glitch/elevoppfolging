@@ -94,6 +94,7 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
         subjectGroup: getRowValue(row, ['gruppe', 'group', 'faggruppe']),
         fagkode: getRowValue(row, ['fagkode']),
         grade: getRowValue(row, ['grade', 'karakter']),
+        subjectTeacher: getRowValue(row, ['subject teacher', 'faglærer', 'faglaerer', 'lærer', 'larer', 'teacher']),
         halvår: getRowValue(row, ['halvår', 'halvar', 'termin', 'term']),
       }))
       .filter(r => r.navn && r.subjectGroup && r.grade)

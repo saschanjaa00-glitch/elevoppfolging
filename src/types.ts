@@ -41,6 +41,7 @@ export interface GradeRecord {
   subjectGroup: string
   fagkode: string
   grade: string
+  subjectTeacher?: string
   halvår: string
 }
 

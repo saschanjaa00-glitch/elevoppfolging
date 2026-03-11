@@ -104,11 +104,13 @@ export default function StudentList({
 
     // Grade map: student+subjectGroup -> term 1 grade
     const gradeMap = new Map<string, string>()
+    const subjectTeacherMap = new Map<string, string>()
     data.grades.forEach(g => {
       const halvar = g.halvår.toString().trim()
       if (halvar === '1' || halvar.toLowerCase().includes('1')) {
         const key = `${normalizeMatch(g.navn)}::${normalizeMatch(g.subjectGroup)}`
         if (!gradeMap.has(key)) gradeMap.set(key, g.grade)
+        if (g.subjectTeacher && !subjectTeacherMap.has(key)) subjectTeacherMap.set(key, g.subjectTeacher)
       }
     })
 
@@ -135,6 +137,7 @@ export default function StudentList({
       const hasSubjectWarning = warnings.length > 0
       const dobStr = studentDobMap.get(normalizeMatch(record.navn)) ?? ''
       const grade = gradeMap.get(warningKey)
+      const subjectTeacher = subjectTeacherMap.get(warningKey) ?? record.teacher
 
       if (!summaryMap.has(key)) {
         const includeSubject = record.percentageAbsence > threshold ||
@@ -145,7 +148,7 @@ export default function StudentList({
           maxPercentage: record.percentageAbsence,
           totalHours: record.hoursAbsence,
           subjects: includeSubject
-            ? [{ subject: record.subject, subjectGroup: record.subjectGroup, teacher: record.teacher, percentageAbsence: record.percentageAbsence, warnings, grade }]
+            ? [{ subject: record.subject, subjectGroup: record.subjectGroup, teacher: subjectTeacher, percentageAbsence: record.percentageAbsence, warnings, grade }]
             : [],
           avbrudd: record.avbrudd,
           hasWarnings: includeSubject ? hasSubjectWarning : false,
@@ -163,7 +166,7 @@ export default function StudentList({
             s => s.subjectGroup === record.subjectGroup && s.subject === record.subject
           )
           if (!subjectExists) {
-            summary.subjects.push({ subject: record.subject, subjectGroup: record.subjectGroup, teacher: record.teacher, percentageAbsence: record.percentageAbsence, warnings, grade })
+            summary.subjects.push({ subject: record.subject, subjectGroup: record.subjectGroup, teacher: subjectTeacher, percentageAbsence: record.percentageAbsence, warnings, grade })
           }
           if (hasSubjectWarning) summary.hasWarnings = true
         }
@@ -417,11 +420,11 @@ export default function StudentList({
     }
 
     allSubjectEntries.forEach(subjectEntry => {
-      ensureSpace(58)
+      ensureSpace(42)
 
       doc.setDrawColor(203, 213, 225)
       doc.setLineWidth(0.2)
-      doc.rect(marginX, y, usableW, 52)
+      doc.rect(marginX, y, usableW, 36)
 
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(11)
@@ -442,7 +445,7 @@ export default function StudentList({
 
       // Stor skriveboks under hvert fag.
       const boxY = infoY + 3
-      const boxH = y + 52 - boxY - 3
+      const boxH = y + 36 - boxY - 3
       doc.rect(marginX + 3, boxY, usableW - 6, boxH)
       addMultilineField(
         `oppfolging_${student.className}_${student.navn.replace(/\s+/g, '_')}_${normalizeMatch(subjectEntry.subjectGroup)}`,
@@ -452,8 +455,26 @@ export default function StudentList({
         boxH
       )
 
-      y += 58
+      y += 42
     })
+
+    ensureSpace(54)
+    doc.setDrawColor(203, 213, 225)
+    doc.setLineWidth(0.2)
+    doc.rect(marginX, y, usableW, 48)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(11)
+    doc.text('Andre notater', marginX + 3, y + 6)
+    const notesBoxY = y + 9
+    const notesBoxH = 48 - 12
+    doc.rect(marginX + 3, notesBoxY, usableW - 6, notesBoxH)
+    addMultilineField(
+      `oppfolging_${student.className}_${student.navn.replace(/\s+/g, '_')}_andre_notater`,
+      marginX + 3,
+      notesBoxY,
+      usableW - 6,
+      notesBoxH
+    )
 
     doc.save(`oppfolgingsark_${student.className}_${student.navn.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`)
   }
@@ -472,16 +493,15 @@ export default function StudentList({
     const kontaktlaerer =
       Array.from(teacherCountsForStudent.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'Ukjent'
 
-    const classRecords = data.absences.filter(r => r.class === student.className)
-    const teacherCountsBySubjectGroup = new Map<string, Map<string, number>>()
-    classRecords.forEach(r => {
-      const sgKey = normalizeMatch(r.subjectGroup)
-      const teacher = r.teacher?.trim()
-      if (!sgKey || !teacher) return
-      if (!teacherCountsBySubjectGroup.has(sgKey)) teacherCountsBySubjectGroup.set(sgKey, new Map())
-      const counts = teacherCountsBySubjectGroup.get(sgKey)!
-      counts.set(teacher, (counts.get(teacher) ?? 0) + 1)
-    })
+    const subjectTeacherMap = new Map<string, string>()
+    data.grades
+      .filter(g => normalizeMatch(g.navn) === normalizeMatch(student.navn))
+      .forEach(g => {
+        const key = normalizeMatch(g.subjectGroup)
+        if (g.subjectTeacher && key && !subjectTeacherMap.has(key)) {
+          subjectTeacherMap.set(key, g.subjectTeacher)
+        }
+      })
 
     const studentWarningMap = new Map<string, number>()
     data.warnings
@@ -510,8 +530,7 @@ export default function StudentList({
       const grade = studentGradeMap.get(normalizeMatch(r.subjectGroup))
 
       const sgKey = normalizeMatch(r.subjectGroup)
-      const subjectTeacher = Array.from(teacherCountsBySubjectGroup.get(sgKey)?.entries() ?? [])
-        .sort((a, b) => b[1] - a[1])[0]?.[0] ?? r.teacher
+      const subjectTeacher = subjectTeacherMap.get(sgKey) ?? r.teacher
 
       if (!existing || r.percentageAbsence > existing.percentageAbsence) {
         allSubjectsMap.set(key, {
@@ -571,8 +590,6 @@ export default function StudentList({
                     new Paragraph({ text: '' }),
                     new Paragraph({ text: '' }),
                     new Paragraph({ text: '' }),
-                    new Paragraph({ text: '' }),
-                    new Paragraph({ text: '' }),
                   ],
                 }),
               ],
@@ -582,6 +599,37 @@ export default function StudentList({
       )
       sections.push(new Paragraph({ text: '' }))
     })
+
+    sections.push(
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                  bottom: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                  left: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                  right: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                },
+                children: [
+                  new Paragraph({
+                    children: [new TextRun({ text: 'Andre notater', bold: true })],
+                  }),
+                  new Paragraph({ text: '' }),
+                  new Paragraph({ text: '' }),
+                  new Paragraph({ text: '' }),
+                  new Paragraph({ text: '' }),
+                  new Paragraph({ text: '' }),
+                  new Paragraph({ text: '' }),
+                ],
+              }),
+            ],
+          }),
+        ],
+      })
+    )
 
     const doc = new Document({
       styles: {
@@ -727,6 +775,11 @@ export default function StudentList({
                               {subjectEntry.subject} —{' '}
                               {subjectEntry.percentageAbsence.toFixed(1)}%
                             </span>
+                            {subjectEntry.teacher && (
+                              <span className="text-xs text-slate-500 pl-2">
+                                Lærer: {subjectEntry.teacher}
+                              </span>
+                            )}
                             {subjectEntry.grade && ['1', '2', 'iv'].includes(subjectEntry.grade.toLowerCase()) && (
                               <span className="w-fit px-2 py-0.5 rounded text-xs font-bold bg-purple-100 text-purple-800">
                                 Karakter T1: {subjectEntry.grade}
