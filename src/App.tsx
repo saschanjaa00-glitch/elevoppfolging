@@ -19,7 +19,9 @@ function App() {
   const [thresholdEnabled, setThresholdEnabled] = useState<boolean>(true)
   const [studentSearch, setStudentSearch] = useState<string>('')
   const [missingWarningsOnly, setMissingWarningsOnly] = useState<boolean>(false)
-  const [lowGradeFilter, setLowGradeFilter] = useState<'all' | 'IV' | '1' | '2'>('all')
+  const [lowGradeFilter, setLowGradeFilter] = useState<string[]>([])
+  const [fullRapport, setFullRapport] = useState<boolean>(false)
+  const [fullRapportInclude2, setFullRapportInclude2] = useState<boolean>(false)
   const [view, setView] = useState<'list' | 'report'>('list')
 
   const handleDataImport = (importedData: DataStore) => {
@@ -177,9 +179,10 @@ function App() {
                     </div>
 
                     {/* Missing warnings filter */}
-                    <div>
+                    <div className={fullRapport ? 'opacity-40 pointer-events-none' : ''}>
                       <button
                         onClick={() => setMissingWarningsOnly(v => !v)}
+                        disabled={fullRapport}
                         className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
                           missingWarningsOnly
                             ? 'bg-orange-500 text-white border-orange-500 hover:bg-orange-600'
@@ -190,23 +193,63 @@ function App() {
                       </button>
                     </div>
 
-                    {/* Low grade filter */}
-                    <div>
-                      <label className="block text-sm font-medium text-slate-900 mb-2">Low Grade Filter</label>
-                      <div className="flex gap-2">
-                        {(['all', 'IV', '1', '2'] as const).map(opt => (
+                    {/* Low grade filter + Full rapport */}
+                    <div className="flex flex-wrap items-end gap-6">
+                      <div className={data.grades.length === 0 ? 'opacity-40 pointer-events-none' : ''}>
+                        <label className={`block text-sm font-medium mb-2 ${fullRapport ? 'text-slate-400' : 'text-slate-900'}`}>
+                          Low Grade Filter
+                          {data.grades.length === 0 && <span className="ml-2 text-xs font-normal text-slate-500">(no grade file imported)</span>}
+                        </label>
+                        <div className={`flex gap-2 ${fullRapport ? 'opacity-40 pointer-events-none' : ''}`}>
+                          {(['IV', '1', '2'] as const).map(opt => (
+                            <button
+                              key={opt}
+                              onClick={() =>
+                                setLowGradeFilter(prev =>
+                                  prev.includes(opt) ? prev.filter(g => g !== opt) : [...prev, opt]
+                                )
+                              }
+                              disabled={data.grades.length === 0 || fullRapport}
+                              className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                                lowGradeFilter.includes(opt)
+                                  ? 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                              }`}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className={data.grades.length === 0 ? 'opacity-40 pointer-events-none' : ''}>
+                        <label className="block text-sm font-medium text-slate-900 mb-2">Full farerapport</label>
+                        <div className="flex gap-2">
                           <button
-                            key={opt}
-                            onClick={() => setLowGradeFilter(opt)}
+                            onClick={() => setFullRapport(v => !v)}
+                            disabled={data.grades.length === 0}
                             className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
-                              lowGradeFilter === opt
+                              fullRapport
+                                ? 'bg-sky-600 text-white border-sky-600 hover:bg-sky-700'
+                                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                            }`}
+                          >
+                            {fullRapport ? '✓ Full farerapport' : 'Full farerapport'}
+                          </button>
+                          <button
+                            onClick={() => setFullRapportInclude2(v => !v)}
+                            disabled={data.grades.length === 0 || !fullRapport}
+                            className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                              !fullRapport ? 'opacity-40 pointer-events-none ' : ''
+                            }${
+                              fullRapportInclude2
                                 ? 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700'
                                 : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
                             }`}
                           >
-                            {opt === 'all' ? 'All' : opt}
+                            Inkluder karakter 2
                           </button>
-                        ))}
+                        </div>
                       </div>
                     </div>
 
@@ -257,6 +300,8 @@ function App() {
                       studentSearch={studentSearch}
                       missingWarningsOnly={missingWarningsOnly}
                       lowGradeFilter={lowGradeFilter}
+                      fullRapport={fullRapport}
+                      fullRapportInclude2={fullRapportInclude2}
                     />
                   )}
 

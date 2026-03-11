@@ -10,8 +10,12 @@ interface StudentListProps {
   threshold: number
   studentSearch: string
   missingWarningsOnly: boolean
-  lowGradeFilter: 'all' | 'IV' | '1' | '2'
+  lowGradeFilter: string[]
+  fullRapport: boolean
+  fullRapportInclude2: boolean
 }
+
+const LOW_GRADES = ['IV', '1', '2']
 
 export default function StudentList({
   data,
@@ -20,6 +24,8 @@ export default function StudentList({
   studentSearch,
   missingWarningsOnly,
   lowGradeFilter,
+  fullRapport,
+  fullRapportInclude2,
 }: StudentListProps) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
 
@@ -84,6 +90,10 @@ export default function StudentList({
       }
     })
 
+    const effectiveLowGrades = fullRapport
+      ? (fullRapportInclude2 ? ['IV', '1', '2'] : ['IV', '1'])
+      : LOW_GRADES
+
     const isOver18 = (dobStr: string): boolean => {
       if (!dobStr) return false
       const match = dobStr.match(/^(\d{1,2})[.\/\-](\d{1,2})[.\/\-](\d{4})$/)
@@ -105,17 +115,18 @@ export default function StudentList({
       const grade = gradeMap.get(warningKey)
 
       if (!summaryMap.has(key)) {
+        const includeSubject = record.percentageAbsence > threshold ||
+          (fullRapport && grade !== undefined && effectiveLowGrades.includes(grade))
         summaryMap.set(key, {
           navn: record.navn,
           className: record.class,
           maxPercentage: record.percentageAbsence,
           totalHours: record.hoursAbsence,
-          subjects:
-            record.percentageAbsence > threshold
-              ? [{ subject: record.subject, subjectGroup: record.subjectGroup, percentageAbsence: record.percentageAbsence, warnings, grade }]
-              : [],
+          subjects: includeSubject
+            ? [{ subject: record.subject, subjectGroup: record.subjectGroup, percentageAbsence: record.percentageAbsence, warnings, grade }]
+            : [],
           avbrudd: record.avbrudd,
-          hasWarnings: record.percentageAbsence > threshold ? hasSubjectWarning : false,
+          hasWarnings: includeSubject ? hasSubjectWarning : false,
           isAdult: isOver18(dobStr),
         })
       } else {
@@ -123,7 +134,9 @@ export default function StudentList({
         summary.maxPercentage = Math.max(summary.maxPercentage, record.percentageAbsence)
         summary.totalHours += record.hoursAbsence
 
-        if (record.percentageAbsence > threshold) {
+        const includeSubject = record.percentageAbsence > threshold ||
+          (fullRapport && grade !== undefined && effectiveLowGrades.includes(grade))
+        if (includeSubject) {
           const subjectExists = summary.subjects.some(
             s => s.subjectGroup === record.subjectGroup && s.subject === record.subject
           )
@@ -139,7 +152,7 @@ export default function StudentList({
     })
 
     return Array.from(summaryMap.values())
-  }, [data, selectedClasses, threshold])
+  }, [data, selectedClasses, threshold, fullRapport, fullRapportInclude2])
 
   const atRiskStudents = useMemo(() => {
     const searchNorm = studentSearch.toLowerCase().trim()
@@ -147,21 +160,23 @@ export default function StudentList({
       .filter(s => s.subjects.length > 0)
       .filter(s => !searchNorm || s.navn.toLowerCase().includes(searchNorm))
       .map(s => {
+        if (fullRapport) return s
         let subjects = s.subjects
         if (missingWarningsOnly) subjects = subjects.filter(sub => sub.warnings.length === 0)
-        if (lowGradeFilter !== 'all') subjects = subjects.filter(sub => sub.grade === lowGradeFilter)
+        if (lowGradeFilter.length > 0) subjects = subjects.filter(sub => sub.grade !== undefined && lowGradeFilter.includes(sub.grade))
         return { ...s, subjects }
       })
       .filter(s => {
+        if (fullRapport) return true
         if (missingWarningsOnly && s.subjects.length === 0) return false
-        if (lowGradeFilter !== 'all' && s.subjects.length === 0) return false
+        if (lowGradeFilter.length > 0 && s.subjects.length === 0) return false
         return true
       })
       .sort((a, b) => {
         if (a.avbrudd !== b.avbrudd) return a.avbrudd ? 1 : -1
         return b.maxPercentage - a.maxPercentage
       })
-  }, [studentSummaries, studentSearch, missingWarningsOnly, lowGradeFilter])
+  }, [studentSummaries, studentSearch, missingWarningsOnly, lowGradeFilter, fullRapport, fullRapportInclude2])
 
   if (atRiskStudents.length === 0) {
     return (
