@@ -77,6 +77,28 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
     return hasNavn && hasKlasse && hasFagnavn && hasPercent && hasHours
   }
 
+  const looksLikeGradeWorkbook = (sheet: Record<string, any>[]): boolean => {
+    if (sheet.length === 0) return false
+    const first = sheet[0]
+    const headers = Object.keys(first).map(h => normalizeHeader(h))
+    const hasElev = headers.some(h => h === 'elev' || h.includes('elev'))
+    const hasGruppe = headers.some(h => h === 'gruppe' || h.includes('gruppe'))
+    const hasGrade = headers.some(h => h === 'grade' || h.includes('grade') || h.includes('karakter'))
+    return hasElev && hasGruppe && hasGrade
+  }
+
+  const parseGradeSheet = (sheet: Record<string, any>[]): import('../types').GradeRecord[] => {
+    return sheet
+      .map(row => ({
+        navn: getRowValue(row, ['elev', 'navn', 'student']),
+        subjectGroup: getRowValue(row, ['gruppe', 'group', 'faggruppe']),
+        fagkode: getRowValue(row, ['fagkode']),
+        grade: getRowValue(row, ['grade', 'karakter']),
+        halvår: getRowValue(row, ['halvår', 'halvar', 'termin', 'term']),
+      }))
+      .filter(r => r.navn && r.subjectGroup && r.grade)
+  }
+
   const looksLikeWarningWorkbook = (sheet: Record<string, any>[]): boolean => {
     if (sheet.length === 0) return false
     const first = sheet[0]
@@ -166,8 +188,13 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
             const parsed = parseWarningsSheet(sheetRaw)
             console.log('Parsed warnings:', parsed.length)
             data.warnings = parsed
+          } else if (looksLikeGradeWorkbook(sheetRaw)) {
+            console.log('Detected as GRADE workbook')
+            const parsed = parseGradeSheet(sheetRaw)
+            console.log('Parsed grades:', parsed.length)
+            data.grades = parsed
           } else {
-            console.log('File not recognized as absence or warning workbook')
+            console.log('File not recognized as absence, warning, or grade workbook')
           }
         } catch (err) {
           console.error('Error processing file:', err)

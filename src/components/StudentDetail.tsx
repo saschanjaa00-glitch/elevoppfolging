@@ -60,7 +60,18 @@ export default function StudentDetail({
       w => normalizeMatch(w.navn) === normalizeMatch(selectedStudent)
     )
 
-    return { records, warnings }
+    // Term 1 grades keyed by subjectGroup
+    const gradeMap = new Map<string, string>()
+    data.grades.forEach(g => {
+      const halvar = g.halvår.toString().trim()
+      if ((halvar === '1' || halvar.toLowerCase().includes('1')) &&
+          normalizeMatch(g.navn) === normalizeMatch(selectedStudent)) {
+        const key = normalizeMatch(g.subjectGroup)
+        if (!gradeMap.has(key)) gradeMap.set(key, g.grade)
+      }
+    })
+
+    return { records, warnings, gradeMap }
   }, [data, selectedClass, selectedStudent])
 
   if (studentData.records.length === 0) {
@@ -86,33 +97,24 @@ export default function StudentDetail({
       )
 
       const subjectWarnings = studentData.warnings
-        .filter(
-          w =>
-            normalizeMatch(w.subjectGroup) ===
-            normalizeMatch(topRecord.subjectGroup)
-        )
+        .filter(w => normalizeMatch(w.subjectGroup) === normalizeMatch(topRecord.subjectGroup))
         .map(w => ({ warningType: w.warningType, sentDate: w.sentDate }))
 
-      return {
-        subject,
-        records,
-        topRecord,
-        warnings: subjectWarnings,
-      }
+      const grade = studentData.gradeMap.get(normalizeMatch(topRecord.subjectGroup))
+
+      return { subject, records, topRecord, warnings: subjectWarnings, grade }
     })
     .sort((a, b) => b.topRecord.percentageAbsence - a.topRecord.percentageAbsence)
 
   return (
     <div className="bg-white divide-y divide-slate-100 py-1">
-      {subjectSummaries.map(({ subject, topRecord: record, warnings }) => {
+      {subjectSummaries.map(({ subject, topRecord: record, warnings, grade }) => {
         const isAtRisk = record.percentageAbsence > threshold
-        const isHighRisk = record.percentageAbsence > 15
+        const isHighRisk = record.percentageAbsence > 10
+        const isLowGrade = grade && ['1', '2', 'iv'].includes(grade.toLowerCase())
 
         return (
-          <div
-            key={subject}
-            className="flex items-start justify-between px-4 py-3 gap-4"
-          >
+          <div key={subject} className="flex items-start justify-between px-4 py-3 gap-4">
             <div className="flex-1 min-w-0">
               <p className="font-medium text-slate-900 truncate">{subject}</p>
               <p className="text-xs text-slate-500">{record.teacher}</p>
@@ -127,21 +129,16 @@ export default function StudentDetail({
                 </div>
               )}
             </div>
-            <div className="text-right shrink-0">
-              <p
-                className={`text-base font-bold ${
-                  isHighRisk
-                    ? 'text-red-600'
-                    : isAtRisk
-                      ? 'text-amber-600'
-                      : 'text-green-600'
-                }`}
-              >
+            <div className="text-right shrink-0 space-y-1">
+              <p className={`text-base font-bold ${isHighRisk ? 'text-red-600' : isAtRisk ? 'text-amber-600' : 'text-green-600'}`}>
                 {record.percentageAbsence.toFixed(1)}%
               </p>
-              <p className="text-xs text-slate-500">
-                {record.hoursAbsence.toFixed(0)}h
-              </p>
+              <p className="text-xs text-slate-500">{record.hoursAbsence.toFixed(0)}h</p>
+              {grade && (
+                <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${isLowGrade ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-600'}`}>
+                  T1: {grade}
+                </span>
+              )}
             </div>
           </div>
         )

@@ -28,6 +28,7 @@ export interface StudentAbsenceSummary {
     subjectGroup: string
     percentageAbsence: number
     warnings: Array<{ warningType: string; sentDate: string }>
+    grade?: string
   }>
   avbrudd: boolean
   hasWarnings: boolean
@@ -36,9 +37,10 @@ export interface StudentAbsenceSummary {
 
 export interface GradeRecord {
   navn: string
-  class: string
-  subject: string
+  subjectGroup: string
+  fagkode: string
   grade: string
+  halvår: string
 }
 
 export interface DataStore {

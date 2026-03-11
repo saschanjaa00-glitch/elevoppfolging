@@ -8,12 +8,16 @@ interface StudentListProps {
   data: DataStore
   selectedClasses: string[]
   threshold: number
+  studentSearch: string
+  missingWarningsOnly: boolean
 }
 
 export default function StudentList({
   data,
   selectedClasses,
   threshold,
+  studentSearch,
+  missingWarningsOnly,
 }: StudentListProps) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
 
@@ -58,22 +62,24 @@ export default function StudentList({
     const selectedClassSet = new Set(selectedClasses)
     const classData = data.absences.filter(a => selectedClassSet.has(a.class))
 
-    const warningMap = new Map<
-      string,
-      Array<{ warningType: string; sentDate: string }>
-    >()
+    const warningMap = new Map<string, Array<{ warningType: string; sentDate: string }>>()
     const studentDobMap = new Map<string, string>()
     data.warnings.forEach(warning => {
-      const key = `${normalizeMatch(warning.navn)}::${normalizeMatch(
-        warning.subjectGroup
-      )}`
+      const key = `${normalizeMatch(warning.navn)}::${normalizeMatch(warning.subjectGroup)}`
       if (!warningMap.has(key)) warningMap.set(key, [])
-      warningMap.get(key)!.push({
-        warningType: warning.warningType,
-        sentDate: warning.sentDate,
-      })
+      warningMap.get(key)!.push({ warningType: warning.warningType, sentDate: warning.sentDate })
       if (warning.dateOfBirth)
         studentDobMap.set(normalizeMatch(warning.navn), warning.dateOfBirth)
+    })
+
+    // Grade map: student+subjectGroup -> term 1 grade
+    const gradeMap = new Map<string, string>()
+    data.grades.forEach(g => {
+      const halvar = g.halvår.toString().trim()
+      if (halvar === '1' || halvar.toLowerCase().includes('1')) {
+        const key = `${normalizeMatch(g.navn)}::${normalizeMatch(g.subjectGroup)}`
+        if (!gradeMap.has(key)) gradeMap.set(key, g.grade)
+      }
     })
 
     const isOver18 = (dobStr: string): boolean => {
@@ -90,12 +96,11 @@ export default function StudentList({
 
     classData.forEach(record => {
       const key = `${record.class}::${record.navn}`
-      const warningKey = `${normalizeMatch(record.navn)}::${normalizeMatch(
-        record.subjectGroup
-      )}`
+      const warningKey = `${normalizeMatch(record.navn)}::${normalizeMatch(record.subjectGroup)}`
       const warnings = warningMap.get(warningKey) ?? []
       const hasSubjectWarning = warnings.length > 0
       const dobStr = studentDobMap.get(normalizeMatch(record.navn)) ?? ''
+      const grade = gradeMap.get(warningKey)
 
       if (!summaryMap.has(key)) {
         summaryMap.set(key, {
@@ -105,41 +110,23 @@ export default function StudentList({
           totalHours: record.hoursAbsence,
           subjects:
             record.percentageAbsence > threshold
-              ? [
-                  {
-                    subject: record.subject,
-                    subjectGroup: record.subjectGroup,
-                    percentageAbsence: record.percentageAbsence,
-                    warnings,
-                  },
-                ]
+              ? [{ subject: record.subject, subjectGroup: record.subjectGroup, percentageAbsence: record.percentageAbsence, warnings, grade }]
               : [],
           avbrudd: record.avbrudd,
-          hasWarnings:
-            record.percentageAbsence > threshold ? hasSubjectWarning : false,
+          hasWarnings: record.percentageAbsence > threshold ? hasSubjectWarning : false,
           isAdult: isOver18(dobStr),
         })
       } else {
         const summary = summaryMap.get(key)!
-        summary.maxPercentage = Math.max(
-          summary.maxPercentage,
-          record.percentageAbsence
-        )
+        summary.maxPercentage = Math.max(summary.maxPercentage, record.percentageAbsence)
         summary.totalHours += record.hoursAbsence
 
         if (record.percentageAbsence > threshold) {
           const subjectExists = summary.subjects.some(
-            s =>
-              s.subjectGroup === record.subjectGroup &&
-              s.subject === record.subject
+            s => s.subjectGroup === record.subjectGroup && s.subject === record.subject
           )
           if (!subjectExists) {
-            summary.subjects.push({
-              subject: record.subject,
-              subjectGroup: record.subjectGroup,
-              percentageAbsence: record.percentageAbsence,
-              warnings,
-            })
+            summary.subjects.push({ subject: record.subject, subjectGroup: record.subjectGroup, percentageAbsence: record.percentageAbsence, warnings, grade })
           }
           if (hasSubjectWarning) summary.hasWarnings = true
         }
@@ -153,13 +140,21 @@ export default function StudentList({
   }, [data, selectedClasses, threshold])
 
   const atRiskStudents = useMemo(() => {
+    const searchNorm = studentSearch.toLowerCase().trim()
     return studentSummaries
       .filter(s => s.subjects.length > 0)
+      .filter(s => !searchNorm || s.navn.toLowerCase().includes(searchNorm))
+      .map(s => {
+        if (!missingWarningsOnly) return s
+        const filtered = s.subjects.filter(sub => sub.warnings.length === 0)
+        return { ...s, subjects: filtered }
+      })
+      .filter(s => !missingWarningsOnly || s.subjects.length > 0)
       .sort((a, b) => {
         if (a.avbrudd !== b.avbrudd) return a.avbrudd ? 1 : -1
         return b.maxPercentage - a.maxPercentage
       })
-  }, [studentSummaries])
+  }, [studentSummaries, studentSearch, missingWarningsOnly])
 
   if (atRiskStudents.length === 0) {
     return (
@@ -406,6 +401,11 @@ export default function StudentList({
                               {subjectEntry.subject} —{' '}
                               {subjectEntry.percentageAbsence.toFixed(1)}%
                             </span>
+                            {subjectEntry.grade && ['1', '2', 'iv'].includes(subjectEntry.grade.toLowerCase()) && (
+                              <span className="w-fit px-2 py-0.5 rounded text-xs font-bold bg-purple-100 text-purple-800">
+                                Karakter T1: {subjectEntry.grade}
+                              </span>
+                            )}
                             {subjectEntry.warnings.length > 0 && (
                               <div className="text-xs text-slate-600 pl-2 space-y-0.5">
                                 {groupWarnings(subjectEntry.warnings).map(

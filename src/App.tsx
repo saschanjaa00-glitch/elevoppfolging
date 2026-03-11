@@ -16,6 +16,9 @@ function App() {
 
   const [selectedClasses, setSelectedClasses] = useState<string[]>([])
   const [absenceThreshold, setAbsenceThreshold] = useState<number>(7.5)
+  const [thresholdEnabled, setThresholdEnabled] = useState<boolean>(true)
+  const [studentSearch, setStudentSearch] = useState<string>('')
+  const [missingWarningsOnly, setMissingWarningsOnly] = useState<boolean>(false)
   const [view, setView] = useState<'list' | 'report'>('list')
 
   const handleDataImport = (importedData: DataStore) => {
@@ -157,26 +160,70 @@ function App() {
                 </aside>
 
                 <section className="lg:col-span-3 space-y-6">
-                  <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-4">
-                    <div className="w-full sm:w-72">
+                  <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-4 space-y-4">
+                    {/* Student search */}
+                    <div>
                       <label className="block text-sm font-medium text-slate-900 mb-2">
-                        Absence Threshold (%)
+                        Search Student
                       </label>
-                      <div className="flex items-center space-x-2">
-                        <input
-                          type="range"
-                          min="0"
-                          max="20"
-                          step="0.5"
-                          value={absenceThreshold}
-                          onChange={e =>
-                            setAbsenceThreshold(parseFloat(e.target.value))
-                          }
-                          className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                      <input
+                        type="text"
+                        placeholder="Name..."
+                        value={studentSearch}
+                        onChange={e => setStudentSearch(e.target.value)}
+                        className="w-full sm:w-72 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+                      />
+                    </div>
+
+                    {/* Missing warnings filter */}
+                    <div>
+                      <button
+                        onClick={() => setMissingWarningsOnly(v => !v)}
+                        className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                          missingWarningsOnly
+                            ? 'bg-orange-500 text-white border-orange-500 hover:bg-orange-600'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        {missingWarningsOnly ? '⚠ Missing warnings only' : '⚠ Show missing warnings only'}
+                      </button>
+                    </div>
+
+                    {/* Absence threshold */}
+                    <div className="flex items-center gap-4">
+                      <button
+                        onClick={() => setThresholdEnabled(v => !v)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                          thresholdEnabled ? 'bg-sky-600' : 'bg-slate-300'
+                        }`}
+                        aria-pressed={thresholdEnabled}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${
+                            thresholdEnabled ? 'translate-x-4' : 'translate-x-0'
+                          }`}
                         />
-                        <span className="text-lg font-semibold text-sky-600 min-w-12">
-                          {absenceThreshold.toFixed(1)}%
-                        </span>
+                      </button>
+                      <div className={`w-full sm:w-72 ${ !thresholdEnabled ? 'opacity-40 pointer-events-none' : '' }`}>
+                        <label className="block text-sm font-medium text-slate-900 mb-1">
+                          Absence Threshold (%)
+                        </label>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="range"
+                            min="0"
+                            max="20"
+                            step="0.5"
+                            value={absenceThreshold}
+                            onChange={e =>
+                              setAbsenceThreshold(parseFloat(e.target.value))
+                            }
+                            className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                          />
+                          <span className="text-lg font-semibold text-sky-600 min-w-12">
+                            {absenceThreshold.toFixed(1)}%
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -185,7 +232,9 @@ function App() {
                     <StudentList
                       data={data}
                       selectedClasses={selectedClasses}
-                      threshold={absenceThreshold}
+                      threshold={thresholdEnabled ? absenceThreshold : 0}
+                      studentSearch={studentSearch}
+                      missingWarningsOnly={missingWarningsOnly}
                     />
                   )}
 
