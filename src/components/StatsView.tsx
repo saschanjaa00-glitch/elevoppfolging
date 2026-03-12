@@ -12,8 +12,14 @@ interface ClassStats {
   studentCount: number
   avgAbsence: number
   ivCount: number
+  ivStudentCount: number
   grade1Count: number
+  grade1StudentCount: number
   grade2Count: number
+  grade2StudentCount: number
+  bothIvAnd1StudentCount: number
+  negativeStudentsCount: number
+  negativeStudentsPct: number
   totalWarnings: number
   fWarnings: number
   gWarnings: number
@@ -26,26 +32,27 @@ function fmt(n: number | null, decimals = 2): string {
   return n === null ? '—' : n.toFixed(decimals).replace('.', ',')
 }
 
-function StatCard({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+function StatCard({ label, value, highlight }: { label: string; value: ReactNode; highlight?: boolean }) {
   return (
     <div className={`rounded-lg border p-4 ${highlight ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
       <p className="text-xs text-slate-500 mb-1">{label}</p>
-      <p className={`text-2xl font-bold ${highlight ? 'text-amber-700' : 'text-slate-900'}`}>{value}</p>
+      <div className={`text-2xl font-bold ${highlight ? 'text-amber-700' : 'text-slate-900'}`}>{value}</div>
     </div>
   )
 }
 
-function Th({ children }: { children: ReactNode }) {
+function Th({ children, center, right, className = '' }: { children: ReactNode; center?: boolean; right?: boolean; className?: string }) {
+  const align = center ? 'text-center' : right ? 'text-right' : 'text-left'
   return (
-    <th className="py-2 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+    <th className={`py-3 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap ${align} ${className}`}>
       {children}
     </th>
   )
 }
 
-function Td({ children, warn, right }: { children: ReactNode; warn?: boolean; right?: boolean }) {
+function Td({ children, warn, center, className = '' }: { children: ReactNode; warn?: boolean; center?: boolean; className?: string }) {
   return (
-    <td className={`py-2 px-3 ${right !== false ? 'text-right' : ''} ${warn ? 'text-amber-700 font-semibold' : 'text-slate-700'}`}>
+    <td className={`py-2 px-3 ${center ? 'text-center' : 'text-right'} ${warn ? 'text-amber-700 font-semibold' : 'text-slate-700'} ${className}`}>
       {children}
     </td>
   )
@@ -98,24 +105,45 @@ export default function StatsView({ data }: Props) {
 
       // Grade counts from grades file
       let ivCount = 0
+      let ivStudentCount = 0
       let grade1Count = 0
+      let grade1StudentCount = 0
       let grade2Count = 0
+      let grade2StudentCount = 0
+      let bothIvAnd1StudentCount = 0
       const numericGrades: number[] = []
       studentNames.forEach(normNavn => {
         const grades = gradesByStudent.get(normNavn) ?? []
+        let hasIv = false
+        let hasGrade1 = false
+        let hasGrade2 = false
         grades.forEach(g => {
           const lower = g.toLowerCase().trim()
-          if (lower === 'iv') ivCount++
-          else if (g === '1') grade1Count++
-          else if (g === '2') grade2Count++
+          if (lower === 'iv') {
+            ivCount++
+            hasIv = true
+          } else if (g === '1') {
+            grade1Count++
+            hasGrade1 = true
+          } else if (g === '2') {
+            grade2Count++
+            hasGrade2 = true
+          }
           const num = parseInt(g)
           if (!isNaN(num) && num >= 1 && num <= 6) numericGrades.push(num)
         })
+        if (hasIv) ivStudentCount++
+        if (hasGrade1) grade1StudentCount++
+        if (hasGrade2) grade2StudentCount++
+        if (hasIv && hasGrade1) bothIvAnd1StudentCount++
       })
       const avgGrade =
         numericGrades.length > 0
           ? numericGrades.reduce((a, b) => a + b, 0) / numericGrades.length
           : null
+
+      const negativeStudentsCount = ivStudentCount + grade1StudentCount - bothIvAnd1StudentCount
+      const negativeStudentsPct = studentCount > 0 ? (negativeStudentsCount / studentCount) * 100 : 0
 
       // Warnings for this class
       let totalWarnings = 0
@@ -157,8 +185,14 @@ export default function StatsView({ data }: Props) {
         studentCount,
         avgAbsence,
         ivCount,
+        ivStudentCount,
         grade1Count,
+        grade1StudentCount,
         grade2Count,
+        grade2StudentCount,
+        bothIvAnd1StudentCount,
+        negativeStudentsCount,
+        negativeStudentsPct,
         totalWarnings,
         fWarnings,
         gWarnings,
@@ -179,6 +213,26 @@ export default function StatsView({ data }: Props) {
     )
     const allGradeValues = perClass.flatMap(c => (c.avgGrade !== null ? [c.avgGrade] : []))
 
+    let overallIvStudentCount = 0
+    let overallGrade1StudentCount = 0
+    let overallGrade2StudentCount = 0
+    let overallBothIvAnd1StudentCount = 0
+    gradesByStudent.forEach(grades => {
+      let hasIv = false
+      let hasGrade1 = false
+      let hasGrade2 = false
+      grades.forEach(g => {
+        const lower = g.toLowerCase().trim()
+        if (lower === 'iv') hasIv = true
+        else if (g === '1') hasGrade1 = true
+        else if (g === '2') hasGrade2 = true
+      })
+      if (hasIv) overallIvStudentCount++
+      if (hasGrade1) overallGrade1StudentCount++
+      if (hasGrade2) overallGrade2StudentCount++
+      if (hasIv && hasGrade1) overallBothIvAnd1StudentCount++
+    })
+
     const overall: ClassStats = {
       className: 'Totalt',
       studentCount: new Set(data.absences.map(r => normalizeMatch(r.navn))).size,
@@ -187,8 +241,20 @@ export default function StatsView({ data }: Props) {
           ? data.absences.reduce((s, r) => s + r.percentageAbsence, 0) / data.absences.length
           : 0,
       ivCount: perClass.reduce((s, c) => s + c.ivCount, 0),
+          ivStudentCount: overallIvStudentCount,
       grade1Count: perClass.reduce((s, c) => s + c.grade1Count, 0),
+          grade1StudentCount: overallGrade1StudentCount,
       grade2Count: perClass.reduce((s, c) => s + c.grade2Count, 0),
+          grade2StudentCount: overallGrade2StudentCount,
+      bothIvAnd1StudentCount: overallBothIvAnd1StudentCount,
+      negativeStudentsCount:
+        overallIvStudentCount + overallGrade1StudentCount - overallBothIvAnd1StudentCount,
+      negativeStudentsPct:
+        new Set(data.absences.map(r => normalizeMatch(r.navn))).size > 0
+          ? ((overallIvStudentCount + overallGrade1StudentCount - overallBothIvAnd1StudentCount) /
+              new Set(data.absences.map(r => normalizeMatch(r.navn))).size) *
+            100
+          : 0,
       totalWarnings: perClass.reduce((s, c) => s + c.totalWarnings, 0),
       fWarnings: perClass.reduce((s, c) => s + c.fWarnings, 0),
       gWarnings: perClass.reduce((s, c) => s + c.gWarnings, 0),
@@ -210,11 +276,48 @@ export default function StatsView({ data }: Props) {
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6">
         <h2 className="text-base font-semibold text-slate-900 mb-4">Totaloversikt</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          <StatCard label="Elever totalt" value={String(stats.overall.studentCount)} />
+          <StatCard
+            label="Elever"
+            value={
+              <div className="flex items-start justify-between gap-3">
+                <span>{stats.overall.studentCount}</span>
+                <span className="w-28 text-xs font-medium text-slate-500 leading-tight text-left">
+                  <span className="block">
+                    Negative karakterer: {stats.overall.negativeStudentsCount} elever ({fmt(stats.overall.negativeStudentsPct, 1)}%)
+                  </span>
+                </span>
+              </div>
+            }
+          />
           <StatCard label="Gj.snitt fravær" value={`${fmt(stats.overall.avgAbsence, 1)}%`} />
-          <StatCard label="IV" value={String(stats.overall.ivCount)} />
-          <StatCard label="Karakter 1" value={String(stats.overall.grade1Count)} />
-          <StatCard label="Karakter 2" value={String(stats.overall.grade2Count)} />
+          <StatCard
+            label="IV"
+            value={
+              <div className="flex items-start justify-between gap-3">
+                <span>{stats.overall.ivCount}</span>
+                <span className="w-28 text-xs font-medium text-slate-500 leading-tight text-left">
+                  <span className="block">IV: {Math.max(stats.overall.ivStudentCount - stats.overall.bothIvAnd1StudentCount, 0)} elever</span>
+                  <span className="block">1+IV: {stats.overall.bothIvAnd1StudentCount} elever</span>
+                </span>
+              </div>
+            }
+          />
+          <StatCard
+            label="Karakter 1"
+            value={
+              <div className="flex items-start justify-between gap-3">
+                <span>{stats.overall.grade1Count}</span>
+                <span className="w-28 text-xs font-medium text-slate-500 leading-tight text-left">
+                  <span className="block">1: {Math.max(stats.overall.grade1StudentCount - stats.overall.bothIvAnd1StudentCount, 0)} elever</span>
+                  <span className="block">1+IV: {stats.overall.bothIvAnd1StudentCount} elever</span>
+                </span>
+              </div>
+            }
+          />
+          <StatCard
+            label="Karakter 2"
+            value={`${stats.overall.grade2Count} (${stats.overall.grade2StudentCount})`}
+          />
           <StatCard label="Varsler totalt" value={String(stats.overall.totalWarnings)} />
           <StatCard label="Fraværsvarsler (F)" value={String(stats.overall.fWarnings)} />
           <StatCard label="Karaktervarsler (G)" value={String(stats.overall.gWarnings)} />
@@ -230,55 +333,52 @@ export default function StatsView({ data }: Props) {
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6">
         <h2 className="text-base font-semibold text-slate-900 mb-4">Per klasse</h2>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm border-separate border-spacing-0">
             <thead>
               <tr className="border-b-2 border-slate-200">
+                {/* Group: identity */}
                 <Th>Klasse</Th>
-                <Th>Elever</Th>
-                <Th>Gj.snitt fravær</Th>
-                <Th>IV</Th>
-                <Th>1</Th>
-                <Th>2</Th>
-                <Th>Varsler</Th>
-                <Th>F</Th>
-                <Th>G</Th>
-                <Th>Manglende varsler</Th>
-                <Th>Gj.snitt gsk.p.</Th>
-                <Th>Gj.snitt karakter</Th>
+                {/* Group: attendance – shaded */}
+                <Th right className="bg-slate-50 border-l border-slate-200">Gj.snitt fravær</Th>
+                {/* Group: grades */}
+                <Th center className="border-l border-slate-200">IV</Th>
+                <Th center>1</Th>
+                <Th center>2</Th>
+                {/* Group: warnings – shaded */}
+                <Th center className="bg-slate-50 border-l border-slate-200">Varsler (F+G)</Th>
+                {/* Group: missing – amber */}
+                <Th center className="bg-amber-50 border-l border-slate-200">Manglende varsler</Th>
+                {/* Group: averages */}
+                <Th right className="border-l border-slate-200">GSK.P</Th>
+                <Th right>Snitt vgs</Th>
               </tr>
             </thead>
             <tbody>
               {stats.perClass.map(c => (
-                <tr key={c.className} className="border-b border-slate-100 hover:bg-slate-50">
+                <tr key={c.className} className="border-b border-slate-100 hover:bg-sky-50/40">
                   <td className="py-2 px-3 font-medium text-slate-900">{c.className}</td>
-                  <Td>{c.studentCount}</Td>
-                  <Td>{fmt(c.avgAbsence, 1)}%</Td>
-                  <Td>{c.ivCount || '—'}</Td>
-                  <Td>{c.grade1Count || '—'}</Td>
-                  <Td>{c.grade2Count || '—'}</Td>
-                  <Td>{c.totalWarnings || '—'}</Td>
-                  <Td>{c.fWarnings || '—'}</Td>
-                  <Td>{c.gWarnings || '—'}</Td>
-                  <Td warn={c.missingWarnings > 0}>{c.missingWarnings || '—'}</Td>
-                  <Td>{fmt(c.avgGrunnskolepoeng)}</Td>
+                  <Td className="bg-slate-50 border-l border-slate-200">{fmt(c.avgAbsence, 1)}%</Td>
+                  <Td center className="border-l border-slate-200">{c.ivCount || '—'}</Td>
+                  <Td center>{c.grade1Count || '—'}</Td>
+                  <Td center>{c.grade2Count || '—'}</Td>
+                  <Td center className="bg-slate-50 border-l border-slate-200">{c.totalWarnings || '—'} ({c.fWarnings || 0}+{c.gWarnings || 0})</Td>
+                  <Td center warn={c.missingWarnings > 0} className="bg-amber-50 border-l border-slate-200">{c.missingWarnings || '—'}</Td>
+                  <Td className="border-l border-slate-200">{fmt(c.avgGrunnskolepoeng)}</Td>
                   <Td>{fmt(c.avgGrade)}</Td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
-              <tr className="border-t-2 border-slate-300 bg-slate-50 font-semibold">
-                <td className="py-2 px-3 text-slate-900">Totalt</td>
-                <Td>{stats.overall.studentCount}</Td>
-                <Td>{fmt(stats.overall.avgAbsence, 1)}%</Td>
-                <Td>{stats.overall.ivCount || '—'}</Td>
-                <Td>{stats.overall.grade1Count || '—'}</Td>
-                <Td>{stats.overall.grade2Count || '—'}</Td>
-                <Td>{stats.overall.totalWarnings || '—'}</Td>
-                <Td>{stats.overall.fWarnings || '—'}</Td>
-                <Td>{stats.overall.gWarnings || '—'}</Td>
-                <Td warn={stats.overall.missingWarnings > 0}>{stats.overall.missingWarnings || '—'}</Td>
-                <Td>{fmt(stats.overall.avgGrunnskolepoeng)}</Td>
-                <Td>{fmt(stats.overall.avgGrade)}</Td>
+              <tr className="border-t-2 border-slate-300 font-semibold">
+                <td className="py-2 px-3 text-slate-900 bg-slate-100">Totalt</td>
+                <Td className="bg-slate-100 border-l border-slate-200">{fmt(stats.overall.avgAbsence, 1)}%</Td>
+                <Td center className="bg-slate-50 border-l border-slate-200">{stats.overall.ivCount || '—'}</Td>
+                <Td center className="bg-slate-50">{stats.overall.grade1Count || '—'}</Td>
+                <Td center className="bg-slate-50">{stats.overall.grade2Count || '—'}</Td>
+                <Td center className="bg-slate-100 border-l border-slate-200">{stats.overall.totalWarnings || '—'} ({stats.overall.fWarnings || 0}+{stats.overall.gWarnings || 0})</Td>
+                <Td center warn={stats.overall.missingWarnings > 0} className="bg-amber-100 border-l border-slate-200">{stats.overall.missingWarnings || '—'}</Td>
+                <Td className="bg-slate-50 border-l border-slate-200">{fmt(stats.overall.avgGrunnskolepoeng)}</Td>
+                <Td className="bg-slate-50">{fmt(stats.overall.avgGrade)}</Td>
               </tr>
             </tfoot>
           </table>
