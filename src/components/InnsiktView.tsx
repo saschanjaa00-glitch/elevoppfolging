@@ -1,5 +1,6 @@
 import { useMemo, useState, Fragment } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
+import jsPDF from 'jspdf'
 import type { DataStore } from '../types'
 import { normalizeMatch } from '../studentInfoUtils'
 
@@ -11,6 +12,7 @@ interface SubjectStats {
   subject: string
   studentCount: number
   totalVarsels: number
+  missingWarnings: number
   varselsByType: Record<string, number>
   gradesCounts: Record<string, number>
 }
@@ -19,12 +21,26 @@ interface TeacherStats {
   name: string
   studentCount: number
   totalVarsels: number
+  missingWarnings: number
   varselsByType: Record<string, number>
   gradesCounts: Record<string, number>
   subjectStats: SubjectStats[]
 }
 
-type SortKey = 'name' | 'students' | 'totalVarsels' | 'gradeCount'
+type SortKey =
+  | 'name'
+  | 'students'
+  | 'totalVarsels'
+  | 'missingWarnings'
+  | 'warningsF'
+  | 'warningsG'
+  | 'gradeIV'
+  | 'grade1'
+  | 'grade2'
+  | 'grade3'
+  | 'grade4'
+  | 'grade5'
+  | 'grade6'
 type SortDirection = 'asc' | 'desc'
 
 export default function InnsiktView({ data }: Props) {
@@ -39,13 +55,17 @@ export default function InnsiktView({ data }: Props) {
     const teacherSubjects = new Map<string, Map<string, SubjectStats>>()
     const teacherStudents = new Map<string, Set<string>>()
     const subjectStudents = new Map<string, Map<string, Set<string>>>()
+    const gradeTeachersByStudentSubject = new Map<string, Set<string>>()
+
+    const studentSubjectKey = (student: string, subject: string) => `${student}|||${normalizeMatch(subject)}`
 
     data.grades.forEach(grade => {
       const teacher = grade.subjectTeacher?.trim()
       if (!teacher) return
 
-      const subject = grade.subjectGroup?.trim()
-      if (!subject) return
+      const subjectDisplay = grade.subjectGroup?.trim()
+      if (!subjectDisplay) return
+      const subject = normalizeMatch(subjectDisplay)
 
       const normStudent = normalizeMatch(grade.navn)
 
@@ -54,6 +74,7 @@ export default function InnsiktView({ data }: Props) {
           name: teacher,
           studentCount: 0,
           totalVarsels: 0,
+          missingWarnings: 0,
           varselsByType: {},
           gradesCounts: {},
           subjectStats: [],
@@ -73,14 +94,21 @@ export default function InnsiktView({ data }: Props) {
       }
       subjectStudents.get(teacher)!.get(subject)!.add(normStudent)
 
+      const lookupKey = studentSubjectKey(normStudent, subject)
+      if (!gradeTeachersByStudentSubject.has(lookupKey)) {
+        gradeTeachersByStudentSubject.set(lookupKey, new Set())
+      }
+      gradeTeachersByStudentSubject.get(lookupKey)!.add(teacher)
+
       if (!teacherSubjects.has(teacher)) {
         teacherSubjects.set(teacher, new Map())
       }
       if (!teacherSubjects.get(teacher)!.has(subject)) {
         teacherSubjects.get(teacher)!.set(subject, {
-          subject,
+          subject: subjectDisplay,
           studentCount: 0,
           totalVarsels: 0,
+          missingWarnings: 0,
           varselsByType: {},
           gradesCounts: {},
         })
@@ -116,14 +144,11 @@ export default function InnsiktView({ data }: Props) {
       const warningSubject = warning.subjectGroup?.trim()
       if (!warningSubject) return
 
-      const matchedGradeRows = data.grades.filter(
-        g =>
-          normalizeMatch(g.navn) === warningStudent &&
-          g.subjectGroup?.trim() === warningSubject &&
-          !!g.subjectTeacher?.trim()
+      const matchedTeachers = gradeTeachersByStudentSubject.get(
+        studentSubjectKey(warningStudent, warningSubject)
       )
+      if (!matchedTeachers || matchedTeachers.size === 0) return
 
-      const matchedTeachers = new Set(matchedGradeRows.map(g => g.subjectTeacher!.trim()))
       matchedTeachers.forEach(teacher => {
         const teacherStats = teacherData.get(teacher)
         if (!teacherStats) return
@@ -132,10 +157,41 @@ export default function InnsiktView({ data }: Props) {
         teacherStats.totalVarsels += 1
         teacherStats.varselsByType[label] = (teacherStats.varselsByType[label] ?? 0) + 1
 
-        const subjectStat = teacherSubjects.get(teacher)?.get(warningSubject)
+        const subjectStat = teacherSubjects.get(teacher)?.get(normalizeMatch(warningSubject))
         if (!subjectStat) return
         subjectStat.totalVarsels += 1
         subjectStat.varselsByType[label] = (subjectStat.varselsByType[label] ?? 0) + 1
+      })
+    })
+
+    // Missing warnings: absence > 8%, no warning for student+subjectGroup.
+    const warningMap = new Map<string, number>()
+    data.warnings.forEach(w => {
+      const key = studentSubjectKey(normalizeMatch(w.navn), w.subjectGroup)
+      warningMap.set(key, (warningMap.get(key) ?? 0) + 1)
+    })
+
+    const checkedCombos = new Set<string>()
+    data.absences.forEach(a => {
+      if (a.percentageAbsence <= 8) return
+      const comboKey = studentSubjectKey(normalizeMatch(a.navn), a.subjectGroup)
+      if (checkedCombos.has(comboKey)) return
+      checkedCombos.add(comboKey)
+
+      if ((warningMap.get(comboKey) ?? 0) > 0) return
+
+      const matchedTeachers = gradeTeachersByStudentSubject.get(comboKey)
+      if (!matchedTeachers || matchedTeachers.size === 0) return
+
+      const subjectKey = normalizeMatch(a.subjectGroup)
+      matchedTeachers.forEach(teacher => {
+        const teacherStat = teacherData.get(teacher)
+        if (!teacherStat) return
+        teacherStat.missingWarnings += 1
+
+        const subjectStat = teacherSubjects.get(teacher)?.get(subjectKey)
+        if (!subjectStat) return
+        subjectStat.missingWarnings += 1
       })
     })
 
@@ -150,34 +206,50 @@ export default function InnsiktView({ data }: Props) {
     return Array.from(teacherData.values())
   }, [data])
 
+  const allGrades = ['IV', '1', '2', '3', '4', '5', '6'] as const
+
+  const gradeSortKeyByGrade: Record<(typeof allGrades)[number], SortKey> = {
+    IV: 'gradeIV',
+    '1': 'grade1',
+    '2': 'grade2',
+    '3': 'grade3',
+    '4': 'grade4',
+    '5': 'grade5',
+    '6': 'grade6',
+  }
+
   const filteredAndSorted = useMemo(() => {
     let filtered = teacherStats.filter(t =>
       t.name.toLowerCase().includes(searchTerm.toLowerCase())
     )
 
-    filtered.sort((a, b) => {
-      let aVal: string | number
-      let bVal: string | number
+    const numericSortValue = (row: TeacherStats, key: SortKey): number => {
+      if (key === 'students') return row.studentCount
+      if (key === 'totalVarsels') return row.totalVarsels
+      if (key === 'missingWarnings') return row.missingWarnings
+      if (key === 'warningsF') return row.varselsByType['F'] ?? 0
+      if (key === 'warningsG') return row.varselsByType['G'] ?? 0
+      if (key === 'gradeIV') return row.gradesCounts['IV'] ?? 0
+      if (key === 'grade1') return row.gradesCounts['1'] ?? 0
+      if (key === 'grade2') return row.gradesCounts['2'] ?? 0
+      if (key === 'grade3') return row.gradesCounts['3'] ?? 0
+      if (key === 'grade4') return row.gradesCounts['4'] ?? 0
+      if (key === 'grade5') return row.gradesCounts['5'] ?? 0
+      if (key === 'grade6') return row.gradesCounts['6'] ?? 0
+      return 0
+    }
 
+    filtered.sort((a, b) => {
       if (sortKey === 'name') {
-        aVal = a.name.toLowerCase()
-        bVal = b.name.toLowerCase()
-        const cmp = aVal.localeCompare(bVal)
+        const cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase())
         return sortDirection === 'asc' ? cmp : -cmp
-      } else if (sortKey === 'students') {
-        aVal = a.studentCount
-        bVal = b.studentCount
-      } else if (sortKey === 'totalVarsels') {
-        aVal = a.totalVarsels
-        bVal = b.totalVarsels
-      } else {
-        // gradeCount
-        aVal = Object.values(a.gradesCounts).reduce((sum, v) => sum + v, 0)
-        bVal = Object.values(b.gradesCounts).reduce((sum, v) => sum + v, 0)
       }
 
-      const diff = (aVal as number) - (bVal as number)
-      return sortDirection === 'asc' ? diff : -diff
+      const aVal = numericSortValue(a, sortKey)
+      const bVal = numericSortValue(b, sortKey)
+      const diff = aVal - bVal
+      if (diff !== 0) return sortDirection === 'asc' ? diff : -diff
+      return a.name.localeCompare(b.name, 'nb-NO', { sensitivity: 'base' })
     })
 
     return filtered
@@ -197,7 +269,85 @@ export default function InnsiktView({ data }: Props) {
     return sortDirection === 'asc' ? '▲' : '▼'
   }
 
-  const allGrades = ['IV', '1', '2', '3', '4', '5', '6']
+  const formatTeacherDisplay = (teacherName: string) => {
+    const splitTeachers = teacherName
+      .split(',')
+      .map(t => t.trim())
+      .filter(Boolean)
+
+    if (splitTeachers.length > 3) return 'Flere lærere'
+    return teacherName
+  }
+
+  const exportTeacherPdf = (teacher: TeacherStats) => {
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+    const pageHeight = doc.internal.pageSize.getHeight()
+    const marginLeft = 36
+    const marginTop = 42
+    const lineHeight = 14
+    let y = marginTop
+
+    const ensureSpace = (needed = lineHeight) => {
+      if (y + needed > pageHeight - 36) {
+        doc.addPage()
+        y = marginTop
+      }
+    }
+
+    const writeLine = (text: string, bold = false, size = 10) => {
+      ensureSpace(lineHeight)
+      doc.setFont('helvetica', bold ? 'bold' : 'normal')
+      doc.setFontSize(size)
+      doc.text(text, marginLeft, y)
+      y += lineHeight
+    }
+
+    const gradeOrder = ['IV', '1', '2', '3', '4', '5', '6']
+    const gradesSummary = gradeOrder.map(g => `${g}: ${teacher.gradesCounts[g] ?? 0}`).join('  |  ')
+
+    writeLine('Lærerinnsikt', true, 14)
+    y += 4
+    writeLine(`Lærer: ${teacher.name}`, true, 11)
+    writeLine(`Elever: ${teacher.studentCount}`)
+    writeLine(`Varsler totalt: ${teacher.totalVarsels}  |  F: ${teacher.varselsByType['F'] ?? 0}  |  G: ${teacher.varselsByType['G'] ?? 0}`)
+    writeLine(`Manglende varsler (>8%): ${teacher.missingWarnings}`)
+    writeLine(`Karakterer: ${gradesSummary}`)
+    y += 6
+
+    writeLine('Detaljer per fag', true, 11)
+    doc.setFont('courier', 'bold')
+    doc.setFontSize(9)
+    ensureSpace()
+    doc.text('Fag                         Elever Varsler Mangl  F  G  IV  1  2  3  4  5  6', marginLeft, y)
+    y += lineHeight
+
+    doc.setFont('courier', 'normal')
+    teacher.subjectStats.forEach(subject => {
+      const subjectName = subject.subject.length > 26 ? `${subject.subject.slice(0, 25)}.` : subject.subject
+      const row = [
+        subjectName.padEnd(26, ' '),
+        String(subject.studentCount).padStart(6, ' '),
+        String(subject.totalVarsels).padStart(7, ' '),
+        String(subject.missingWarnings).padStart(6, ' '),
+        String(subject.varselsByType['F'] ?? 0).padStart(3, ' '),
+        String(subject.varselsByType['G'] ?? 0).padStart(3, ' '),
+        String(subject.gradesCounts['IV'] ?? 0).padStart(4, ' '),
+        String(subject.gradesCounts['1'] ?? 0).padStart(3, ' '),
+        String(subject.gradesCounts['2'] ?? 0).padStart(3, ' '),
+        String(subject.gradesCounts['3'] ?? 0).padStart(3, ' '),
+        String(subject.gradesCounts['4'] ?? 0).padStart(3, ' '),
+        String(subject.gradesCounts['5'] ?? 0).padStart(3, ' '),
+        String(subject.gradesCounts['6'] ?? 0).padStart(3, ' '),
+      ].join(' ')
+
+      ensureSpace()
+      doc.text(row, marginLeft, y)
+      y += lineHeight
+    })
+
+    const safeName = teacher.name.replace(/[<>:"/\\|?*]+/g, '_')
+    doc.save(`innsikt-${safeName}.pdf`)
+  }
 
   return (
     <div className="space-y-4">
@@ -257,19 +407,37 @@ export default function InnsiktView({ data }: Props) {
                 <th className="py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   <button
                     type="button"
-                    onClick={() => toggleSort('totalVarsels')}
+                    onClick={() => toggleSort('missingWarnings')}
                     className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
                   >
-                    <span>F</span>
+                    <span>Manglende</span>
+                    <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                      {getSortIndicator('missingWarnings')}
+                    </span>
                   </button>
                 </th>
                 <th className="py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   <button
                     type="button"
-                    onClick={() => toggleSort('totalVarsels')}
+                    onClick={() => toggleSort('warningsF')}
+                    className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
+                  >
+                    <span>F</span>
+                    <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                      {getSortIndicator('warningsF')}
+                    </span>
+                  </button>
+                </th>
+                <th className="py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                  <button
+                    type="button"
+                    onClick={() => toggleSort('warningsG')}
                     className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
                   >
                     <span>G</span>
+                    <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                      {getSortIndicator('warningsG')}
+                    </span>
                   </button>
                 </th>
                 {allGrades.map(grade => (
@@ -277,9 +445,21 @@ export default function InnsiktView({ data }: Props) {
                     key={grade}
                     className="py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap"
                   >
-                    {grade}
+                    <button
+                      type="button"
+                      onClick={() => toggleSort(gradeSortKeyByGrade[grade])}
+                      className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
+                    >
+                      <span>{grade}</span>
+                      <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                        {getSortIndicator(gradeSortKeyByGrade[grade])}
+                      </span>
+                    </button>
                   </th>
                 ))}
+                <th className="py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                  PDF
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -287,7 +467,9 @@ export default function InnsiktView({ data }: Props) {
                 <Fragment key={teacher.name}>
                   <tr
                     onClick={() => setExpandedTeacher(expandedTeacher === teacher.name ? null : teacher.name)}
-                    className="border-b border-slate-100 hover:bg-sky-50/40 cursor-pointer"
+                    className={`border-b border-slate-100 hover:bg-sky-50/40 cursor-pointer transition-opacity ${
+                      expandedTeacher && expandedTeacher !== teacher.name ? 'opacity-35' : 'opacity-100'
+                    }`}
                   >
                     <td className="py-2 px-3 font-medium text-slate-900">
                       <div className="flex items-center gap-2">
@@ -296,16 +478,17 @@ export default function InnsiktView({ data }: Props) {
                         ) : (
                           <ChevronRight className="w-4 h-4 flex-shrink-0" />
                         )}
-                        <span>{teacher.name}</span>
+                        <span>{formatTeacherDisplay(teacher.name)}</span>
                       </div>
                     </td>
                     <td className="py-2 px-3 text-center text-slate-700">{teacher.studentCount}</td>
                     <td className="py-2 px-3 text-center text-slate-700 font-medium">{teacher.totalVarsels}</td>
+                    <td className="py-2 px-3 text-center text-amber-700 font-medium">{teacher.missingWarnings > 0 ? teacher.missingWarnings : '—'}</td>
                     <td className="py-2 px-3 text-center text-slate-700">
-                      {teacher.varselsByType['f'] ?? 0}
+                      {teacher.varselsByType['F'] ?? 0}
                     </td>
                     <td className="py-2 px-3 text-center text-slate-700">
-                      {teacher.varselsByType['g'] ?? 0}
+                      {teacher.varselsByType['G'] ?? 0}
                     </td>
                     {allGrades.map(grade => (
                       <td
@@ -321,6 +504,18 @@ export default function InnsiktView({ data }: Props) {
                         {teacher.gradesCounts[grade] ?? 0}
                       </td>
                     ))}
+                    <td className="py-2 px-3 text-center">
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation()
+                          exportTeacherPdf(teacher)
+                        }}
+                        className="px-2 py-1 text-xs font-medium rounded bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      >
+                        Skriv ut
+                      </button>
+                    </td>
                   </tr>
                   {expandedTeacher === teacher.name && (
                     <>
@@ -330,8 +525,9 @@ export default function InnsiktView({ data }: Props) {
                             <td className="py-2 px-3 text-left text-slate-700 pl-10">- {subject.subject}</td>
                             <td className="py-2 px-3 text-center text-slate-700">{subject.studentCount}</td>
                             <td className="py-2 px-3 text-center text-slate-700 font-medium">{subject.totalVarsels}</td>
-                            <td className="py-2 px-3 text-center text-slate-700">{subject.varselsByType['f'] ?? 0}</td>
-                            <td className="py-2 px-3 text-center text-slate-700">{subject.varselsByType['g'] ?? 0}</td>
+                            <td className="py-2 px-3 text-center text-amber-700 font-medium">{subject.missingWarnings > 0 ? subject.missingWarnings : '—'}</td>
+                            <td className="py-2 px-3 text-center text-slate-700">{subject.varselsByType['F'] ?? 0}</td>
+                            <td className="py-2 px-3 text-center text-slate-700">{subject.varselsByType['G'] ?? 0}</td>
                             {allGrades.map(grade => (
                               <td
                                 key={grade}
@@ -346,11 +542,12 @@ export default function InnsiktView({ data }: Props) {
                                 {subject.gradesCounts[grade] ?? 0}
                               </td>
                             ))}
+                            <td className="py-2 px-3 text-center text-slate-400">-</td>
                           </tr>
                         ))
                       ) : (
                         <tr className="bg-slate-50 border-b border-slate-200">
-                          <td colSpan={12} className="py-3 px-3 text-center text-slate-500 text-sm">
+                          <td colSpan={14} className="py-3 px-3 text-center text-slate-500 text-sm">
                             Ingen fag med vurderingsdata for denne læreren.
                           </td>
                         </tr>
@@ -363,7 +560,7 @@ export default function InnsiktView({ data }: Props) {
             {filteredAndSorted.length === 0 && (
               <tbody>
                 <tr>
-                  <td colSpan={12} className="py-6 px-3 text-center text-slate-500">
+                  <td colSpan={14} className="py-6 px-3 text-center text-slate-500">
                     Ingen lærere funnet
                   </td>
                 </tr>
