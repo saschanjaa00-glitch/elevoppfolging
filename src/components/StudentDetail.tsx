@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { DataStore } from '../types'
+import { resolveTeacher } from '../teacherUtils'
 
 interface StudentDetailProps {
   data: DataStore
@@ -70,18 +71,22 @@ export default function StudentDetail({
       w => normalizeMatch(w.navn) === normalizeMatch(selectedStudent)
     )
 
-    // Term 1 grades keyed by subjectGroup
+    // Term 1 grades and subject teachers keyed by subjectGroup
     const gradeMap = new Map<string, string>()
+    const subjectTeacherMap = new Map<string, string>()
     data.grades.forEach(g => {
+      if (normalizeMatch(g.navn) !== normalizeMatch(selectedStudent)) return
+      const key = normalizeMatch(g.subjectGroup)
+      if (g.subjectTeacher && !subjectTeacherMap.has(key)) {
+        subjectTeacherMap.set(key, g.subjectTeacher)
+      }
       const halvar = g.halvår.toString().trim()
-      if ((halvar === '1' || halvar.toLowerCase().includes('1')) &&
-          normalizeMatch(g.navn) === normalizeMatch(selectedStudent)) {
-        const key = normalizeMatch(g.subjectGroup)
-        if (!gradeMap.has(key)) gradeMap.set(key, g.grade)
+      if ((halvar === '1' || halvar.toLowerCase().includes('1')) && !gradeMap.has(key)) {
+        gradeMap.set(key, g.grade)
       }
     })
 
-    return { records, warnings, gradeMap }
+    return { records, warnings, gradeMap, subjectTeacherMap }
   }, [data, selectedClass, selectedStudent])
 
   if (studentData.records.length === 0) {
@@ -111,14 +116,15 @@ export default function StudentDetail({
         .map(w => ({ warningType: w.warningType, sentDate: w.sentDate }))
 
       const grade = studentData.gradeMap.get(normalizeMatch(topRecord.subjectGroup))
+      const teacher = resolveTeacher(selectedClass, studentData.subjectTeacherMap.get(normalizeMatch(topRecord.subjectGroup)) ?? topRecord.teacher)
 
-      return { subject, records, topRecord, warnings: subjectWarnings, grade }
+      return { subject, records, topRecord, warnings: subjectWarnings, grade, teacher }
     })
     .sort((a, b) => b.topRecord.percentageAbsence - a.topRecord.percentageAbsence)
 
   return (
     <div className="bg-white divide-y divide-slate-100 py-1">
-      {subjectSummaries.map(({ subject, topRecord: record, warnings, grade }) => {
+      {subjectSummaries.map(({ subject, topRecord: record, warnings, grade, teacher }) => {
         const isAtRisk = record.percentageAbsence > threshold
         const isHighRisk = record.percentageAbsence > 10
         const isLowGrade = grade && ['1', '2', 'iv'].includes(grade.toLowerCase())
@@ -127,7 +133,7 @@ export default function StudentDetail({
           <div key={subject} className="flex items-start justify-between px-4 py-3 gap-4">
             <div className="flex-1 min-w-0">
               <p className="font-medium text-slate-900 truncate">{subject}</p>
-              <p className="text-xs text-slate-500">{record.teacher}</p>
+              <p className="text-xs text-slate-500">{teacher}</p>
               {warnings.length > 0 && (
                 <div className="text-xs text-slate-600 mt-1 space-y-0.5">
                   {groupWarnings(warnings).map(([label, dates]) => (

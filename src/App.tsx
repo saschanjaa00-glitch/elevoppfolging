@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { AlertCircle } from 'lucide-react'
 import { BorderStyle, Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
+import { resolveTeacher } from './teacherUtils'
 import FileUpload from './components/FileUpload'
 import ClassSelector from './components/ClassSelector'
 import StudentList from './components/StudentList'
@@ -153,7 +154,7 @@ function App() {
       )
 
       subjects.forEach(subject => {
-        const teacherText = subject.teacher ? ` (Lærer: ${subject.teacher})` : ''
+        const teacherText = subject.teacher ? ` (Lærer: ${resolveTeacher(student.className, subject.teacher)})` : ''
         const infoText = `Fravær: ${subject.percentageAbsence.toFixed(1)}%   |   Karakter: ${subject.grade ?? '-'}   |   Varsler: ${subject.warningCount}`
         children.push(
           new Table({
@@ -180,7 +181,6 @@ function App() {
               }),
             ],
           }),
-          new Paragraph({ text: '' })
         )
       })
 

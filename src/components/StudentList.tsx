@@ -4,6 +4,7 @@ import { Eye, X, Printer, FileText } from 'lucide-react'
 import StudentDetail from './StudentDetail'
 import { jsPDF } from 'jspdf'
 import { BorderStyle, Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
+import { resolveTeacher } from '../teacherUtils'
 
 interface StudentListProps {
   data: DataStore
@@ -350,6 +351,111 @@ export default function StudentList({
     doc.save(`oppfolging_${selectedClasses.join('-')}_${new Date().toISOString().slice(0, 10)}.pdf`)
   }
 
+  const generateOppfolgingsarkForUtvalg = async () => {
+    if (atRiskStudents.length === 0) return
+
+    const children: Array<Paragraph | Table> = []
+
+    atRiskStudents.forEach((student, index) => {
+      const { allSubjectEntries, kontaktlaerer } = getAllSubjectEntries(student)
+      const radgiver = ownerForClass(student.className, RADGIVER)
+
+      children.push(
+        new Paragraph({
+          text: 'Oppfølgingsark',
+          heading: HeadingLevel.HEADING_1,
+          pageBreakBefore: index > 0,
+        }),
+        new Paragraph({ children: [new TextRun({ text: `Elev: ${student.navn}` })] }),
+        new Paragraph({ children: [new TextRun({ text: `Klasse: ${student.className}` })] }),
+        new Paragraph({ children: [new TextRun({ text: `Kontaktlærer: ${kontaktlaerer}` })] }),
+        new Paragraph({ children: [new TextRun({ text: `Rådgiver: ${radgiver}` })] }),
+        new Paragraph({ text: '' }),
+      )
+
+      allSubjectEntries.forEach(subjectEntry => {
+        const resolvedTeacher = resolveTeacher(student.className, subjectEntry.teacher)
+        const teacherText = resolvedTeacher ? ` (Lærer: ${resolvedTeacher})` : ''
+        const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}`
+
+        children.push(
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: [
+              new TableRow({
+                children: [
+                  new TableCell({
+                    borders: {
+                      top: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                      bottom: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                      left: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                      right: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                    },
+                    children: [
+                      new Paragraph({ children: [new TextRun({ text: `${subjectEntry.subject}${teacherText}`, bold: true })] }),
+                      new Paragraph({ text: infoText }),
+                      new Paragraph({ text: '' }),
+                      new Paragraph({ text: '' }),
+                      new Paragraph({ text: '' }),
+                    ],
+                  }),
+                ],
+              }),
+            ],
+          }),
+        )
+      })
+
+      children.push(
+        new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: [
+            new TableRow({
+              children: [
+                new TableCell({
+                  borders: {
+                    top: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                    bottom: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                    left: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                    right: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                  },
+                  children: [
+                    new Paragraph({ children: [new TextRun({ text: 'Andre notater', bold: true })] }),
+                    new Paragraph({ text: '' }),
+                    new Paragraph({ text: '' }),
+                    new Paragraph({ text: '' }),
+                    new Paragraph({ text: '' }),
+                    new Paragraph({ text: '' }),
+                    new Paragraph({ text: '' }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+        }),
+      )
+    })
+
+    const doc = new Document({
+      styles: {
+        default: {
+          document: {
+            run: { font: 'Calibri' },
+          },
+        },
+      },
+      sections: [{ children }],
+    })
+
+    const blob = await Packer.toBlob(doc)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `oppfolgingsark_utvalg_${new Date().toISOString().slice(0, 10)}.docx`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const generateOppfolgingsark = (student: StudentAbsenceSummary) => {
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
     const pageW = 210
@@ -428,7 +534,8 @@ export default function StudentList({
 
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(11)
-      const teacherText = subjectEntry.teacher ? ` (Lærer: ${subjectEntry.teacher})` : ''
+      const resolvedTeacherPdf = resolveTeacher(student.className, subjectEntry.teacher)
+      const teacherText = resolvedTeacherPdf ? ` (Lærer: ${resolvedTeacherPdf})` : ''
       const headerLines = doc.splitTextToSize(`${subjectEntry.subject}${teacherText}`, usableW - 6)
       doc.text(headerLines, marginX + 3, y + 6)
 
@@ -566,7 +673,8 @@ export default function StudentList({
     ]
 
     allSubjectEntries.forEach(subjectEntry => {
-      const teacherText = subjectEntry.teacher ? ` (Lærer: ${subjectEntry.teacher})` : ''
+      const resolvedTeacherDocx = resolveTeacher(student.className, subjectEntry.teacher)
+      const teacherText = resolvedTeacherDocx ? ` (Lærer: ${resolvedTeacherDocx})` : ''
       const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}`
 
       sections.push(
@@ -597,7 +705,6 @@ export default function StudentList({
           ],
         })
       )
-      sections.push(new Paragraph({ text: '' }))
     })
 
     sections.push(
@@ -671,6 +778,13 @@ export default function StudentList({
           <span className="text-sm text-slate-600">
             Grense: {threshold.toFixed(1)}%
           </span>
+          <button
+            onClick={() => void generateOppfolgingsarkForUtvalg()}
+            className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+          >
+            <FileText className="w-4 h-4" />
+            Oppfølgingsark for utvalg
+          </button>
           <button
             onClick={generatePDF}
             className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors"
@@ -777,7 +891,7 @@ export default function StudentList({
                             </span>
                             {subjectEntry.teacher && (
                               <span className="text-xs text-slate-500 pl-2">
-                                Lærer: {subjectEntry.teacher}
+                                Lærer: {resolveTeacher(student.className, subjectEntry.teacher)}
                               </span>
                             )}
                             {subjectEntry.grade && ['1', '2', 'iv'].includes(subjectEntry.grade.toLowerCase()) && (
