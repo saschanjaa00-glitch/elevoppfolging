@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useRef } from 'react'
 import type { ReactNode } from 'react'
+import html2canvas from 'html2canvas'
 import type { DataStore } from '../types'
 import { normalizeMatch } from '../studentInfoUtils'
 
@@ -161,9 +162,55 @@ export default function StatsView({ data }: Props) {
   const [selectedMetric, setSelectedMetric] = useState<MetricKey | null>(null)
   const [tableSort, setTableSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null)
   const [vgFilter, setVgFilter] = useState<string | null>(null)
+  const summaryRef = useRef<HTMLDivElement>(null)
+  const tableRef = useRef<HTMLDivElement>(null)
 
   const toggleMetric = (metric: MetricKey) => {
     setSelectedMetric(current => (current === metric ? null : metric))
+  }
+
+  const exportStatsPNG = async () => {
+    if (!summaryRef.current || !tableRef.current) return
+
+    try {
+      // Capture summary section
+      const summaryCanvas = await html2canvas(summaryRef.current, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+      })
+
+      // Capture table section
+      const tableCanvas = await html2canvas(tableRef.current, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+      })
+
+      // Combine canvases vertically
+      const gap = 20
+      const combinedHeight = summaryCanvas.height + tableCanvas.height + gap * 2
+      const combinedCanvas = document.createElement('canvas')
+      combinedCanvas.width = summaryCanvas.width
+      combinedCanvas.height = combinedHeight
+
+      const ctx = combinedCanvas.getContext('2d')
+      if (!ctx) return
+
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, combinedCanvas.width, combinedCanvas.height)
+      ctx.drawImage(summaryCanvas, 0, gap)
+      ctx.drawImage(tableCanvas, 0, summaryCanvas.height + gap * 2)
+
+      // Download
+      const link = document.createElement('a')
+      link.href = combinedCanvas.toDataURL('image/png')
+      link.download = `statistikk-${new Date().toISOString().split('T')[0]}.png`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    } catch (error) {
+      console.error('Export failed:', error)
+      alert('Kunne ikke eksportere statistikk. Prøv på nytt.')
+    }
   }
 
   const cycleTableSort = (key: SortKey) => {
@@ -616,8 +663,17 @@ export default function StatsView({ data }: Props) {
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end mb-2">
+        <button
+          type="button"
+          onClick={exportStatsPNG}
+          className="px-3 py-2 text-sm font-medium bg-slate-600 text-white rounded hover:bg-slate-700 transition-colors"
+        >
+          📥 Eksporter som PNG
+        </button>
+      </div>
       {/* Section 1: Overall summary cards */}
-      <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6">
+      <div ref={summaryRef} className="bg-white rounded-lg shadow-sm border border-slate-100 p-6">
         <h2 className="text-base font-semibold text-slate-900 mb-4">Totaloversikt</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           <StatCard
@@ -737,7 +793,7 @@ export default function StatsView({ data }: Props) {
       </div>
 
       {/* Section 2: Per-class table */}
-      <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6">
+      <div ref={tableRef} className="bg-white rounded-lg shadow-sm border border-slate-100 p-6">
         <h2 className="text-base font-semibold text-slate-900 mb-4">Per klasse</h2>
         <div className="flex gap-2 mb-4">
           <button
