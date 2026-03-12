@@ -89,6 +89,18 @@ export default function StudentList({
     )
   }
 
+  const formatWarningSummary = (warnings: Array<{ warningType: string; sentDate: string }>) => {
+    const grouped = groupWarnings(warnings)
+    if (grouped.length === 0) return 'Ingen varsler sendt'
+
+    return grouped
+      .map(([label, dates]) => {
+        const shortLabel = label === 'Fravær' ? 'F' : label === 'Grunnlag' ? 'G' : label
+        return `${shortLabel}: ${dates.join(', ')}`
+      })
+      .join('   |   ')
+  }
+
   const studentSummaries = useMemo(() => {
     const selectedClassSet = new Set(selectedClasses)
     const classData = data.absences.filter(a => selectedClassSet.has(a.class))
@@ -460,6 +472,7 @@ export default function StudentList({
         const resolvedTeacher = resolveTeacher(subjectEntry.subject, subjectEntry.teacher)
         const teacherText = resolvedTeacher ? ` (Lærer: ${resolvedTeacher})` : ''
         const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}`
+        const warningText = `Varselbrev sendt: ${formatWarningSummary(subjectEntry.warnings)}`
 
         children.push(
           new Table({
@@ -477,6 +490,7 @@ export default function StudentList({
                     children: [
                       new Paragraph({ children: [new TextRun({ text: `${subjectEntry.subject}${teacherText}`, bold: true })] }),
                       new Paragraph({ text: infoText }),
+                      new Paragraph({ text: warningText }),
                       new Paragraph({ text: '' }),
                       new Paragraph({ text: '' }),
                       new Paragraph({ text: '' }),
@@ -609,33 +623,41 @@ export default function StudentList({
     }
 
     allSubjectEntries.forEach(subjectEntry => {
-      ensureSpace(42)
-
-      doc.setDrawColor(203, 213, 225)
-      doc.setLineWidth(0.2)
-      doc.rect(marginX, y, usableW, 36)
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(11)
       const resolvedTeacherPdf = resolveTeacher(subjectEntry.subject, subjectEntry.teacher)
       const teacherText = resolvedTeacherPdf ? ` (Lærer: ${resolvedTeacherPdf})` : ''
       const headerLines = doc.splitTextToSize(`${subjectEntry.subject}${teacherText}`, usableW - 6)
+      const headerLineCount = Array.isArray(headerLines) ? headerLines.length : 1
+      const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}`
+      const warningLines = doc.splitTextToSize(
+        `Varselbrev sendt: ${formatWarningSummary(subjectEntry.warnings)}`,
+        usableW - 6
+      )
+      const warningLineCount = Array.isArray(warningLines) ? warningLines.length : 1
+      const sectionHeight = Math.max(36, 6 + headerLineCount * 4 + 5 + warningLineCount * 4 + 3 + 18 + 3)
+
+      ensureSpace(sectionHeight + 6)
+
+      doc.setDrawColor(203, 213, 225)
+      doc.setLineWidth(0.2)
+      doc.rect(marginX, y, usableW, sectionHeight)
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(11)
       doc.text(headerLines, marginX + 3, y + 6)
 
-      const headerLineCount = Array.isArray(headerLines) ? headerLines.length : 1
       const infoY = y + 6 + headerLineCount * 4
 
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(9)
-      doc.text(
-        `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}`,
-        marginX + 3,
-        infoY
-      )
+      doc.text(infoText, marginX + 3, infoY)
+
+      const warningY = infoY + 5
+      doc.setFontSize(8.5)
+      doc.text(warningLines, marginX + 3, warningY)
 
       // Stor skriveboks under hvert fag.
-      const boxY = infoY + 3
-      const boxH = y + 36 - boxY - 3
+      const boxY = warningY + warningLineCount * 4 + 2
+      const boxH = y + sectionHeight - boxY - 3
       doc.rect(marginX + 3, boxY, usableW - 6, boxH)
       addMultilineField(
         `oppfolging_${student.className}_${student.navn.replace(/\s+/g, '_')}_${normalizeMatch(subjectEntry.subjectGroup)}`,
@@ -645,7 +667,7 @@ export default function StudentList({
         boxH
       )
 
-      y += 42
+      y += sectionHeight + 6
     })
 
     ensureSpace(54)
@@ -693,12 +715,13 @@ export default function StudentList({
         }
       })
 
-    const studentWarningMap = new Map<string, number>()
+    const studentWarningMap = new Map<string, Array<{ warningType: string; sentDate: string }>>()
     data.warnings
       .filter(w => normalizeMatch(w.navn) === normalizeMatch(student.navn))
       .forEach(w => {
         const key = normalizeMatch(w.subjectGroup)
-        studentWarningMap.set(key, (studentWarningMap.get(key) ?? 0) + 1)
+        if (!studentWarningMap.has(key)) studentWarningMap.set(key, [])
+        studentWarningMap.get(key)!.push({ warningType: w.warningType, sentDate: w.sentDate })
       })
 
     const studentGradeMap = new Map<string, string>()
@@ -712,11 +735,20 @@ export default function StudentList({
         }
       })
 
-    const allSubjectsMap = new Map<string, { subject: string; subjectGroup: string; teacher: string; percentageAbsence: number; grade?: string; warningCount: number }>()
+    const allSubjectsMap = new Map<string, {
+      subject: string
+      subjectGroup: string
+      teacher: string
+      percentageAbsence: number
+      grade?: string
+      warningCount: number
+      warnings: Array<{ warningType: string; sentDate: string }>
+    }>()
     studentRecords.forEach(r => {
       const key = `${normalizeMatch(r.subject)}::${normalizeMatch(r.subjectGroup)}`
       const existing = allSubjectsMap.get(key)
-      const warningCount = studentWarningMap.get(normalizeMatch(r.subjectGroup)) ?? 0
+      const warnings = studentWarningMap.get(normalizeMatch(r.subjectGroup)) ?? []
+      const warningCount = warnings.length
       const grade = studentGradeMap.get(normalizeMatch(r.subjectGroup))
 
       const sgKey = normalizeMatch(r.subjectGroup)
@@ -730,6 +762,7 @@ export default function StudentList({
           percentageAbsence: r.percentageAbsence,
           grade,
           warningCount,
+          warnings,
         })
       }
     })
@@ -759,6 +792,7 @@ export default function StudentList({
       const resolvedTeacherDocx = resolveTeacher(subjectEntry.subject, subjectEntry.teacher)
       const teacherText = resolvedTeacherDocx ? ` (Lærer: ${resolvedTeacherDocx})` : ''
       const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}`
+      const warningText = `Varselbrev sendt: ${formatWarningSummary(subjectEntry.warnings)}`
 
       sections.push(
         new Table({
@@ -778,6 +812,7 @@ export default function StudentList({
                       children: [new TextRun({ text: `${subjectEntry.subject}${teacherText}`, bold: true })],
                     }),
                     new Paragraph({ text: infoText }),
+                    new Paragraph({ text: warningText }),
                     new Paragraph({ text: '' }),
                     new Paragraph({ text: '' }),
                     new Paragraph({ text: '' }),
