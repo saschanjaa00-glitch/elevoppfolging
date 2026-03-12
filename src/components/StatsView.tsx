@@ -24,6 +24,7 @@ interface ClassStats {
   fWarnings: number
   gWarnings: number
   missingWarnings: number
+  missingWarningStudentCount: number
   avgGrunnskolepoeng: number | null
   avgGrade: number | null
 }
@@ -34,6 +35,7 @@ type MetricKey =
   | 'iv'
   | 'grade1'
   | 'grade2'
+  | 'avgDelta'
   | 'warningsTotal'
   | 'warningsF'
   | 'warningsG'
@@ -57,6 +59,7 @@ interface LevelStats {
   fWarnings: number
   gWarnings: number
   missingWarnings: number
+  missingWarningStudentCount: number
   avgGrunnskolepoeng: number | null
   avgGrade: number | null
 }
@@ -129,10 +132,10 @@ function Th({
         <button
           type="button"
           onClick={onClick}
-          className={`inline-flex w-full items-center gap-1 ${justify} hover:text-slate-700`}
+          className={`inline-flex w-full items-center gap-1 bg-transparent p-0 text-xs font-semibold uppercase tracking-wide text-slate-500 ${justify} hover:text-slate-600 focus:outline-none`}
         >
           <span>{children}</span>
-          <span className="text-[10px] leading-none min-w-2">{indicator}</span>
+          <span className="min-w-2 text-[10px] leading-none text-slate-400">{indicator}</span>
         </button>
       ) : (
         children
@@ -157,6 +160,7 @@ function gradeDelta(avgGrade: number | null, avgGrunnskolepoeng: number | null):
 export default function StatsView({ data }: Props) {
   const [selectedMetric, setSelectedMetric] = useState<MetricKey | null>(null)
   const [tableSort, setTableSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null)
+  const [vgFilter, setVgFilter] = useState<string | null>(null)
 
   const toggleMetric = (metric: MetricKey) => {
     setSelectedMetric(current => (current === metric ? null : metric))
@@ -276,12 +280,16 @@ export default function StatsView({ data }: Props) {
       // Missing warnings: absence > 8%, no warnings for that subject (unique student+subject combos)
       let missingWarnings = 0
       const checkedCombos = new Set<string>()
+      const missingWarningStudents = new Set<string>()
       absences.forEach(r => {
         const comboKey = `${normalizeMatch(r.navn)}::${normalizeMatch(r.subjectGroup)}`
         if (checkedCombos.has(comboKey)) return
         checkedCombos.add(comboKey)
         const warnings = warningMap.get(comboKey) ?? []
-        if (r.percentageAbsence > 8 && warnings.length === 0) missingWarnings++
+        if (r.percentageAbsence > 8 && warnings.length === 0) {
+          missingWarnings++
+          missingWarningStudents.add(normalizeMatch(r.navn))
+        }
       })
 
       // Grunnskolepoeng
@@ -312,6 +320,7 @@ export default function StatsView({ data }: Props) {
         fWarnings,
         gWarnings,
         missingWarnings,
+        missingWarningStudentCount: missingWarningStudents.size,
         avgGrunnskolepoeng,
         avgGrade,
       }
@@ -374,6 +383,7 @@ export default function StatsView({ data }: Props) {
       fWarnings: perClass.reduce((s, c) => s + c.fWarnings, 0),
       gWarnings: perClass.reduce((s, c) => s + c.gWarnings, 0),
       missingWarnings: perClass.reduce((s, c) => s + c.missingWarnings, 0),
+      missingWarningStudentCount: perClass.reduce((s, c) => s + c.missingWarningStudentCount, 0),
       avgGrunnskolepoeng:
         allGpValues.length > 0 ? allGpValues.reduce((a, b) => a + b, 0) / allGpValues.length : null,
       avgGrade:
@@ -429,6 +439,7 @@ export default function StatsView({ data }: Props) {
           fWarnings: classRows.reduce((sum, c) => sum + c.fWarnings, 0),
           gWarnings: classRows.reduce((sum, c) => sum + c.gWarnings, 0),
           missingWarnings: classRows.reduce((sum, c) => sum + c.missingWarnings, 0),
+          missingWarningStudentCount: classRows.reduce((sum, c) => sum + c.missingWarningStudentCount, 0),
           avgGrunnskolepoeng:
             gskValues.length > 0
               ? gskValues.reduce((sum, v) => sum + v, 0) / gskValues.length
@@ -448,6 +459,7 @@ export default function StatsView({ data }: Props) {
     iv: 'IV',
     grade1: 'Karakter 1',
     grade2: 'Karakter 2',
+    avgDelta: 'Delta',
     warningsTotal: 'Varsler totalt',
     warningsF: 'Fraværsvarsler (F)',
     warningsG: 'Karaktervarsler (G)',
@@ -468,10 +480,11 @@ export default function StatsView({ data }: Props) {
       return `${row.grade1Count} | 1: ${oneOnly} elever | 1+IV: ${row.bothIvAnd1StudentCount} elever`
     }
     if (metric === 'grade2') return `${row.grade2Count} (${row.grade2StudentCount} elever)`
+    if (metric === 'avgDelta') return fmt(gradeDelta(row.avgGrade, row.avgGrunnskolepoeng), 2)
     if (metric === 'warningsTotal') return String(row.totalWarnings)
     if (metric === 'warningsF') return String(row.fWarnings)
     if (metric === 'warningsG') return String(row.gWarnings)
-    return String(row.missingWarnings)
+    return `${row.missingWarnings} (${row.missingWarningStudentCount} elever)`
   }
 
   const sortedPerClass = useMemo(() => {
@@ -509,6 +522,98 @@ export default function StatsView({ data }: Props) {
     return tableSort?.key === key ? tableSort.direction : null
   }
 
+  const filteredPerClass = useMemo(() => {
+    if (!vgFilter) return sortedPerClass
+    return sortedPerClass.filter(c => c.className.startsWith(vgFilter))
+  }, [sortedPerClass, vgFilter])
+
+  const filteredStats = useMemo(() => {
+    if (filteredPerClass.length === 0) {
+      return {
+        className: 'Totalt',
+        studentCount: 0,
+        avgAbsence: 0,
+        ivCount: 0,
+        ivStudentCount: 0,
+        grade1Count: 0,
+        grade1StudentCount: 0,
+        grade2Count: 0,
+        grade2StudentCount: 0,
+        bothIvAnd1StudentCount: 0,
+        negativeStudentsCount: 0,
+        negativeStudentsPct: 0,
+        totalWarnings: 0,
+        fWarnings: 0,
+        gWarnings: 0,
+        missingWarnings: 0,
+        missingWarningStudentCount: 0,
+        avgGrunnskolepoeng: null,
+        avgGrade: null,
+      }
+    }
+
+    // Get all student names from filtered classes
+    const studentNames = new Set<string>()
+    filteredPerClass.forEach(c => {
+      const classAbsences = data.absences.filter(a => a.class === c.className)
+      classAbsences.forEach(r => studentNames.add(normalizeMatch(r.navn)))
+    })
+
+    // Calculate totals from filtered per-class data
+    const totalStudents = studentNames.size
+    const totalIvCount = filteredPerClass.reduce((sum, c) => sum + c.ivCount, 0)
+    const totalIvStudents = filteredPerClass.reduce((sum, c) => sum + c.ivStudentCount, 0)
+    const totalGrade1Count = filteredPerClass.reduce((sum, c) => sum + c.grade1Count, 0)
+    const totalGrade1Students = filteredPerClass.reduce((sum, c) => sum + c.grade1StudentCount, 0)
+    const totalGrade2Count = filteredPerClass.reduce((sum, c) => sum + c.grade2Count, 0)
+    const totalGrade2Students = filteredPerClass.reduce((sum, c) => sum + c.grade2StudentCount, 0)
+    const totalBothIvAnd1 = filteredPerClass.reduce((sum, c) => sum + c.bothIvAnd1StudentCount, 0)
+    const totalNegativeStudents = totalIvStudents + totalGrade1Students - totalBothIvAnd1
+    
+    // Calculate average absence from filtered absences
+    const classNames = new Set(filteredPerClass.map(c => c.className))
+    const filteredAbsences = data.absences.filter(a => classNames.has(a.class))
+    const avgAbsence = filteredAbsences.length > 0
+      ? filteredAbsences.reduce((sum, r) => sum + r.percentageAbsence, 0) / filteredAbsences.length
+      : 0
+
+    // Calculate average grades from filtered per-class data
+    const gskValues = filteredPerClass
+      .map(c => c.avgGrunnskolepoeng)
+      .filter((v): v is number => v !== null)
+    const gradeValues = filteredPerClass
+      .map(c => c.avgGrade)
+      .filter((v): v is number => v !== null)
+    const avgGrunnskolepoeng = gskValues.length > 0
+      ? gskValues.reduce((sum, v) => sum + v, 0) / gskValues.length
+      : null
+    const avgGrade = gradeValues.length > 0
+      ? gradeValues.reduce((sum, v) => sum + v, 0) / gradeValues.length
+      : null
+
+    return {
+      className: 'Totalt',
+      studentCount: totalStudents,
+      avgAbsence,
+      ivCount: totalIvCount,
+      ivStudentCount: totalIvStudents,
+      grade1Count: totalGrade1Count,
+      grade1StudentCount: totalGrade1Students,
+      grade2Count: totalGrade2Count,
+      grade2StudentCount: totalGrade2Students,
+      bothIvAnd1StudentCount: totalBothIvAnd1,
+      negativeStudentsCount: totalNegativeStudents,
+      negativeStudentsPct: totalStudents > 0 ? (totalNegativeStudents / totalStudents) * 100 : 0,
+      totalWarnings: filteredPerClass.reduce((sum, c) => sum + c.totalWarnings, 0),
+      fWarnings: filteredPerClass.reduce((sum, c) => sum + c.fWarnings, 0),
+      gWarnings: filteredPerClass.reduce((sum, c) => sum + c.gWarnings, 0),
+      missingWarnings: filteredPerClass.reduce((sum, c) => sum + c.missingWarnings, 0),
+      missingWarningStudentCount: filteredPerClass.reduce((sum, c) => sum + c.missingWarningStudentCount, 0),
+      avgGrunnskolepoeng,
+      avgGrade,
+    }
+  }, [filteredPerClass, data.absences])
+
   return (
     <div className="space-y-6">
       {/* Section 1: Overall summary cards */}
@@ -521,10 +626,10 @@ export default function StatsView({ data }: Props) {
             onClick={() => toggleMetric('students')}
             value={
               <div className="flex items-start justify-between gap-3">
-                <span>{stats.overall.studentCount}</span>
+                <span>{filteredStats.studentCount}</span>
                 <span className="w-28 text-xs font-medium text-slate-500 leading-tight text-left">
                   <span className="block">
-                    Negative karakterer: {stats.overall.negativeStudentsCount} elever ({fmt(stats.overall.negativeStudentsPct, 1)}%)
+                    Negative karakterer: {filteredStats.negativeStudentsCount} elever ({fmt(filteredStats.negativeStudentsPct, 1)}%)
                   </span>
                 </span>
               </div>
@@ -532,7 +637,7 @@ export default function StatsView({ data }: Props) {
           />
           <StatCard
             label="Gj.snitt fravær"
-            value={`${fmt(stats.overall.avgAbsence, 1)}%`}
+            value={`${fmt(filteredStats.avgAbsence, 1)}%`}
             active={selectedMetric === 'avgAbsence'}
             onClick={() => toggleMetric('avgAbsence')}
           />
@@ -542,10 +647,10 @@ export default function StatsView({ data }: Props) {
             onClick={() => toggleMetric('iv')}
             value={
               <div className="flex items-start justify-between gap-3">
-                <span>{stats.overall.ivCount}</span>
+                <span>{filteredStats.ivCount}</span>
                 <span className="w-28 text-xs font-medium text-slate-500 leading-tight text-left">
-                  <span className="block">IV: {Math.max(stats.overall.ivStudentCount - stats.overall.bothIvAnd1StudentCount, 0)} elever</span>
-                  <span className="block">1+IV: {stats.overall.bothIvAnd1StudentCount} elever</span>
+                  <span className="block">IV: {Math.max(filteredStats.ivStudentCount - filteredStats.bothIvAnd1StudentCount, 0)} elever</span>
+                  <span className="block">1+IV: {filteredStats.bothIvAnd1StudentCount} elever</span>
                 </span>
               </div>
             }
@@ -556,41 +661,47 @@ export default function StatsView({ data }: Props) {
             onClick={() => toggleMetric('grade1')}
             value={
               <div className="flex items-start justify-between gap-3">
-                <span>{stats.overall.grade1Count}</span>
+                <span>{filteredStats.grade1Count}</span>
                 <span className="w-28 text-xs font-medium text-slate-500 leading-tight text-left">
-                  <span className="block">1: {Math.max(stats.overall.grade1StudentCount - stats.overall.bothIvAnd1StudentCount, 0)} elever</span>
-                  <span className="block">1+IV: {stats.overall.bothIvAnd1StudentCount} elever</span>
+                  <span className="block">1: {Math.max(filteredStats.grade1StudentCount - filteredStats.bothIvAnd1StudentCount, 0)} elever</span>
+                  <span className="block">1+IV: {filteredStats.bothIvAnd1StudentCount} elever</span>
                 </span>
               </div>
             }
           />
           <StatCard
             label="Karakter 2"
-            value={`${stats.overall.grade2Count} (${stats.overall.grade2StudentCount})`}
+            value={`${filteredStats.grade2Count} (${filteredStats.grade2StudentCount})`}
             active={selectedMetric === 'grade2'}
             onClick={() => toggleMetric('grade2')}
           />
           <StatCard
+            label="Delta"
+            value={fmt(gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng), 2)}
+            active={selectedMetric === 'avgDelta'}
+            onClick={() => toggleMetric('avgDelta')}
+          />
+          <StatCard
             label="Varsler totalt"
-            value={String(stats.overall.totalWarnings)}
+            value={String(filteredStats.totalWarnings)}
             active={selectedMetric === 'warningsTotal'}
             onClick={() => toggleMetric('warningsTotal')}
           />
           <StatCard
             label="Fraværsvarsler (F)"
-            value={String(stats.overall.fWarnings)}
+            value={String(filteredStats.fWarnings)}
             active={selectedMetric === 'warningsF'}
             onClick={() => toggleMetric('warningsF')}
           />
           <StatCard
             label="Karaktervarsler (G)"
-            value={String(stats.overall.gWarnings)}
+            value={String(filteredStats.gWarnings)}
             active={selectedMetric === 'warningsG'}
             onClick={() => toggleMetric('warningsG')}
           />
           <StatCard
             label="Manglende varsler (>8%)"
-            value={String(stats.overall.missingWarnings)}
+            value={String(filteredStats.missingWarnings)}
             highlight
             active={selectedMetric === 'missingWarnings'}
             onClick={() => toggleMetric('missingWarnings')}
@@ -628,6 +739,52 @@ export default function StatsView({ data }: Props) {
       {/* Section 2: Per-class table */}
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6">
         <h2 className="text-base font-semibold text-slate-900 mb-4">Per klasse</h2>
+        <div className="flex gap-2 mb-4">
+          <button
+            type="button"
+            onClick={() => setVgFilter(null)}
+            className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+              vgFilter === null
+                ? 'bg-sky-600 text-white hover:bg-sky-700'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            Alle
+          </button>
+          <button
+            type="button"
+            onClick={() => setVgFilter('1')}
+            className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+              vgFilter === '1'
+                ? 'bg-sky-600 text-white hover:bg-sky-700'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            VG1
+          </button>
+          <button
+            type="button"
+            onClick={() => setVgFilter('2')}
+            className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+              vgFilter === '2'
+                ? 'bg-sky-600 text-white hover:bg-sky-700'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            VG2
+          </button>
+          <button
+            type="button"
+            onClick={() => setVgFilter('3')}
+            className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+              vgFilter === '3'
+                ? 'bg-sky-600 text-white hover:bg-sky-700'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            VG3
+          </button>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-separate border-spacing-0">
             <thead>
@@ -686,18 +843,23 @@ export default function StatsView({ data }: Props) {
               </tr>
             </thead>
             <tbody>
-              {sortedPerClass.map(c => (
+              {filteredPerClass.map(c => (
                 <tr key={c.className} className="border-b border-slate-100 hover:bg-sky-50/40">
                   <td className="py-2 px-3 font-medium text-slate-900">{c.className}</td>
-                  <Td className="bg-slate-50 border-l border-slate-200">{fmt(c.avgAbsence, 1)}%</Td>
-                  <Td center className="border-l border-slate-200">{c.ivCount || '—'}</Td>
-                  <Td center>{c.grade1Count || '—'}</Td>
-                  <Td center>{c.grade2Count || '—'}</Td>
+                  <Td center className="bg-slate-50 border-l border-slate-200">{fmt(c.avgAbsence, 1)}%</Td>
+                  <Td center className="border-l border-slate-200">
+                    {c.ivCount ? `${c.ivCount} (${c.ivStudentCount})` : '—'}
+                  </Td>
+                  <Td center>{c.grade1Count ? `${c.grade1Count} (${c.grade1StudentCount})` : '—'}</Td>
+                  <Td center>{c.grade2Count ? `${c.grade2Count} (${c.grade2StudentCount})` : '—'}</Td>
                   <Td center className="bg-slate-50 border-l border-slate-200">{c.totalWarnings || '—'} ({c.fWarnings || 0}+{c.gWarnings || 0})</Td>
-                  <Td center warn={c.missingWarnings > 0} className="bg-amber-50 border-l border-slate-200">{c.missingWarnings || '—'}</Td>
-                  <Td className="border-l border-slate-200">{fmt(c.avgGrunnskolepoeng)}</Td>
-                  <Td>{fmt(c.avgGrade)}</Td>
+                  <Td center warn={c.missingWarnings > 0} className="bg-amber-50 border-l border-slate-200">
+                    {c.missingWarnings ? `${c.missingWarnings} (${c.missingWarningStudentCount})` : '—'}
+                  </Td>
+                  <Td center className="border-l border-slate-200">{fmt(c.avgGrunnskolepoeng)}</Td>
+                  <Td center>{fmt(c.avgGrade)}</Td>
                   <Td
+                    center
                     className={
                       gradeDelta(c.avgGrade, c.avgGrunnskolepoeng) === null
                         ? ''
@@ -718,28 +880,39 @@ export default function StatsView({ data }: Props) {
             <tfoot>
               <tr className="border-t-2 border-slate-300 font-semibold">
                 <td className="py-2 px-3 text-slate-900 bg-slate-100">Totalt</td>
-                <Td className="bg-slate-100 border-l border-slate-200">{fmt(stats.overall.avgAbsence, 1)}%</Td>
-                <Td center className="bg-slate-50 border-l border-slate-200">{stats.overall.ivCount || '—'}</Td>
-                <Td center className="bg-slate-50">{stats.overall.grade1Count || '—'}</Td>
-                <Td center className="bg-slate-50">{stats.overall.grade2Count || '—'}</Td>
-                <Td center className="bg-slate-100 border-l border-slate-200">{stats.overall.totalWarnings || '—'} ({stats.overall.fWarnings || 0}+{stats.overall.gWarnings || 0})</Td>
-                <Td center warn={stats.overall.missingWarnings > 0} className="bg-amber-100 border-l border-slate-200">{stats.overall.missingWarnings || '—'}</Td>
-                <Td className="bg-slate-50 border-l border-slate-200">{fmt(stats.overall.avgGrunnskolepoeng)}</Td>
-                <Td className="bg-slate-50">{fmt(stats.overall.avgGrade)}</Td>
+                <Td center className="bg-slate-100 border-l border-slate-200">{fmt(filteredStats.avgAbsence, 1)}%</Td>
+                <Td center className="bg-slate-50 border-l border-slate-200">
+                  {filteredStats.ivCount ? `${filteredStats.ivCount} (${filteredStats.ivStudentCount})` : '—'}
+                </Td>
+                <Td center className="bg-slate-50">
+                  {filteredStats.grade1Count ? `${filteredStats.grade1Count} (${filteredStats.grade1StudentCount})` : '—'}
+                </Td>
+                <Td center className="bg-slate-50">
+                  {filteredStats.grade2Count ? `${filteredStats.grade2Count} (${filteredStats.grade2StudentCount})` : '—'}
+                </Td>
+                <Td center className="bg-slate-100 border-l border-slate-200">{filteredStats.totalWarnings || '—'} ({filteredStats.fWarnings || 0}+{filteredStats.gWarnings || 0})</Td>
+                <Td center warn={filteredStats.missingWarnings > 0} className="bg-amber-100 border-l border-slate-200">
+                  {filteredStats.missingWarnings
+                    ? `${filteredStats.missingWarnings} (${filteredStats.missingWarningStudentCount})`
+                    : '—'}
+                </Td>
+                <Td center className="bg-slate-50 border-l border-slate-200">{fmt(filteredStats.avgGrunnskolepoeng)}</Td>
+                <Td center className="bg-slate-50">{fmt(filteredStats.avgGrade)}</Td>
                 <Td
+                  center
                   className={
-                    gradeDelta(stats.overall.avgGrade, stats.overall.avgGrunnskolepoeng) === null
+                    gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng) === null
                       ? 'bg-slate-50'
-                      : gradeDelta(stats.overall.avgGrade, stats.overall.avgGrunnskolepoeng)! < 0
+                      : gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng)! < 0
                         ? 'bg-red-50 text-slate-800'
-                        : gradeDelta(stats.overall.avgGrade, stats.overall.avgGrunnskolepoeng)! > 0
+                        : gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng)! > 0
                           ? 'bg-emerald-50 text-slate-800'
                           : 'bg-slate-50'
                   }
                 >
-                  {gradeDelta(stats.overall.avgGrade, stats.overall.avgGrunnskolepoeng) === null
+                  {gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng) === null
                     ? '—'
-                    : fmt(gradeDelta(stats.overall.avgGrade, stats.overall.avgGrunnskolepoeng), 2)}
+                    : fmt(gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng), 2)}
                 </Td>
               </tr>
             </tfoot>
