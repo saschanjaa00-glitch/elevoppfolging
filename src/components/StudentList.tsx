@@ -238,14 +238,33 @@ export default function StudentList({
     const usableW = pageW - marginX * 2
     let y = 14
 
-    const checkPageBreak = (needed: number) => {
-      if (y + needed > pageH - 14) {
-        doc.addPage()
-        y = 14
-      }
+    // helpers
+    const chip = (
+      text: string,
+      x: number,
+      baseY: number,
+      bg: [number, number, number],
+      fg: [number, number, number],
+      bold = false,
+      fs = 7.5
+    ): number => {
+      doc.setFontSize(fs)
+      doc.setFont('helvetica', bold ? 'bold' : 'normal')
+      const tw = doc.getTextWidth(text)
+      const w = tw + 4
+      const h = 4.5
+      doc.setFillColor(...bg)
+      doc.roundedRect(x, baseY - 3.2, w, h, 0.8, 0.8, 'F')
+      doc.setTextColor(...fg)
+      doc.text(text, x + 2, baseY)
+      return w + 2 // step
     }
 
-    // Header
+    const checkPageBreak = (needed: number) => {
+      if (y + needed > pageH - 14) { doc.addPage(); y = 14 }
+    }
+
+    // Page header
     doc.setFillColor(2, 132, 199)
     doc.rect(0, 0, pageW, 18, 'F')
     doc.setFont('helvetica', 'bold')
@@ -262,10 +281,15 @@ export default function StudentList({
     doc.setTextColor(0, 0, 0)
 
     atRiskStudents.forEach(student => {
-      const subjectLines = student.subjects.reduce((acc, s) => {
-        return acc + 1 + groupWarnings(s.warnings).length
-      }, 0)
-      const cardHeight = 10 + subjectLines * 5 + 4
+      // Calculate card height: name row + per-subject rows
+      const rowsPerSubject = student.subjects.map(s => {
+        const teacher = resolveTeacher(s.subject, s.teacher ?? '').trim()
+        const warningRows = groupWarnings(s.warnings).length
+        const noWarningRow = s.warnings.length === 0 && s.percentageAbsence >= 5 ? 1 : 0
+        return 1 + (teacher ? 1 : 0) + warningRows + noWarningRow
+      })
+      const totalSubjectRows = rowsPerSubject.reduce((a, b) => a + b, 0)
+      const cardHeight = 11 + totalSubjectRows * 5 + 2
 
       checkPageBreak(cardHeight + 3)
 
@@ -273,85 +297,135 @@ export default function StudentList({
       const isAvbrudd = student.avbrudd
 
       // Card background + left stripe
-      doc.setFillColor(isAvbrudd ? 255 : 255, isAvbrudd ? 251 : 255, isAvbrudd ? 235 : 255)
+      if (isAvbrudd) {
+        doc.setFillColor(255, 251, 235)
+      } else {
+        doc.setFillColor(255, 255, 255)
+      }
       doc.rect(marginX, cardY, usableW, cardHeight, 'F')
-      doc.setFillColor(isAvbrudd ? 245 : 239, isAvbrudd ? 158 : 68, isAvbrudd ? 11 : 68)
+      if (isAvbrudd) {
+        doc.setFillColor(245, 158, 11)
+      } else {
+        doc.setFillColor(239, 68, 68)
+      }
       doc.rect(marginX, cardY, 2.5, cardHeight, 'F')
-      doc.setDrawColor(203, 213, 225)
+      doc.setDrawColor(226, 232, 240)
       doc.setLineWidth(0.2)
       doc.rect(marginX, cardY, usableW, cardHeight)
 
-      // Student name
+      // --- Name row ---
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(10)
-      doc.setTextColor(15, 23, 42)
-      doc.text(student.navn, marginX + 5, cardY + 6)
+      doc.setTextColor(isAvbrudd ? 71 : 15, isAvbrudd ? 85 : 23, isAvbrudd ? 105 : 42)
+      doc.text(student.navn, marginX + 5, cardY + 6.5)
 
-      // Class badge
-      let badgeX = marginX + 5 + doc.getTextWidth(student.navn) + 3
-      doc.setFillColor(241, 245, 249)
-      doc.roundedRect(badgeX, cardY + 2, doc.getTextWidth(student.className) + 4, 5, 1, 1, 'F')
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(7.5)
-      doc.setTextColor(71, 85, 105)
-      doc.text(student.className, badgeX + 2, cardY + 5.8)
-      badgeX += doc.getTextWidth(student.className) + 8
+      let bx = marginX + 5 + doc.getTextWidth(student.navn) + 3
+      const bY = cardY + 6.5
 
-      // Warning count badge
-      const warningCount = student.subjects.reduce((c, s) => c + s.warnings.length, 0)
-      if (warningCount > 0) {
-        const wLabel = `Varsler: ${warningCount}`
-        doc.setFillColor(254, 226, 226)
-        doc.roundedRect(badgeX, cardY + 2, doc.getTextWidth(wLabel) + 4, 5, 1, 1, 'F')
-        doc.setTextColor(185, 28, 28)
-        doc.text(wLabel, badgeX + 2, cardY + 5.8)
-        badgeX += doc.getTextWidth(wLabel) + 8
+      // Class chip (slate)
+      bx += chip(student.className, bx, bY, [241, 245, 249], [71, 85, 105])
+
+      // Warnings chip
+      const warningBreakdown = student.subjects.reduce(
+        (acc, s) => {
+          s.warnings.forEach(w => {
+            const t = w.warningType.toLowerCase()
+            if (t.includes('frav')) acc.f++
+            else if (t.includes('vurdering') || t.includes('grunnlag')) acc.g++
+            else acc.o++
+          })
+          return acc
+        },
+        { f: 0, g: 0, o: 0 }
+      )
+      const wTotal = warningBreakdown.f + warningBreakdown.g + warningBreakdown.o
+      const wLabel = wTotal > 0
+        ? `Varsler: ${wTotal} (${warningBreakdown.f}+${warningBreakdown.g}${warningBreakdown.o > 0 ? '+' + warningBreakdown.o : ''})`
+        : 'Varsler funnet: 0'
+      bx += chip(wLabel, bx, bY,
+        wTotal > 0 ? [254, 226, 226] : [241, 245, 249],
+        wTotal > 0 ? [185, 28, 28] : [100, 116, 139]
+      )
+
+      // 18+ chip
+      if (student.isAdult && wTotal > 0) {
+        bx += chip('18+', bx, bY, [237, 233, 254], [109, 40, 217], true)
       }
 
-      // 18+ badge
-      if (student.isAdult && warningCount > 0) {
-        doc.setFillColor(237, 233, 254)
-        doc.roundedRect(badgeX, cardY + 2, 12, 5, 1, 1, 'F')
-        doc.setFont('helvetica', 'bold')
-        doc.setTextColor(109, 40, 217)
-        doc.text('18+', badgeX + 2, cardY + 5.8)
-        badgeX += 15
-      }
-
-      // Avbrudd badge
+      // Avbrudd chip
       if (isAvbrudd) {
-        const abLabel = 'Avbrudd'
-        doc.setFillColor(254, 215, 170)
-        doc.roundedRect(badgeX, cardY + 2, doc.getTextWidth(abLabel) + 4, 5, 1, 1, 'F')
-        doc.setFont('helvetica', 'normal')
-        doc.setTextColor(120, 53, 15)
-        doc.text(abLabel, badgeX + 2, cardY + 5.8)
+        chip('Avbrudd', bx, bY, [254, 215, 170], [120, 53, 15])
       }
 
-      // Subjects
-      let subY = cardY + 11
+      // --- Subject rows ---
+      let subY = cardY + 12
       student.subjects.forEach(subjectEntry => {
-        const isHighRisk = subjectEntry.percentageAbsence > 10
-        const subjectLabel = `${subjectEntry.subject} — ${subjectEntry.percentageAbsence.toFixed(1)}%`
-        const maxLabelW = usableW - 14
-        const truncated = doc.splitTextToSize(subjectLabel, maxLabelW)[0]
-        const labelW = Math.min(doc.getTextWidth(subjectLabel) + 4, maxLabelW + 4)
+        const pct = subjectEntry.percentageAbsence
+        const isHighRisk = pct > 10
+        const isMedRisk = pct >= 5
 
-        doc.setFontSize(8)
-        doc.setFillColor(isHighRisk ? 254 : 255, isHighRisk ? 226 : 251, isHighRisk ? 226 : 235)
-        doc.roundedRect(marginX + 5, subY - 3.5, labelW, 5, 1, 1, 'F')
+        // Subject name — grey chip (matches app)
+        doc.setFontSize(8.5)
         doc.setFont('helvetica', 'normal')
-        doc.setTextColor(isHighRisk ? 185 : 146, isHighRisk ? 28 : 64, isHighRisk ? 28 : 14)
-        doc.text(truncated, marginX + 7, subY)
+        const subjectTw = doc.getTextWidth(subjectEntry.subject)
+        const subjectChipW = subjectTw + 4
+        doc.setFillColor(241, 245, 249)   // slate-100
+        doc.roundedRect(marginX + 5, subY - 3.5, subjectChipW, 5, 0.8, 0.8, 'F')
+        doc.setTextColor(55, 65, 81)       // slate-700
+        doc.text(subjectEntry.subject, marginX + 7, subY)
+
+        // Percentage chip — red >10%, amber ≥5%, slate otherwise
+        const pctLabel = `${pct.toFixed(1)}%`
+        doc.setFontSize(7.5)
+        const pctX = marginX + 5 + subjectChipW + 2
+        if (isHighRisk) {
+          chip(pctLabel, pctX, subY, [254, 226, 226], [185, 28, 28])
+        } else if (isMedRisk) {
+          chip(pctLabel, pctX, subY, [254, 243, 199], [180, 83, 9])
+        } else {
+          chip(pctLabel, pctX, subY, [241, 245, 249], [100, 116, 139])
+        }
+
+        // Grade chip — orange, only for IV/1/2
+        if (subjectEntry.grade && ['iv', '1', '2'].includes(subjectEntry.grade.toLowerCase())) {
+          const gradeLabel = `Karakter T1: ${subjectEntry.grade}`
+          const gradeX = pctX + doc.getTextWidth(pctLabel) + 6
+          chip(gradeLabel, gradeX, subY, [253, 186, 116], [154, 52, 18], true, 7.5)
+        }
+
         subY += 5
 
-        groupWarnings(subjectEntry.warnings).forEach(([label, dates]) => {
+        // Teacher line
+        const resolvedTeacher = resolveTeacher(subjectEntry.subject, subjectEntry.teacher ?? '').trim()
+        if (resolvedTeacher) {
+          doc.setFontSize(7)
+          doc.setFont('helvetica', 'italic')
+          doc.setTextColor(148, 163, 184)  // slate-400
+          doc.text(`Lærer: ${resolvedTeacher}`, marginX + 10, subY)
+          subY += 4.5
+        }
+
+        // Warning lines
+        const grouped = groupWarnings(subjectEntry.warnings)
+        grouped.forEach(([label, dates]) => {
           doc.setFontSize(7.5)
+          doc.setFont('helvetica', 'bold')
+          doc.setTextColor(71, 85, 105)
+          doc.text(`${label}:`, marginX + 10, subY)
           doc.setFont('helvetica', 'normal')
           doc.setTextColor(100, 116, 139)
-          doc.text(`${label}: ${dates.join(', ')}`, marginX + 10, subY)
+          doc.text(` ${dates.join(', ')}`, marginX + 10 + doc.getTextWidth(`${label}:`), subY)
           subY += 4.5
         })
+
+        // "No warning" line
+        if (subjectEntry.warnings.length === 0 && pct >= 5) {
+          doc.setFontSize(7)
+          doc.setFont('helvetica', 'italic')
+          doc.setTextColor(148, 163, 184)
+          doc.text('Ingen varsel funnet for dette faget', marginX + 10, subY)
+          subY += 4.5
+        }
       })
 
       y = cardY + cardHeight + 3
