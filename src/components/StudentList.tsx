@@ -374,7 +374,7 @@ export default function StudentList({
       )
 
       allSubjectEntries.forEach(subjectEntry => {
-        const resolvedTeacher = resolveTeacher(student.className, subjectEntry.teacher)
+        const resolvedTeacher = resolveTeacher(subjectEntry.subject, subjectEntry.teacher)
         const teacherText = resolvedTeacher ? ` (Lærer: ${resolvedTeacher})` : ''
         const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}`
 
@@ -534,7 +534,7 @@ export default function StudentList({
 
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(11)
-      const resolvedTeacherPdf = resolveTeacher(student.className, subjectEntry.teacher)
+      const resolvedTeacherPdf = resolveTeacher(subjectEntry.subject, subjectEntry.teacher)
       const teacherText = resolvedTeacherPdf ? ` (Lærer: ${resolvedTeacherPdf})` : ''
       const headerLines = doc.splitTextToSize(`${subjectEntry.subject}${teacherText}`, usableW - 6)
       doc.text(headerLines, marginX + 3, y + 6)
@@ -673,7 +673,7 @@ export default function StudentList({
     ]
 
     allSubjectEntries.forEach(subjectEntry => {
-      const resolvedTeacherDocx = resolveTeacher(student.className, subjectEntry.teacher)
+      const resolvedTeacherDocx = resolveTeacher(subjectEntry.subject, subjectEntry.teacher)
       const teacherText = resolvedTeacherDocx ? ` (Lærer: ${resolvedTeacherDocx})` : ''
       const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}`
 
@@ -891,7 +891,7 @@ export default function StudentList({
                             </span>
                             {subjectEntry.teacher && (
                               <span className="text-xs text-slate-500 pl-2">
-                                Lærer: {resolveTeacher(student.className, subjectEntry.teacher)}
+                                Lærer: {resolveTeacher(subjectEntry.subject, subjectEntry.teacher)}
                               </span>
                             )}
                             {subjectEntry.grade && ['1', '2', 'iv'].includes(subjectEntry.grade.toLowerCase()) && (

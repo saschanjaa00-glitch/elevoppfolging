@@ -116,7 +116,7 @@ export default function StudentDetail({
         .map(w => ({ warningType: w.warningType, sentDate: w.sentDate }))
 
       const grade = studentData.gradeMap.get(normalizeMatch(topRecord.subjectGroup))
-      const teacher = resolveTeacher(selectedClass, studentData.subjectTeacherMap.get(normalizeMatch(topRecord.subjectGroup)) ?? topRecord.teacher)
+      const teacher = resolveTeacher(subject, studentData.subjectTeacherMap.get(normalizeMatch(topRecord.subjectGroup)) ?? topRecord.teacher)
 
       return { subject, records, topRecord, warnings: subjectWarnings, grade, teacher }
     })

@@ -154,7 +154,7 @@ function App() {
       )
 
       subjects.forEach(subject => {
-        const teacherText = subject.teacher ? ` (Lærer: ${resolveTeacher(student.className, subject.teacher)})` : ''
+        const teacherText = subject.teacher ? ` (Lærer: ${resolveTeacher(subject.subject, subject.teacher)})` : ''
         const infoText = `Fravær: ${subject.percentageAbsence.toFixed(1)}%   |   Karakter: ${subject.grade ?? '-'}   |   Varsler: ${subject.warningCount}`
         children.push(
           new Table({

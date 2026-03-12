@@ -1,5 +1,5 @@
-const TOPPIDRETT_CLASSES = new Set(['1TID', '2TID', '3TID'])
+const TOPPIDRETT_SUBJECTS = new Set(['toppidrett 1', 'toppidrett 2', 'toppidrett 3'])
 
-export function resolveTeacher(className: string, teacher: string): string {
-  return TOPPIDRETT_CLASSES.has(className) ? 'Avhenger av idrett' : teacher
+export function resolveTeacher(subjectName: string, teacher: string): string {
+  return TOPPIDRETT_SUBJECTS.has(subjectName.toLowerCase().trim()) ? 'Avhenger av idrett' : teacher
 }
