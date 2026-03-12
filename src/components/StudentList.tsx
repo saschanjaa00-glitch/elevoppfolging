@@ -5,7 +5,7 @@ import StudentDetail from './StudentDetail'
 import { jsPDF } from 'jspdf'
 import { BorderStyle, Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 import { resolveTeacher } from '../teacherUtils'
-import { findStudentInfo, formatIntakePoints, getDisplayClassName, hasTalentProgramTag, isNorskSubject, normalizeMatch } from '../studentInfoUtils'
+import { createStudentInfoLookup, findStudentInfoInLookup, formatIntakePoints, getDisplayClassName, hasTalentProgramTag, isNorskSubject, normalizeMatch } from '../studentInfoUtils'
 
 interface StudentListProps {
   data: DataStore
@@ -37,6 +37,7 @@ export default function StudentList({
   fullRapportInclude2,
 }: StudentListProps) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
+  const studentInfoLookup = useMemo(() => createStudentInfoLookup(data.studentInfo), [data.studentInfo])
 
   const ownerForClass = (className: string, mapping: Record<string, string[]>) => {
     const found = Object.entries(mapping).find(([, classes]) => classes.includes(className))
@@ -145,7 +146,7 @@ export default function StudentList({
       const dobStr = studentDobMap.get(normalizeMatch(record.navn)) ?? ''
       const grade = gradeMap.get(warningKey)
       const subjectTeacher = subjectTeacherMap.get(warningKey) ?? record.teacher
-      const matchedStudentInfo = findStudentInfo(data.studentInfo, record.navn, record.class)
+      const matchedStudentInfo = findStudentInfoInLookup(studentInfoLookup, record.navn, record.class)
       const overThreshold = record.percentageAbsence > threshold
       const matchesSelectedGrade = grade !== undefined && lowGradeFilter.includes(grade)
       const matchesFullRapportGrade = grade !== undefined && effectiveLowGrades.includes(grade)
@@ -201,7 +202,7 @@ export default function StudentList({
     })
 
     return Array.from(summaryMap.values())
-  }, [data, selectedClasses, threshold, lowGradeFilter, fullRapport, fullRapportInclude2])
+  }, [data, selectedClasses, threshold, lowGradeFilter, fullRapport, fullRapportInclude2, studentInfoLookup])
 
   const atRiskStudents = useMemo(() => {
     const searchNorm = studentSearch.toLowerCase().trim()
@@ -708,7 +709,7 @@ export default function StudentList({
     const studentRecords = data.absences.filter(
       r => r.class === student.className && normalizeMatch(r.navn) === normalizeMatch(student.navn)
     )
-    const matchedStudentInfo = findStudentInfo(data.studentInfo, student.navn, student.className)
+    const matchedStudentInfo = findStudentInfoInLookup(studentInfoLookup, student.navn, student.className)
 
     const teacherCountsForStudent = new Map<string, number>()
     studentRecords.forEach(r => {

@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { DataStore } from '../types'
 import { resolveTeacher } from '../teacherUtils'
-import { findStudentInfo, isNorskSubject, normalizeMatch } from '../studentInfoUtils'
+import { createStudentInfoLookup, findStudentInfoInLookup, isNorskSubject, normalizeMatch } from '../studentInfoUtils'
 
 interface StudentDetailProps {
   data: DataStore
@@ -16,6 +16,8 @@ export default function StudentDetail({
   selectedStudent,
   threshold,
 }: StudentDetailProps) {
+  const studentInfoLookup = useMemo(() => createStudentInfoLookup(data.studentInfo), [data.studentInfo])
+
   const dateColor = (dateStr: string): string => {
     const m = dateStr.match(/^(\d{1,2})[.\/\-](\d{1,2})[.\/\-]\d{4}$/)
     if (!m) return ''
@@ -80,10 +82,10 @@ export default function StudentDetail({
       }
     })
 
-    const studentInfo = findStudentInfo(data.studentInfo, selectedStudent, selectedClass)
+    const studentInfo = findStudentInfoInLookup(studentInfoLookup, selectedStudent, selectedClass)
 
     return { records, warnings, gradeMap, subjectTeacherMap, studentInfo }
-  }, [data, selectedClass, selectedStudent])
+  }, [data, selectedClass, selectedStudent, studentInfoLookup])
 
   if (studentData.records.length === 0) {
     return (

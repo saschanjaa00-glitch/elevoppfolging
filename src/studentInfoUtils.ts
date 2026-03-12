@@ -35,6 +35,35 @@ export const findStudentInfo = (
   })
 }
 
+export const createStudentInfoLookup = (studentInfo: StudentInfoRecord[]): Map<string, StudentInfoRecord> => {
+  const lookup = new Map<string, StudentInfoRecord>()
+
+  studentInfo.forEach(info => {
+    const normalizedName = normalizeMatch(info.navn)
+    if (!normalizedName) return
+
+    if (!lookup.has(normalizedName)) {
+      lookup.set(normalizedName, info)
+    }
+
+    if (info.class) {
+      lookup.set(`${normalizedName}::${normalizeMatch(info.class)}`, info)
+    }
+  })
+
+  return lookup
+}
+
+export const findStudentInfoInLookup = (
+  lookup: Map<string, StudentInfoRecord>,
+  navn: string,
+  className?: string
+): StudentInfoRecord | undefined => {
+  const normalizedName = normalizeMatch(navn)
+  const byClass = className ? lookup.get(`${normalizedName}::${normalizeMatch(className)}`) : undefined
+  return byClass ?? lookup.get(normalizedName)
+}
+
 export const formatIntakePoints = (intakePoints: number | null): {
   label: string
   tone: 'green' | 'slate'

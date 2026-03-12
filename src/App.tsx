@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { AlertTriangle, AlertCircle } from 'lucide-react'
 import { BorderStyle, Document, HeadingLevel, HeightRule, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 import { resolveTeacher } from './teacherUtils'
-import { findStudentInfo, getDisplayClassName, isNorskSubject, normalizeMatch } from './studentInfoUtils'
+import { createStudentInfoLookup, findStudentInfoInLookup, getDisplayClassName, isNorskSubject, normalizeMatch } from './studentInfoUtils'
 import FileUpload from './components/FileUpload'
 import ClassSelector from './components/ClassSelector'
 import StudentList from './components/StudentList'
@@ -37,6 +37,7 @@ function App() {
     fullRapport: boolean
     fullRapportInclude2: boolean
   } | null>(null)
+  const studentInfoLookup = useMemo(() => createStudentInfoLookup(data.studentInfo), [data.studentInfo])
 
   const handleDataImport = (importedData: DataStore) => {
     setData(importedData)
@@ -85,7 +86,7 @@ function App() {
     const studentRecords = data.absences.filter(
       r => r.class === className && normalizeMatch(r.navn) === normalizeMatch(navn)
     )
-    const matchedStudentInfo = findStudentInfo(data.studentInfo, navn, className)
+    const matchedStudentInfo = findStudentInfoInLookup(studentInfoLookup, navn, className)
 
     const teacherCountsForStudent = new Map<string, number>()
     studentRecords.forEach(record => {

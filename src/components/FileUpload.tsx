@@ -209,39 +209,24 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
       // Process all files and detect by content
       for (const file of Array.from(files)) {
         try {
-          console.log('Processing file:', file.name)
           const buffer = await file.arrayBuffer()
           const wb = XLSX.read(buffer)
           const sheetRaw = XLSX.utils.sheet_to_json(
             wb.Sheets[wb.SheetNames[0]]
           ) as Record<string, any>[]
 
-          console.log('Sheet headers:', Object.keys(sheetRaw[0] || {}))
-          console.log('First row:', sheetRaw[0])
-
           if (looksLikeAbsenceWorkbook(sheetRaw)) {
-            console.log('Detected as ABSENCE workbook')
             const parsed = parseAbsenceSheet(sheetRaw)
-            console.log('Parsed absences:', parsed.length)
-            console.log('Sample records:', parsed.slice(0, 3))
             data.absences = parsed
           } else if (looksLikeWarningWorkbook(sheetRaw)) {
-            console.log('Detected as WARNING workbook')
             const parsed = parseWarningsSheet(sheetRaw)
-            console.log('Parsed warnings:', parsed.length)
             data.warnings = parsed
           } else if (looksLikeGradeWorkbook(sheetRaw)) {
-            console.log('Detected as GRADE workbook')
             const parsed = parseGradeSheet(sheetRaw)
-            console.log('Parsed grades:', parsed.length)
             data.grades = parsed
           } else if (looksLikeStudentInfoWorkbook(sheetRaw)) {
-            console.log('Detected as STUDENT INFO workbook')
             const parsed = parseStudentInfoSheet(sheetRaw)
-            console.log('Parsed student info rows:', parsed.length)
             data.studentInfo = parsed
-          } else {
-            console.log('File not recognized as absence, warning, grade, or student info workbook')
           }
         } catch (err) {
           console.error('Error processing file:', err)
