@@ -660,49 +660,20 @@ function App() {
                           ))}
                         </div>
                       </div>
+                      <div className="ml-auto self-end">
+                        <button
+                          onClick={handleResetFilters}
+                          className="px-3 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors"
+                        >
+                          Tilbakestill filter
+                        </button>
+                      </div>
                     </div>
 
                     {/* Secondary actions */}
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-3">
-                        <div className={data.grades.length === 0 ? 'opacity-40 pointer-events-none' : ''}>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => setFullRapport(v => !v)}
-                              disabled={data.grades.length === 0}
-                              className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
-                                fullRapport
-                                  ? 'bg-sky-600 text-white border-sky-600 hover:bg-sky-700'
-                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                              }`}
-                            >
-                              {fullRapport ? '✓ Full farerapport' : 'Full farerapport'}
-                            </button>
-                            <button
-                              onClick={() => setFullRapportInclude2(v => !v)}
-                              disabled={data.grades.length === 0 || !fullRapport}
-                              className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
-                                !fullRapport ? 'opacity-40 pointer-events-none ' : ''
-                              }${
-                                fullRapportInclude2
-                                  ? 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700'
-                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                              }`}
-                            >
-                              Inkluder karakter 2
-                            </button>
-                          </div>
-                        </div>
                       </div>
-
-                      <div className={data.grades.length === 0 ? 'opacity-40 pointer-events-none' : ''}>
-                      <button
-                        onClick={handleResetFilters}
-                        className="px-3 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors"
-                      >
-                        Reset filtre
-                      </button>
-                    </div>
                   </div>
 
                     <div className="border-t border-slate-100 pt-3">
