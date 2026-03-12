@@ -7,6 +7,17 @@ export const normalizeMatch = (value: string): string =>
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, '')
 
+export const normalizeSubjectGroupKey = (value: string): string => {
+  const trimmed = (value ?? '').trim()
+  if (!trimmed) return ''
+
+  // Some files include class prefix in subjectGroup, e.g. "3STC/NOR1268".
+  const slashParts = trimmed.split('/')
+  const tail = slashParts[slashParts.length - 1]?.trim() ?? trimmed
+
+  return normalizeMatch(tail || trimmed)
+}
+
 export const isNorskSubject = (subject: string): boolean =>
   normalizeMatch(subject).includes('norsk')
 

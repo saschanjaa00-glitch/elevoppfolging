@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { AlertTriangle, AlertCircle } from 'lucide-react'
 import { BorderStyle, Document, HeadingLevel, HeightRule, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 import { resolveTeacher } from './teacherUtils'
-import { createStudentInfoLookup, findStudentInfoInLookup, getDisplayClassName, isNorskSubject, normalizeMatch } from './studentInfoUtils'
+import { createStudentInfoLookup, findStudentInfoInLookup, getDisplayClassName, isNorskSubject, normalizeMatch, normalizeSubjectGroupKey } from './studentInfoUtils'
 import FileUpload from './components/FileUpload'
 import ClassSelector from './components/ClassSelector'
 import StudentList from './components/StudentList'
@@ -106,7 +106,7 @@ function App() {
     data.grades
       .filter(g => normalizeMatch(g.navn) === normalizeMatch(navn))
       .forEach(g => {
-        const subjectKey = normalizeMatch(g.subjectGroup)
+        const subjectKey = normalizeSubjectGroupKey(g.subjectGroup)
         if (g.subjectTeacher && subjectKey && !subjectTeacherMap.has(subjectKey)) {
           subjectTeacherMap.set(subjectKey, g.subjectTeacher)
         }
@@ -120,7 +120,7 @@ function App() {
     data.warnings
       .filter(w => normalizeMatch(w.navn) === normalizeMatch(navn))
       .forEach(w => {
-        const key = normalizeMatch(w.subjectGroup)
+        const key = normalizeSubjectGroupKey(w.subjectGroup)
         if (!warningMap.has(key)) warningMap.set(key, [])
         warningMap.get(key)!.push({ warningType: w.warningType, sentDate: w.sentDate })
       })
@@ -138,7 +138,7 @@ function App() {
 
     studentRecords.forEach(record => {
       const key = `${normalizeMatch(record.subject)}::${normalizeMatch(record.subjectGroup)}`
-      const subjectGroupKey = normalizeMatch(record.subjectGroup)
+      const subjectGroupKey = normalizeSubjectGroupKey(record.subjectGroup)
       const existing = subjectsMap.get(key)
       const warnings = warningMap.get(subjectGroupKey) ?? []
       if (!existing || record.percentageAbsence > existing.percentageAbsence) {

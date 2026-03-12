@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { DataStore } from '../types'
 import { resolveTeacher } from '../teacherUtils'
-import { createStudentInfoLookup, findStudentInfoInLookup, isNorskSubject, normalizeMatch } from '../studentInfoUtils'
+import { createStudentInfoLookup, findStudentInfoInLookup, isNorskSubject, normalizeMatch, normalizeSubjectGroupKey } from '../studentInfoUtils'
 
 interface StudentDetailProps {
   data: DataStore
@@ -72,7 +72,7 @@ export default function StudentDetail({
     const subjectTeacherMap = new Map<string, string>()
     data.grades.forEach(g => {
       if (normalizeMatch(g.navn) !== normalizeMatch(selectedStudent)) return
-      const key = normalizeMatch(g.subjectGroup)
+      const key = normalizeSubjectGroupKey(g.subjectGroup)
       if (g.subjectTeacher && !subjectTeacherMap.has(key)) {
         subjectTeacherMap.set(key, g.subjectTeacher)
       }
@@ -110,11 +110,11 @@ export default function StudentDetail({
       )
 
       const subjectWarnings = studentData.warnings
-        .filter(w => normalizeMatch(w.subjectGroup) === normalizeMatch(topRecord.subjectGroup))
+        .filter(w => normalizeSubjectGroupKey(w.subjectGroup) === normalizeSubjectGroupKey(topRecord.subjectGroup))
         .map(w => ({ warningType: w.warningType, sentDate: w.sentDate }))
 
-      const grade = studentData.gradeMap.get(normalizeMatch(topRecord.subjectGroup))
-      const teacher = resolveTeacher(subject, studentData.subjectTeacherMap.get(normalizeMatch(topRecord.subjectGroup)) ?? topRecord.teacher)
+      const grade = studentData.gradeMap.get(normalizeSubjectGroupKey(topRecord.subjectGroup))
+      const teacher = resolveTeacher(subject, studentData.subjectTeacherMap.get(normalizeSubjectGroupKey(topRecord.subjectGroup)) ?? topRecord.teacher)
 
       return {
         subject,
@@ -123,31 +123,106 @@ export default function StudentDetail({
         warnings: subjectWarnings,
         grade,
         teacher,
+        noAbsenceData: false,
         showSidemalExemption: studentData.studentInfo?.sidemalExemption ?? false,
       }
     })
     .sort((a, b) => b.topRecord.percentageAbsence - a.topRecord.percentageAbsence)
 
+  // Add Norwegian codes from vurderinger even when no fravær rows exist.
+  const requiredNorskCodes = ['NOR1268', 'NOR1269']
+  const norskDisplayNames: Record<string, string> = {
+    NOR1268: 'Norsk sidemål',
+    NOR1269: 'Norsk muntlig',
+  }
+  const existingSubjectGroupKeys = new Set(
+    subjectSummaries.map(s => normalizeSubjectGroupKey(s.topRecord.subjectGroup))
+  )
+  // Find NOR1267 raw record to inherit absence data for NOR1268/1269
+  const nor1267Record =
+    studentData.records.find(r =>
+      normalizeSubjectGroupKey(r.subjectGroup) === normalizeSubjectGroupKey('NOR1267')
+    ) ??
+    studentData.records.find(r =>
+      normalizeMatch(r.subject).includes('norsk') && normalizeMatch(r.subject).includes('hoved')
+    )
+
+  const norskSupplement = requiredNorskCodes
+    .filter(code => {
+      const key = normalizeSubjectGroupKey(code)
+      return studentData.gradeMap.has(key) && !existingSubjectGroupKeys.has(key)
+    })
+    .map(code => {
+      const subjectGroupKey = normalizeSubjectGroupKey(code)
+      const displayName = norskDisplayNames[code] ?? code
+      const teacher = resolveTeacher(
+        code,
+        studentData.subjectTeacherMap.get(subjectGroupKey) ?? ''
+      )
+      const warnings = studentData.warnings
+        .filter(w => normalizeSubjectGroupKey(w.subjectGroup) === subjectGroupKey)
+        .map(w => ({ warningType: w.warningType, sentDate: w.sentDate }))
+
+      const inheritedAbsence = nor1267Record?.percentageAbsence ?? 0
+      const inheritedHours = nor1267Record?.hoursAbsence ?? 0
+      const hasAbsenceData = nor1267Record !== undefined
+
+      return {
+        subject: displayName,
+        records: [] as typeof studentData.records,
+        topRecord: {
+          navn: selectedStudent,
+          class: selectedClass,
+          subject: displayName,
+          subjectGroup: code,
+          percentageAbsence: inheritedAbsence,
+          hoursAbsence: inheritedHours,
+          teacher,
+          avbrudd: false,
+        },
+        warnings,
+        grade: studentData.gradeMap.get(subjectGroupKey),
+        teacher,
+        noAbsenceData: !hasAbsenceData,
+        showSidemalExemption: studentData.studentInfo?.sidemalExemption ?? false,
+      }
+    })
+
+  if (norskSupplement.length > 0) {
+    const insertAfterIndex = subjectSummaries.findIndex(s => {
+      const lower = s.subject.toLowerCase()
+      return lower.includes('norsk') && lower.includes('hoved')
+    })
+
+    if (insertAfterIndex >= 0) {
+      subjectSummaries.splice(insertAfterIndex + 1, 0, ...norskSupplement)
+    } else {
+      const firstNorskIndex = subjectSummaries.findIndex(s => isNorskSubject(s.subject))
+      if (firstNorskIndex >= 0) subjectSummaries.splice(firstNorskIndex + 1, 0, ...norskSupplement)
+      else subjectSummaries.push(...norskSupplement)
+    }
+  }
+
   return (
     <div className="bg-white divide-y divide-slate-100 py-1">
-      {subjectSummaries.map(({ subject, topRecord: record, warnings, grade, teacher, showSidemalExemption }) => {
-        const isAtRisk = record.percentageAbsence > threshold
-        const isHighRisk = record.percentageAbsence > 10
+      {subjectSummaries.map(({ subject, topRecord: record, warnings, grade, teacher, noAbsenceData, showSidemalExemption }) => {
+        const isAtRisk = !noAbsenceData && record.percentageAbsence > threshold
+        const isHighRisk = !noAbsenceData && record.percentageAbsence > 10
         const isLowGrade = grade && ['1', '2', 'iv'].includes(grade.toLowerCase())
 
         return (
           <div key={subject} className="flex items-start justify-between px-4 py-3 gap-4 transition-colors hover:bg-slate-100">
             <div className="flex-1 min-w-0">
               <p className="font-medium text-slate-900 truncate">{subject}</p>
-              <p className="text-xs text-slate-500">{teacher}</p>
-              {showSidemalExemption && isNorskSubject(subject) && (
+              {!noAbsenceData && <p className="text-xs text-slate-500">{teacher}</p>}
+              {!noAbsenceData && showSidemalExemption && isNorskSubject(subject) && (
                 <div className="mt-1">
                   <span className="inline-block px-2 py-0.5 rounded text-xs font-bold bg-emerald-100 text-emerald-800">
                     Fritak sidemål
                   </span>
                 </div>
               )}
-              {warnings.length > 0 && (
+              {!noAbsenceData && warnings.length > 0 && (
                 <div className="text-xs text-slate-600 mt-1 space-y-0.5">
                   {groupWarnings(warnings).map(([label, dates]) => (
                     <div key={label}>
@@ -161,10 +236,14 @@ export default function StudentDetail({
               )}
             </div>
             <div className="text-right shrink-0 space-y-1">
-              <p className={`text-base font-bold ${isHighRisk ? 'text-red-600' : isAtRisk ? 'text-amber-600' : 'text-green-600'}`}>
-                {record.percentageAbsence.toFixed(1)}%
-              </p>
-              <p className="text-xs text-slate-500">{record.hoursAbsence.toFixed(0)}h</p>
+              {!noAbsenceData && (
+                <>
+                  <p className={`text-base font-bold ${isHighRisk ? 'text-red-600' : isAtRisk ? 'text-amber-600' : 'text-green-600'}`}>
+                    {record.percentageAbsence.toFixed(1)}%
+                  </p>
+                  <p className="text-xs text-slate-500">{record.hoursAbsence.toFixed(0)}h</p>
+                </>
+              )}
               {grade && (
                 <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${isLowGrade ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-600'}`}>
                   T1: {grade}

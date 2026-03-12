@@ -5,7 +5,7 @@ import StudentDetail from './StudentDetail'
 import { jsPDF } from 'jspdf'
 import { BorderStyle, Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 import { resolveTeacher } from '../teacherUtils'
-import { createStudentInfoLookup, findStudentInfoInLookup, formatIntakePoints, getDisplayClassName, hasTalentProgramTag, isNorskSubject, normalizeMatch } from '../studentInfoUtils'
+import { createStudentInfoLookup, findStudentInfoInLookup, formatIntakePoints, getDisplayClassName, hasTalentProgramTag, isNorskSubject, normalizeMatch, normalizeSubjectGroupKey } from '../studentInfoUtils'
 
 interface StudentListProps {
   data: DataStore
@@ -105,7 +105,7 @@ export default function StudentList({
     const warningMap = new Map<string, Array<{ warningType: string; sentDate: string }>>()
     const studentDobMap = new Map<string, string>()
     data.warnings.forEach(warning => {
-      const key = `${normalizeMatch(warning.navn)}::${normalizeMatch(warning.subjectGroup)}`
+      const key = `${normalizeMatch(warning.navn)}::${normalizeSubjectGroupKey(warning.subjectGroup)}`
       if (!warningMap.has(key)) warningMap.set(key, [])
       warningMap.get(key)!.push({ warningType: warning.warningType, sentDate: warning.sentDate })
       if (warning.dateOfBirth)
@@ -118,7 +118,7 @@ export default function StudentList({
     data.grades.forEach(g => {
       const halvar = g.halvår.toString().trim()
       if (halvar === '1' || halvar.toLowerCase().includes('1')) {
-        const key = `${normalizeMatch(g.navn)}::${normalizeMatch(g.subjectGroup)}`
+        const key = `${normalizeMatch(g.navn)}::${normalizeSubjectGroupKey(g.subjectGroup)}`
         if (!gradeMap.has(key)) gradeMap.set(key, g.grade)
         if (g.subjectTeacher && !subjectTeacherMap.has(key)) subjectTeacherMap.set(key, g.subjectTeacher)
       }
@@ -142,7 +142,7 @@ export default function StudentList({
 
     classData.forEach(record => {
       const key = `${record.class}::${record.navn}`
-      const warningKey = `${normalizeMatch(record.navn)}::${normalizeMatch(record.subjectGroup)}`
+      const warningKey = `${normalizeMatch(record.navn)}::${normalizeSubjectGroupKey(record.subjectGroup)}`
       const warnings = warningMap.get(warningKey) ?? []
       const hasSubjectWarning = warnings.length > 0
       const dobStr = studentDobMap.get(normalizeMatch(record.navn)) ?? ''
@@ -201,6 +201,83 @@ export default function StudentList({
           summary.hasTalentProgram = hasTalentProgramTag(record.class, matchedStudentInfo.programArea)
         }
       }
+    })
+
+    // Add Norwegian grade-only subjects from vurderinger even when fravær rows do not exist.
+    const norskSupplements: Record<string, string> = {
+      NOR1268: 'Norsk sidemål',
+      NOR1269: 'Norsk muntlig',
+    }
+
+    summaryMap.forEach(summary => {
+      const studentNorm = normalizeMatch(summary.navn)
+      const requiredCodes = Object.keys(norskSupplements)
+
+      // Look up NOR1267 directly from raw absence data regardless of threshold filtering
+      const nor1267RawRecord =
+        classData.find(r =>
+          normalizeMatch(r.navn) === studentNorm &&
+          normalizeSubjectGroupKey(r.subjectGroup) === normalizeSubjectGroupKey('NOR1267')
+        ) ??
+        classData.find(r =>
+          normalizeMatch(r.navn) === studentNorm &&
+          normalizeMatch(r.subject).includes('norsk') &&
+          normalizeMatch(r.subject).includes('hoved')
+        )
+
+      const norskHovedmalSource =
+        summary.subjects.find(s => {
+          const n = normalizeMatch(s.subject)
+          return n.includes('norsk') && n.includes('hoved')
+        }) ??
+        summary.subjects.find(s => isNorskSubject(s.subject))
+
+      const sourceAbsencePercentage = nor1267RawRecord?.percentageAbsence ?? norskHovedmalSource?.percentageAbsence ?? 0
+      const sourceSubjectName = nor1267RawRecord?.subject ?? norskHovedmalSource?.subject
+
+      const sourceFravaerWarnings = (norskHovedmalSource?.warnings ?? []).filter(w =>
+        w.warningType.toLowerCase().includes('frav')
+      )
+
+      requiredCodes.forEach(code => {
+        const codeKey = normalizeSubjectGroupKey(code)
+        const gradeKey = `${studentNorm}::${codeKey}`
+        const grade = gradeMap.get(gradeKey)
+        if (!grade) return
+
+        const gradeUpper = grade.toUpperCase()
+        const matchesSelectedGrade = lowGradeFilter.includes(grade)
+        const matchesFullRapportGrade = effectiveLowGrades.includes(gradeUpper)
+
+        let includeSubject = noFilter
+        if (!noFilter && fullRapport) {
+          includeSubject = matchesFullRapportGrade
+        } else if (!noFilter && lowGradeFilter.length > 0) {
+          includeSubject = matchesSelectedGrade
+        }
+        if (!includeSubject) return
+
+        const alreadyExists = summary.subjects.some(
+          s => normalizeSubjectGroupKey(s.subjectGroup) === codeKey
+        )
+        if (alreadyExists) return
+
+        const warningKey = `${studentNorm}::${codeKey}`
+        const warnings = warningMap.get(warningKey) ?? []
+        const teacher = subjectTeacherMap.get(gradeKey) ?? ''
+
+        summary.subjects.push({
+          subject: norskSupplements[code],
+          subjectGroup: code,
+          teacher,
+          percentageAbsence: sourceAbsencePercentage,
+          warnings: sourceFravaerWarnings.length > 0 ? sourceFravaerWarnings : warnings,
+          grade,
+          inheritsFromSubject: sourceSubjectName,
+        })
+
+        if ((sourceFravaerWarnings.length > 0 ? sourceFravaerWarnings : warnings).length > 0) summary.hasWarnings = true
+      })
     })
 
     return Array.from(summaryMap.values())
@@ -754,7 +831,7 @@ export default function StudentList({
     data.grades
       .filter(g => normalizeMatch(g.navn) === normalizeMatch(student.navn))
       .forEach(g => {
-        const key = normalizeMatch(g.subjectGroup)
+        const key = normalizeSubjectGroupKey(g.subjectGroup)
         if (g.subjectTeacher && key && !subjectTeacherMap.has(key)) {
           subjectTeacherMap.set(key, g.subjectTeacher)
         }
@@ -764,7 +841,7 @@ export default function StudentList({
     data.warnings
       .filter(w => normalizeMatch(w.navn) === normalizeMatch(student.navn))
       .forEach(w => {
-        const key = normalizeMatch(w.subjectGroup)
+        const key = normalizeSubjectGroupKey(w.subjectGroup)
         if (!studentWarningMap.has(key)) studentWarningMap.set(key, [])
         studentWarningMap.get(key)!.push({ warningType: w.warningType, sentDate: w.sentDate })
       })
@@ -775,7 +852,7 @@ export default function StudentList({
       .forEach(g => {
         const halvar = g.halvår.toString().trim().toLowerCase()
         if (halvar === '1' || halvar.includes('1')) {
-          const key = normalizeMatch(g.subjectGroup)
+          const key = normalizeSubjectGroupKey(g.subjectGroup)
           if (!studentGradeMap.has(key)) studentGradeMap.set(key, g.grade)
         }
       })
@@ -793,11 +870,11 @@ export default function StudentList({
     studentRecords.forEach(r => {
       const key = `${normalizeMatch(r.subject)}::${normalizeMatch(r.subjectGroup)}`
       const existing = allSubjectsMap.get(key)
-      const warnings = studentWarningMap.get(normalizeMatch(r.subjectGroup)) ?? []
+      const warnings = studentWarningMap.get(normalizeSubjectGroupKey(r.subjectGroup)) ?? []
       const warningCount = warnings.length
-      const grade = studentGradeMap.get(normalizeMatch(r.subjectGroup))
+      const grade = studentGradeMap.get(normalizeSubjectGroupKey(r.subjectGroup))
 
-      const sgKey = normalizeMatch(r.subjectGroup)
+      const sgKey = normalizeSubjectGroupKey(r.subjectGroup)
       const subjectTeacher = subjectTeacherMap.get(sgKey) ?? r.teacher
 
       if (!existing || r.percentageAbsence > existing.percentageAbsence) {
@@ -1104,6 +1181,7 @@ export default function StudentList({
                                 Ingen varsel funnet for dette faget
                               </div>
                             )}
+
                           </div>
                         ))}
                       </div>
