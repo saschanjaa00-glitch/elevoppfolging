@@ -6,6 +6,7 @@ import { createStudentInfoLookup, findStudentInfoInLookup, getDisplayClassName, 
 import FileUpload from './components/FileUpload'
 import ClassSelector from './components/ClassSelector'
 import StudentList from './components/StudentList'
+import StatsView from './components/StatsView'
 import type { DataStore } from './types'
 import './index.css'
 
@@ -27,6 +28,7 @@ function App() {
   const [absenceThreshold, setAbsenceThreshold] = useState<number>(8)
   const [thresholdEnabled, setThresholdEnabled] = useState<boolean>(true)
   const [noFilter, setNoFilter] = useState<boolean>(false)
+  const [activeTab, setActiveTab] = useState<'elever' | 'statistikk'>('elever')
   const [studentSearch, setStudentSearch] = useState<string>('')
   const [missingWarningsOnly, setMissingWarningsOnly] = useState<boolean>(false)
   const [lowGradeFilter, setLowGradeFilter] = useState<string[]>(['IV', '1', '2'])
@@ -436,7 +438,27 @@ function App() {
         ) : (
           <div className="space-y-6">
             {/* Top bar */}
-            <div className="flex border-b border-slate-200 pb-2">
+            <div className="flex items-center border-b border-slate-200 pb-2 gap-1">
+              <button
+                onClick={() => setActiveTab('elever')}
+                className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
+                  activeTab === 'elever'
+                    ? 'text-sky-700 border-b-2 border-sky-600'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Elever
+              </button>
+              <button
+                onClick={() => setActiveTab('statistikk')}
+                className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
+                  activeTab === 'statistikk'
+                    ? 'text-sky-700 border-b-2 border-sky-600'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Statistikk
+              </button>
               <button
                 onClick={() => {
                   setData({ absences: [], warnings: [], grades: [], studentInfo: [] })
@@ -448,7 +470,9 @@ function App() {
               </button>
             </div>
 
-            {/* Settings Panel */}
+            {activeTab === 'statistikk' ? (
+              <StatsView data={data} />
+            ) : (
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                 <aside className="lg:col-span-1 no-print">
                   {/* Presets */}
@@ -736,6 +760,7 @@ function App() {
                   )}
                 </section>
               </div>
+            )}
 
           </div>
         )}
