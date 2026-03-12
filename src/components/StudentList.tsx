@@ -877,26 +877,28 @@ export default function StudentList({
                             key={`${subjectEntry.subjectGroup}-${subjectEntry.subject}`}
                             className="flex flex-col gap-1"
                           >
-                            <span
-                              className={`w-fit px-2 py-0.5 rounded text-xs font-medium ${
-                                subjectEntry.percentageAbsence > 10
-                                  ? 'bg-red-100 text-red-700'
-                                  : subjectEntry.percentageAbsence >= 5
-                                  ? 'bg-amber-100 text-amber-700'
-                                  : 'bg-slate-100 text-slate-600'
-                              }`}
-                            >
-                              {subjectEntry.subject} —{' '}
-                              {subjectEntry.percentageAbsence.toFixed(1)}%
-                            </span>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span
+                                className={`w-fit px-2 py-0.5 rounded text-xs font-medium ${
+                                  subjectEntry.percentageAbsence > 10
+                                    ? 'bg-red-100 text-red-700'
+                                    : subjectEntry.percentageAbsence >= 5
+                                    ? 'bg-amber-100 text-amber-700'
+                                    : 'bg-slate-100 text-slate-600'
+                                }`}
+                              >
+                                {subjectEntry.subject} —{' '}
+                                {subjectEntry.percentageAbsence.toFixed(1)}%
+                              </span>
+                              {subjectEntry.grade && ['1', '2', 'iv'].includes(subjectEntry.grade.toLowerCase()) && (
+                                <span className="w-fit px-2 py-0.5 rounded text-xs font-bold bg-orange-200 text-orange-900">
+                                  Karakter T1: {subjectEntry.grade}
+                                </span>
+                              )}
+                            </div>
                             {subjectEntry.teacher && (
                               <span className="text-xs text-slate-500 pl-2">
                                 Lærer: {resolveTeacher(subjectEntry.subject, subjectEntry.teacher)}
-                              </span>
-                            )}
-                            {subjectEntry.grade && ['1', '2', 'iv'].includes(subjectEntry.grade.toLowerCase()) && (
-                              <span className="w-fit px-2 py-0.5 rounded text-xs font-bold bg-purple-100 text-purple-800">
-                                Karakter T1: {subjectEntry.grade}
                               </span>
                             )}
                             {subjectEntry.warnings.length > 0 && (
