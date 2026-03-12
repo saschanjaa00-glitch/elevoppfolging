@@ -29,6 +29,12 @@ function App() {
   const [lowGradeFilter, setLowGradeFilter] = useState<string[]>(['IV', '1', '2'])
   const [fullRapport, setFullRapport] = useState<boolean>(false)
   const [fullRapportInclude2, setFullRapportInclude2] = useState<boolean>(false)
+  const [preOverrideFilters, setPreOverrideFilters] = useState<{
+    studentSearch: string
+    lowGradeFilter: string[]
+    fullRapport: boolean
+    fullRapportInclude2: boolean
+  } | null>(null)
 
   const handleDataImport = (importedData: DataStore) => {
     setData(importedData)
@@ -359,6 +365,7 @@ function App() {
     setLowGradeFilter(['IV', '1', '2'])
     setFullRapport(false)
     setFullRapportInclude2(false)
+    setPreOverrideFilters(null)
   }
 
   return (
@@ -646,18 +653,25 @@ function App() {
 
                     <div className="border-t border-slate-100 pt-3">
                       <button
-                        onClick={() =>
+                        onClick={() => {
                           setMissingWarningsOnly(prev => {
                             const next = !prev
                             if (next) {
+                              setPreOverrideFilters({ studentSearch, lowGradeFilter, fullRapport, fullRapportInclude2 })
                               setStudentSearch('')
                               setLowGradeFilter([])
                               setFullRapport(false)
                               setFullRapportInclude2(false)
+                            } else if (preOverrideFilters) {
+                              setStudentSearch(preOverrideFilters.studentSearch)
+                              setLowGradeFilter(preOverrideFilters.lowGradeFilter)
+                              setFullRapport(preOverrideFilters.fullRapport)
+                              setFullRapportInclude2(preOverrideFilters.fullRapportInclude2)
+                              setPreOverrideFilters(null)
                             }
                             return next
                           })
-                        }
+                        }}
                         className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
                           missingWarningsOnly
                             ? 'bg-orange-300 text-orange-900 border-orange-300 hover:bg-orange-400'
