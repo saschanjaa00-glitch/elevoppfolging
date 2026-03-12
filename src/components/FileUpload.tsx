@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import * as XLSX from 'xlsx'
 import { Upload } from 'lucide-react'
-import type { DataStore, AbsenceRecord, WarningRecord } from '../types'
+import type { DataStore, AbsenceRecord, WarningRecord, StudentInfoRecord } from '../types'
 
 interface FileUploadProps {
   onDataImport: (data: DataStore) => void
@@ -54,6 +54,13 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
     }
 
     return String(value)
+  }
+
+  const getNumericField = (row: Record<string, any>, aliases: string[]): number | null => {
+    const value = getRowValue(row, aliases)
+    if (!value) return null
+    const parsed = parseFloat(value.replace(/\s+/g, '').replace(',', '.'))
+    return Number.isFinite(parsed) ? parsed : null
   }
 
   const looksLikeAbsenceWorkbook = (sheet: Record<string, any>[]): boolean => {
@@ -115,6 +122,18 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
     return hasNavn && hasFaggruppe && hasVarselType
   }
 
+  const looksLikeStudentInfoWorkbook = (sheet: Record<string, any>[]): boolean => {
+    if (sheet.length === 0) return false
+    const first = sheet[0]
+    const headers = Object.keys(first).map(h => normalizeHeader(h))
+    const hasFornavn = headers.some(h => h.includes('fornavn') || h.includes('firstname'))
+    const hasEtternavn = headers.some(h => h.includes('etternavn') || h.includes('lastname'))
+    const hasProgramArea = headers.some(h => h.includes('programomrade') || h.includes('programområde'))
+    const hasSidemal = headers.some(h => h.includes('sidemal') || h.includes('sidemål'))
+    const hasIntake = headers.some(h => h.includes('inntakspoeng'))
+    return hasFornavn && hasEtternavn && hasProgramArea && hasSidemal && hasIntake
+  }
+
   const parseAbsenceSheet = (sheet: Record<string, any>[]): AbsenceRecord[] => {
     return sheet
       .map(row => {
@@ -152,6 +171,27 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
       .filter(r => r.navn && r.class)
   }
 
+  const parseStudentInfoSheet = (sheet: Record<string, any>[]): StudentInfoRecord[] => {
+    return sheet
+      .map(row => {
+        const fornavn = getRowValue(row, ['fornavn', 'first name', 'firstname'])
+        const etternavn = getRowValue(row, ['etternavn', 'last name', 'lastname'])
+        const navn = [fornavn, etternavn].filter(Boolean).join(' ').trim()
+        const sidemalValue = getRowValue(row, ['fritak i sidemål', 'fritak i sidemal', 'sidemål', 'sidemal'])
+
+        return {
+          navn,
+          fornavn,
+          etternavn,
+          class: getRowValue(row, ['klasse', 'class']),
+          programArea: getRowValue(row, ['programområde', 'programomrade', 'program area']),
+          sidemalExemption: sidemalValue.toLowerCase().includes('assessment exemption'),
+          intakePoints: getNumericField(row, ['inntakspoeng', 'intake points']),
+        }
+      })
+      .filter(r => r.navn)
+  }
+
   const handleFileSelect = async (files: FileList) => {
     if (files.length === 0) return
 
@@ -163,6 +203,7 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
         absences: [],
         warnings: [],
         grades: [],
+        studentInfo: [],
       }
 
       // Process all files and detect by content
@@ -194,8 +235,13 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
             const parsed = parseGradeSheet(sheetRaw)
             console.log('Parsed grades:', parsed.length)
             data.grades = parsed
+          } else if (looksLikeStudentInfoWorkbook(sheetRaw)) {
+            console.log('Detected as STUDENT INFO workbook')
+            const parsed = parseStudentInfoSheet(sheetRaw)
+            console.log('Parsed student info rows:', parsed.length)
+            data.studentInfo = parsed
           } else {
-            console.log('File not recognized as absence, warning, or grade workbook')
+            console.log('File not recognized as absence, warning, grade, or student info workbook')
           }
         } catch (err) {
           console.error('Error processing file:', err)
@@ -271,12 +317,12 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
           <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-lg">
             <p className="text-red-700 font-medium">{error}</p>
             <p className="text-sm text-red-600 mt-2">
-              Kontroller at filene inneholder: Navn, Klasse, Fagnavn, H1+H2 % udok. fravær, H1+H2 timer udok. fravær, Lærer (fraværsfil) og Navn, Faggruppe, Varseltype, Sendt, Fødselsdato (varselfil)
+              Kontroller at filene inneholder: Navn, Klasse, Fagnavn, H1+H2 % udok. fravær, H1+H2 timer udok. fravær, Lærer (fraværsfil), Navn, Faggruppe, Varseltype, Sendt, Fødselsdato (varselfil), Elev, Gruppe, Karakter (karakterfil) og Fornavn, Etternavn, Programområde, Fritak i sidemål, Inntakspoeng (elevfil)
             </p>
           </div>
         )}
 
-        <div className="mt-8 grid grid-cols-2 gap-4 text-sm">
+        <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
           <div className="bg-slate-50 rounded-lg p-4">
             <h4 className="font-semibold text-slate-900 mb-2">Fraværsfil</h4>
             <ul className="text-slate-600 space-y-1 text-xs">
@@ -295,6 +341,26 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
               <li>• Varseltype</li>
               <li>• Sendt</li>
               <li>• Fødselsdato</li>
+            </ul>
+          </div>
+          <div className="bg-slate-50 rounded-lg p-4">
+            <h4 className="font-semibold text-slate-900 mb-2">Karakterfil</h4>
+            <ul className="text-slate-600 space-y-1 text-xs">
+              <li>• Elev</li>
+              <li>• Gruppe</li>
+              <li>• Karakter</li>
+              <li>• Faglærer</li>
+              <li>• Halvår</li>
+            </ul>
+          </div>
+          <div className="bg-slate-50 rounded-lg p-4">
+            <h4 className="font-semibold text-slate-900 mb-2">Elevfil</h4>
+            <ul className="text-slate-600 space-y-1 text-xs">
+              <li>• Fornavn</li>
+              <li>• Etternavn</li>
+              <li>• Programområde</li>
+              <li>• Fritak i sidemål</li>
+              <li>• Inntakspoeng</li>
             </ul>
           </div>
         </div>

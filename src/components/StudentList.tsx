@@ -5,6 +5,7 @@ import StudentDetail from './StudentDetail'
 import { jsPDF } from 'jspdf'
 import { BorderStyle, Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 import { resolveTeacher } from '../teacherUtils'
+import { findStudentInfo, formatIntakePoints, getDisplayClassName, hasTalentProgramTag, isNorskSubject, normalizeMatch } from '../studentInfoUtils'
 
 interface StudentListProps {
   data: DataStore
@@ -41,13 +42,6 @@ export default function StudentList({
     const found = Object.entries(mapping).find(([, classes]) => classes.includes(className))
     return found?.[0] ?? 'Ukjent'
   }
-
-  const normalizeMatch = (value: string): string =>
-    value
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/\s+/g, '')
 
   const dateColor = (dateStr: string): string => {
     const m = dateStr.match(/^(\d{1,2})[.\/\-](\d{1,2})[.\/\-]\d{4}$/)
@@ -151,6 +145,7 @@ export default function StudentList({
       const dobStr = studentDobMap.get(normalizeMatch(record.navn)) ?? ''
       const grade = gradeMap.get(warningKey)
       const subjectTeacher = subjectTeacherMap.get(warningKey) ?? record.teacher
+      const matchedStudentInfo = findStudentInfo(data.studentInfo, record.navn, record.class)
       const overThreshold = record.percentageAbsence > threshold
       const matchesSelectedGrade = grade !== undefined && lowGradeFilter.includes(grade)
       const matchesFullRapportGrade = grade !== undefined && effectiveLowGrades.includes(grade)
@@ -174,6 +169,10 @@ export default function StudentList({
           avbrudd: record.avbrudd,
           hasWarnings: includeSubject ? hasSubjectWarning : false,
           isAdult: isOver18(dobStr),
+          programArea: matchedStudentInfo?.programArea,
+          sidemalExemption: matchedStudentInfo?.sidemalExemption ?? false,
+          intakePoints: matchedStudentInfo?.intakePoints ?? null,
+          hasTalentProgram: hasTalentProgramTag(record.class, matchedStudentInfo?.programArea),
         })
       } else {
         const summary = summaryMap.get(key)!
@@ -192,6 +191,12 @@ export default function StudentList({
 
         summary.avbrudd = summary.avbrudd || record.avbrudd
         if (!summary.isAdult && dobStr) summary.isAdult = isOver18(dobStr)
+        if (!summary.programArea && matchedStudentInfo?.programArea) {
+          summary.programArea = matchedStudentInfo.programArea
+          summary.sidemalExemption = matchedStudentInfo.sidemalExemption
+          summary.intakePoints = matchedStudentInfo.intakePoints
+          summary.hasTalentProgram = hasTalentProgramTag(record.class, matchedStudentInfo.programArea)
+        }
       }
     })
 
@@ -452,8 +457,9 @@ export default function StudentList({
     const children: Array<Paragraph | Table> = []
 
     atRiskStudents.forEach((student, index) => {
-      const { allSubjectEntries, kontaktlaerer } = getAllSubjectEntries(student)
+      const { allSubjectEntries, kontaktlaerer, studentInfo } = getAllSubjectEntries(student)
       const radgiver = ownerForClass(student.className, RADGIVER)
+      const displayClassName = getDisplayClassName(student.className, studentInfo?.programArea)
 
       children.push(
         new Paragraph({
@@ -462,7 +468,7 @@ export default function StudentList({
           pageBreakBefore: index > 0,
         }),
         new Paragraph({ children: [new TextRun({ text: `Elev: ${student.navn}` })] }),
-        new Paragraph({ children: [new TextRun({ text: `Klasse: ${student.className}` })] }),
+        new Paragraph({ children: [new TextRun({ text: `Klasse: ${displayClassName}` })] }),
         new Paragraph({ children: [new TextRun({ text: `Kontaktlærer: ${kontaktlaerer}` })] }),
         new Paragraph({ children: [new TextRun({ text: `Rådgiver: ${radgiver}` })] }),
         new Paragraph({ text: '' }),
@@ -471,7 +477,10 @@ export default function StudentList({
       allSubjectEntries.forEach(subjectEntry => {
         const resolvedTeacher = resolveTeacher(subjectEntry.subject, subjectEntry.teacher)
         const teacherText = resolvedTeacher ? ` (Lærer: ${resolvedTeacher})` : ''
-        const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}`
+        const sidemalText = subjectEntry.showSidemalExemption && isNorskSubject(subjectEntry.subject)
+          ? '   |   Fritak sidemål'
+          : ''
+        const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}${sidemalText}`
         const warningText = `Varselbrev sendt: ${formatWarningSummary(subjectEntry.warnings)}`
 
         children.push(
@@ -561,8 +570,9 @@ export default function StudentList({
     const usableW = pageW - marginX * 2
     let y = 16
 
-    const { allSubjectEntries, kontaktlaerer } = getAllSubjectEntries(student)
+    const { allSubjectEntries, kontaktlaerer, studentInfo } = getAllSubjectEntries(student)
     const radgiver = ownerForClass(student.className, RADGIVER)
+    const displayClassName = getDisplayClassName(student.className, studentInfo?.programArea)
     const acroSupported =
       typeof (jsPDF as unknown as { AcroFormTextField?: unknown }).AcroFormTextField === 'function' &&
       typeof (doc as unknown as { addField?: unknown }).addField === 'function'
@@ -607,7 +617,7 @@ export default function StudentList({
     doc.setFontSize(10)
     doc.text(`Elev: ${student.navn}`, marginX, y)
     y += 6
-    doc.text(`Klasse: ${student.className}`, marginX, y)
+    doc.text(`Klasse: ${displayClassName}`, marginX, y)
     y += 6
     doc.text(`Kontaktlærer: ${kontaktlaerer}`, marginX, y)
     y += 6
@@ -627,7 +637,10 @@ export default function StudentList({
       const teacherText = resolvedTeacherPdf ? ` (Lærer: ${resolvedTeacherPdf})` : ''
       const headerLines = doc.splitTextToSize(`${subjectEntry.subject}${teacherText}`, usableW - 6)
       const headerLineCount = Array.isArray(headerLines) ? headerLines.length : 1
-      const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}`
+      const sidemalText = subjectEntry.showSidemalExemption && isNorskSubject(subjectEntry.subject)
+        ? '   |   Fritak sidemål'
+        : ''
+      const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}${sidemalText}`
       const warningLines = doc.splitTextToSize(
         `Varselbrev sendt: ${formatWarningSummary(subjectEntry.warnings)}`,
         usableW - 6
@@ -695,6 +708,7 @@ export default function StudentList({
     const studentRecords = data.absences.filter(
       r => r.class === student.className && normalizeMatch(r.navn) === normalizeMatch(student.navn)
     )
+    const matchedStudentInfo = findStudentInfo(data.studentInfo, student.navn, student.className)
 
     const teacherCountsForStudent = new Map<string, number>()
     studentRecords.forEach(r => {
@@ -743,6 +757,7 @@ export default function StudentList({
       grade?: string
       warningCount: number
       warnings: Array<{ warningType: string; sentDate: string }>
+      showSidemalExemption: boolean
     }>()
     studentRecords.forEach(r => {
       const key = `${normalizeMatch(r.subject)}::${normalizeMatch(r.subjectGroup)}`
@@ -763,12 +778,14 @@ export default function StudentList({
           grade,
           warningCount,
           warnings,
+          showSidemalExemption: matchedStudentInfo?.sidemalExemption ?? false,
         })
       }
     })
 
     return {
       kontaktlaerer,
+      studentInfo: matchedStudentInfo,
       allSubjectEntries: Array.from(allSubjectsMap.values()).sort((a, b) =>
         a.subject.localeCompare(b.subject, 'nb-NO')
       ),
@@ -776,13 +793,14 @@ export default function StudentList({
   }
 
   const generateOppfolgingsarkDocx = async (student: StudentAbsenceSummary) => {
-    const { allSubjectEntries, kontaktlaerer } = getAllSubjectEntries(student)
+    const { allSubjectEntries, kontaktlaerer, studentInfo } = getAllSubjectEntries(student)
     const radgiver = ownerForClass(student.className, RADGIVER)
+    const displayClassName = getDisplayClassName(student.className, studentInfo?.programArea)
 
     const sections: Array<Paragraph | Table> = [
       new Paragraph({ text: 'Oppfølgingsark', heading: HeadingLevel.HEADING_1 }),
       new Paragraph({ children: [new TextRun({ text: `Elev: ${student.navn}` })] }),
-      new Paragraph({ children: [new TextRun({ text: `Klasse: ${student.className}` })] }),
+      new Paragraph({ children: [new TextRun({ text: `Klasse: ${displayClassName}` })] }),
       new Paragraph({ children: [new TextRun({ text: `Kontaktlærer: ${kontaktlaerer}` })] }),
       new Paragraph({ children: [new TextRun({ text: `Rådgiver: ${radgiver}` })] }),
       new Paragraph({ text: '' }),
@@ -791,7 +809,10 @@ export default function StudentList({
     allSubjectEntries.forEach(subjectEntry => {
       const resolvedTeacherDocx = resolveTeacher(subjectEntry.subject, subjectEntry.teacher)
       const teacherText = resolvedTeacherDocx ? ` (Lærer: ${resolvedTeacherDocx})` : ''
-      const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}`
+      const sidemalText = subjectEntry.showSidemalExemption && isNorskSubject(subjectEntry.subject)
+        ? '   |   Fritak sidemål'
+        : ''
+      const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}${sidemalText}`
       const warningText = `Varselbrev sendt: ${formatWarningSummary(subjectEntry.warnings)}`
 
       sections.push(
@@ -960,6 +981,11 @@ export default function StudentList({
                       <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs font-medium">
                         {student.className}
                       </span>
+                      {student.hasTalentProgram && (
+                        <span className="px-2 py-0.5 bg-sky-100 text-sky-700 rounded text-xs font-bold">
+                          T
+                        </span>
+                      )}
                       <span
                         className={`px-2 py-0.5 rounded text-xs font-medium ${
                           warningTypesCount > 0
@@ -1013,6 +1039,11 @@ export default function StudentList({
                               {subjectEntry.grade && ['1', '2', 'iv'].includes(subjectEntry.grade.toLowerCase()) && (
                                 <span className="w-fit px-2 py-0.5 rounded text-xs font-bold bg-orange-200 text-orange-900">
                                   Karakter T1: {subjectEntry.grade}
+                                </span>
+                              )}
+                              {student.sidemalExemption && isNorskSubject(subjectEntry.subject) && (
+                                <span className="w-fit px-2 py-0.5 rounded text-xs font-bold bg-emerald-100 text-emerald-800">
+                                  Fritak sidemål
                                 </span>
                               )}
                             </div>
@@ -1078,6 +1109,20 @@ export default function StudentList({
                         {isExpanded ? 'Lukk' : 'Detaljer'}
                       </span>
                     </button>
+                    {(() => {
+                      const intake = formatIntakePoints(student.intakePoints)
+                      const toneClasses = intake.empty
+                        ? 'bg-green-600 border-green-600 text-transparent'
+                        : intake.tone === 'green'
+                        ? 'bg-green-100 border-green-200 text-green-800'
+                        : 'bg-slate-100 border-slate-200 text-slate-700'
+
+                      return (
+                        <div className={`w-full min-h-10 rounded border flex items-center justify-center text-sm font-semibold ${toneClasses}`}>
+                          {intake.label || '•'}
+                        </div>
+                      )
+                    })()}
                   </div>
                 </div>
               </div>

@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { DataStore } from '../types'
 import { resolveTeacher } from '../teacherUtils'
+import { findStudentInfo, isNorskSubject, normalizeMatch } from '../studentInfoUtils'
 
 interface StudentDetailProps {
   data: DataStore
@@ -15,13 +16,6 @@ export default function StudentDetail({
   selectedStudent,
   threshold,
 }: StudentDetailProps) {
-  const normalizeMatch = (value: string): string =>
-    value
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/\s+/g, '')
-
   const dateColor = (dateStr: string): string => {
     const m = dateStr.match(/^(\d{1,2})[.\/\-](\d{1,2})[.\/\-]\d{4}$/)
     if (!m) return ''
@@ -86,7 +80,9 @@ export default function StudentDetail({
       }
     })
 
-    return { records, warnings, gradeMap, subjectTeacherMap }
+    const studentInfo = findStudentInfo(data.studentInfo, selectedStudent, selectedClass)
+
+    return { records, warnings, gradeMap, subjectTeacherMap, studentInfo }
   }, [data, selectedClass, selectedStudent])
 
   if (studentData.records.length === 0) {
@@ -118,13 +114,21 @@ export default function StudentDetail({
       const grade = studentData.gradeMap.get(normalizeMatch(topRecord.subjectGroup))
       const teacher = resolveTeacher(subject, studentData.subjectTeacherMap.get(normalizeMatch(topRecord.subjectGroup)) ?? topRecord.teacher)
 
-      return { subject, records, topRecord, warnings: subjectWarnings, grade, teacher }
+      return {
+        subject,
+        records,
+        topRecord,
+        warnings: subjectWarnings,
+        grade,
+        teacher,
+        showSidemalExemption: studentData.studentInfo?.sidemalExemption ?? false,
+      }
     })
     .sort((a, b) => b.topRecord.percentageAbsence - a.topRecord.percentageAbsence)
 
   return (
     <div className="bg-white divide-y divide-slate-100 py-1">
-      {subjectSummaries.map(({ subject, topRecord: record, warnings, grade, teacher }) => {
+      {subjectSummaries.map(({ subject, topRecord: record, warnings, grade, teacher, showSidemalExemption }) => {
         const isAtRisk = record.percentageAbsence > threshold
         const isHighRisk = record.percentageAbsence > 10
         const isLowGrade = grade && ['1', '2', 'iv'].includes(grade.toLowerCase())
@@ -134,6 +138,13 @@ export default function StudentDetail({
             <div className="flex-1 min-w-0">
               <p className="font-medium text-slate-900 truncate">{subject}</p>
               <p className="text-xs text-slate-500">{teacher}</p>
+              {showSidemalExemption && isNorskSubject(subject) && (
+                <div className="mt-1">
+                  <span className="inline-block px-2 py-0.5 rounded text-xs font-bold bg-emerald-100 text-emerald-800">
+                    Fritak sidemål
+                  </span>
+                </div>
+              )}
               {warnings.length > 0 && (
                 <div className="text-xs text-slate-600 mt-1 space-y-0.5">
                   {groupWarnings(warnings).map(([label, dates]) => (

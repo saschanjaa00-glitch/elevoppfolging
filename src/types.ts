@@ -18,6 +18,16 @@ export interface WarningRecord {
   dateOfBirth: string
 }
 
+export interface StudentInfoRecord {
+  navn: string
+  fornavn: string
+  etternavn: string
+  class?: string
+  programArea: string
+  sidemalExemption: boolean
+  intakePoints: number | null
+}
+
 export interface StudentAbsenceSummary {
   navn: string
   className: string
@@ -34,6 +44,10 @@ export interface StudentAbsenceSummary {
   avbrudd: boolean
   hasWarnings: boolean
   isAdult: boolean
+  programArea?: string
+  sidemalExemption: boolean
+  intakePoints: number | null
+  hasTalentProgram: boolean
 }
 
 export interface GradeRecord {
@@ -49,4 +63,5 @@ export interface DataStore {
   absences: AbsenceRecord[]
   warnings: WarningRecord[]
   grades: GradeRecord[]
+  studentInfo: StudentInfoRecord[]
 }

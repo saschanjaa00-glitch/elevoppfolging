@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { AlertTriangle, AlertCircle } from 'lucide-react'
 import { BorderStyle, Document, HeadingLevel, HeightRule, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 import { resolveTeacher } from './teacherUtils'
+import { findStudentInfo, getDisplayClassName, isNorskSubject, normalizeMatch } from './studentInfoUtils'
 import FileUpload from './components/FileUpload'
 import ClassSelector from './components/ClassSelector'
 import StudentList from './components/StudentList'
@@ -19,6 +20,7 @@ function App() {
     absences: [],
     warnings: [],
     grades: [],
+    studentInfo: [],
   })
 
   const [selectedClasses, setSelectedClasses] = useState<string[]>([])
@@ -44,22 +46,46 @@ function App() {
 
   const hasData = data.absences.length > 0
 
-  const normalizeMatch = (value: string): string =>
-    value
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/\s+/g, '')
-
   const ownerForClass = (className: string, mapping: Record<string, string[]>) => {
     const found = Object.entries(mapping).find(([, classes]) => classes.includes(className))
     return found?.[0] ?? 'Ukjent'
+  }
+
+  const groupWarnings = (warnings: Array<{ warningType: string; sentDate: string }>) => {
+    const parseDMY = (d: string) => {
+      const m = d.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/)
+      return m ? new Date(+m[3], +m[2] - 1, +m[1]).getTime() : 0
+    }
+    const order = (label: string) => (label === 'Fravær' ? 0 : label === 'Grunnlag' ? 1 : 2)
+    const grouped = new Map<string, string[]>()
+
+    warnings.forEach(warning => {
+      const type = warning.warningType.toLowerCase()
+      const label = type.includes('frav') ? 'Fravær' : type.includes('vurdering') || type.includes('grunnlag') ? 'Grunnlag' : warning.warningType
+      if (!grouped.has(label)) grouped.set(label, [])
+      if (warning.sentDate) grouped.get(label)!.push(warning.sentDate)
+    })
+
+    grouped.forEach((dates, label) => {
+      grouped.set(label, [...dates].sort((a, b) => parseDMY(a) - parseDMY(b)))
+    })
+
+    return Array.from(grouped.entries()).sort(([a], [b]) => order(a) - order(b))
+  }
+
+  const formatWarningSummary = (warnings: Array<{ warningType: string; sentDate: string }>) => {
+    const grouped = groupWarnings(warnings)
+    if (grouped.length === 0) return 'Ingen varsler sendt'
+    return grouped
+      .map(([label, dates]) => `${label === 'Fravær' ? 'F' : label === 'Grunnlag' ? 'G' : label}: ${dates.join(', ')}`)
+      .join('   |   ')
   }
 
   const getStudentSheetData = (className: string, navn: string) => {
     const studentRecords = data.absences.filter(
       r => r.class === className && normalizeMatch(r.navn) === normalizeMatch(navn)
     )
+    const matchedStudentInfo = findStudentInfo(data.studentInfo, navn, className)
 
     const teacherCountsForStudent = new Map<string, number>()
     studentRecords.forEach(record => {
@@ -85,12 +111,13 @@ function App() {
         }
       })
 
-    const warningCountMap = new Map<string, number>()
+    const warningMap = new Map<string, Array<{ warningType: string; sentDate: string }>>()
     data.warnings
       .filter(w => normalizeMatch(w.navn) === normalizeMatch(navn))
       .forEach(w => {
         const key = normalizeMatch(w.subjectGroup)
-        warningCountMap.set(key, (warningCountMap.get(key) ?? 0) + 1)
+        if (!warningMap.has(key)) warningMap.set(key, [])
+        warningMap.get(key)!.push({ warningType: w.warningType, sentDate: w.sentDate })
       })
 
     const subjectsMap = new Map<string, {
@@ -100,12 +127,15 @@ function App() {
       percentageAbsence: number
       grade?: string
       warningCount: number
+      warnings: Array<{ warningType: string; sentDate: string }>
+      showSidemalExemption: boolean
     }>()
 
     studentRecords.forEach(record => {
       const key = `${normalizeMatch(record.subject)}::${normalizeMatch(record.subjectGroup)}`
       const subjectGroupKey = normalizeMatch(record.subjectGroup)
       const existing = subjectsMap.get(key)
+      const warnings = warningMap.get(subjectGroupKey) ?? []
       if (!existing || record.percentageAbsence > existing.percentageAbsence) {
         subjectsMap.set(key, {
           subject: record.subject,
@@ -113,13 +143,16 @@ function App() {
           teacher: subjectTeacherMap.get(subjectGroupKey) ?? record.teacher,
           percentageAbsence: record.percentageAbsence,
           grade: gradeMap.get(subjectGroupKey),
-          warningCount: warningCountMap.get(subjectGroupKey) ?? 0,
+          warningCount: warnings.length,
+          warnings,
+          showSidemalExemption: matchedStudentInfo?.sidemalExemption ?? false,
         })
       }
     })
 
     return {
       kontaktlaerer,
+      studentInfo: matchedStudentInfo,
       radgiver: ownerForClass(className, RADGIVER),
       subjects: Array.from(subjectsMap.values()).sort((a, b) =>
         a.subject.localeCompare(b.subject, 'nb-NO')
@@ -145,7 +178,8 @@ function App() {
     const children: Array<Paragraph | Table> = []
 
     students.forEach((student, index) => {
-      const { kontaktlaerer, radgiver, subjects } = getStudentSheetData(student.className, student.navn)
+      const { kontaktlaerer, radgiver, subjects, studentInfo } = getStudentSheetData(student.className, student.navn)
+      const displayClassName = getDisplayClassName(student.className, studentInfo?.programArea)
 
       children.push(
         new Paragraph({
@@ -154,7 +188,7 @@ function App() {
           pageBreakBefore: index > 0,
         }),
         new Paragraph({ children: [new TextRun({ text: `Elev: ${student.navn}` })] }),
-        new Paragraph({ children: [new TextRun({ text: `Klasse: ${student.className}` })] }),
+        new Paragraph({ children: [new TextRun({ text: `Klasse: ${displayClassName}` })] }),
         new Paragraph({ children: [new TextRun({ text: `Kontaktlærer: ${kontaktlaerer}` })] }),
         new Paragraph({ children: [new TextRun({ text: `Rådgiver: ${radgiver}` })] }),
         new Paragraph({ text: '' })
@@ -162,7 +196,11 @@ function App() {
 
       subjects.forEach(subject => {
         const teacherText = subject.teacher ? ` (Lærer: ${resolveTeacher(subject.subject, subject.teacher)})` : ''
-        const infoText = `Fravær: ${subject.percentageAbsence.toFixed(1)}%   |   Karakter: ${subject.grade ?? '-'}   |   Varsler: ${subject.warningCount}`
+        const sidemalText = subject.showSidemalExemption && isNorskSubject(subject.subject)
+          ? '   |   Fritak sidemål'
+          : ''
+        const infoText = `Fravær: ${subject.percentageAbsence.toFixed(1)}%   |   Karakter: ${subject.grade ?? '-'}   |   Varsler: ${subject.warningCount}${sidemalText}`
+        const warningText = `Varselbrev sendt: ${formatWarningSummary(subject.warnings)}`
         children.push(
           new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
@@ -179,6 +217,7 @@ function App() {
                     children: [
                       new Paragraph({ children: [new TextRun({ text: `${subject.subject}${teacherText}`, bold: true })] }),
                       new Paragraph({ text: infoText }),
+                      new Paragraph({ text: warningText }),
                       new Paragraph({ text: '' }),
                       new Paragraph({ text: '' }),
                       new Paragraph({ text: '' }),
@@ -397,7 +436,7 @@ function App() {
             <div className="flex border-b border-slate-200 pb-2">
               <button
                 onClick={() => {
-                  setData({ absences: [], warnings: [], grades: [] })
+                  setData({ absences: [], warnings: [], grades: [], studentInfo: [] })
                   setSelectedClasses([])
                 }}
                 className="ml-auto px-4 py-2 text-slate-600 hover:text-slate-900 font-medium transition-colors"
