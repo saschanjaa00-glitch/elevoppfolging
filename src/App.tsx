@@ -468,7 +468,7 @@ function App() {
                     : 'text-slate-500 hover:text-slate-700'
                 }`}
               >
-                Innsikt
+                Lærerinnsikt
               </button>
               <button
                 onClick={() => {
