@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { DataStore } from '../types'
 import { normalizeMatch } from '../studentInfoUtils'
@@ -28,16 +28,67 @@ interface ClassStats {
   avgGrade: number | null
 }
 
+type MetricKey =
+  | 'students'
+  | 'avgAbsence'
+  | 'iv'
+  | 'grade1'
+  | 'grade2'
+  | 'warningsTotal'
+  | 'warningsF'
+  | 'warningsG'
+  | 'missingWarnings'
+
+interface LevelStats {
+  level: string
+  classCount: number
+  studentCount: number
+  avgAbsence: number
+  ivCount: number
+  ivStudentCount: number
+  grade1Count: number
+  grade1StudentCount: number
+  grade2Count: number
+  grade2StudentCount: number
+  bothIvAnd1StudentCount: number
+  negativeStudentsCount: number
+  negativeStudentsPct: number
+  totalWarnings: number
+  fWarnings: number
+  gWarnings: number
+  missingWarnings: number
+  avgGrunnskolepoeng: number | null
+  avgGrade: number | null
+}
+
 function fmt(n: number | null, decimals = 2): string {
   return n === null ? '—' : n.toFixed(decimals).replace('.', ',')
 }
 
-function StatCard({ label, value, highlight }: { label: string; value: ReactNode; highlight?: boolean }) {
+function StatCard({
+  label,
+  value,
+  highlight,
+  active,
+  onClick,
+}: {
+  label: string
+  value: ReactNode
+  highlight?: boolean
+  active?: boolean
+  onClick?: () => void
+}) {
   return (
-    <div className={`rounded-lg border p-4 ${highlight ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full rounded-lg border p-4 text-left transition-colors ${
+        highlight ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+      } ${active ? 'ring-2 ring-sky-300 ring-offset-1' : ''}`}
+    >
       <p className="text-xs text-slate-500 mb-1">{label}</p>
       <div className={`text-2xl font-bold ${highlight ? 'text-amber-700' : 'text-slate-900'}`}>{value}</div>
-    </div>
+    </button>
   )
 }
 
@@ -59,6 +110,12 @@ function Td({ children, warn, center, className = '' }: { children: ReactNode; w
 }
 
 export default function StatsView({ data }: Props) {
+  const [selectedMetric, setSelectedMetric] = useState<MetricKey | null>(null)
+
+  const toggleMetric = (metric: MetricKey) => {
+    setSelectedMetric(current => (current === metric ? null : metric))
+  }
+
   const stats = useMemo(() => {
     // Warning map: normalizedNavn::normalizedSubjectGroup -> count by type
     const warningMap = new Map<string, { type: string }[]>()
@@ -270,6 +327,95 @@ export default function StatsView({ data }: Props) {
     return { overall, perClass }
   }, [data])
 
+  const levelStats = useMemo((): LevelStats[] => {
+    const levels = ['1', '2', '3']
+    return levels
+      .map(level => {
+        const classRows = stats.perClass.filter(c => c.className.startsWith(level))
+        if (classRows.length === 0) return null
+
+        const classNames = new Set(classRows.map(c => c.className))
+        const levelAbsences = data.absences.filter(a => classNames.has(a.class))
+        const avgAbsence =
+          levelAbsences.length > 0
+            ? levelAbsences.reduce((sum, row) => sum + row.percentageAbsence, 0) / levelAbsences.length
+            : 0
+
+        const studentCount = classRows.reduce((sum, c) => sum + c.studentCount, 0)
+        const ivStudentCount = classRows.reduce((sum, c) => sum + c.ivStudentCount, 0)
+        const grade1StudentCount = classRows.reduce((sum, c) => sum + c.grade1StudentCount, 0)
+        const bothIvAnd1StudentCount = classRows.reduce((sum, c) => sum + c.bothIvAnd1StudentCount, 0)
+        const negativeStudentsCount =
+          ivStudentCount + grade1StudentCount - bothIvAnd1StudentCount
+
+        const gskValues = classRows
+          .map(c => c.avgGrunnskolepoeng)
+          .filter((v): v is number => v !== null)
+        const gradeValues = classRows.map(c => c.avgGrade).filter((v): v is number => v !== null)
+
+        return {
+          level,
+          classCount: classRows.length,
+          studentCount,
+          avgAbsence,
+          ivCount: classRows.reduce((sum, c) => sum + c.ivCount, 0),
+          ivStudentCount,
+          grade1Count: classRows.reduce((sum, c) => sum + c.grade1Count, 0),
+          grade1StudentCount,
+          grade2Count: classRows.reduce((sum, c) => sum + c.grade2Count, 0),
+          grade2StudentCount: classRows.reduce((sum, c) => sum + c.grade2StudentCount, 0),
+          bothIvAnd1StudentCount,
+          negativeStudentsCount,
+          negativeStudentsPct: studentCount > 0 ? (negativeStudentsCount / studentCount) * 100 : 0,
+          totalWarnings: classRows.reduce((sum, c) => sum + c.totalWarnings, 0),
+          fWarnings: classRows.reduce((sum, c) => sum + c.fWarnings, 0),
+          gWarnings: classRows.reduce((sum, c) => sum + c.gWarnings, 0),
+          missingWarnings: classRows.reduce((sum, c) => sum + c.missingWarnings, 0),
+          avgGrunnskolepoeng:
+            gskValues.length > 0
+              ? gskValues.reduce((sum, v) => sum + v, 0) / gskValues.length
+              : null,
+          avgGrade:
+            gradeValues.length > 0
+              ? gradeValues.reduce((sum, v) => sum + v, 0) / gradeValues.length
+              : null,
+        }
+      })
+      .filter((row): row is LevelStats => row !== null)
+  }, [data.absences, stats.perClass])
+
+  const metricTitle: Record<MetricKey, string> = {
+    students: 'Elever',
+    avgAbsence: 'Gj.snitt fravær',
+    iv: 'IV',
+    grade1: 'Karakter 1',
+    grade2: 'Karakter 2',
+    warningsTotal: 'Varsler totalt',
+    warningsF: 'Fraværsvarsler (F)',
+    warningsG: 'Karaktervarsler (G)',
+    missingWarnings: 'Manglende varsler (>8%)',
+  }
+
+  const metricValueText = (metric: MetricKey, row: LevelStats): string => {
+    if (metric === 'students') {
+      return `${row.studentCount} elever | Negative karakterer: ${row.negativeStudentsCount} (${fmt(row.negativeStudentsPct, 1)}%)`
+    }
+    if (metric === 'avgAbsence') return `${fmt(row.avgAbsence, 1)}%`
+    if (metric === 'iv') {
+      const ivOnly = Math.max(row.ivStudentCount - row.bothIvAnd1StudentCount, 0)
+      return `${row.ivCount} | IV: ${ivOnly} elever | 1+IV: ${row.bothIvAnd1StudentCount} elever`
+    }
+    if (metric === 'grade1') {
+      const oneOnly = Math.max(row.grade1StudentCount - row.bothIvAnd1StudentCount, 0)
+      return `${row.grade1Count} | 1: ${oneOnly} elever | 1+IV: ${row.bothIvAnd1StudentCount} elever`
+    }
+    if (metric === 'grade2') return `${row.grade2Count} (${row.grade2StudentCount} elever)`
+    if (metric === 'warningsTotal') return String(row.totalWarnings)
+    if (metric === 'warningsF') return String(row.fWarnings)
+    if (metric === 'warningsG') return String(row.gWarnings)
+    return String(row.missingWarnings)
+  }
+
   return (
     <div className="space-y-6">
       {/* Section 1: Overall summary cards */}
@@ -278,6 +424,8 @@ export default function StatsView({ data }: Props) {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           <StatCard
             label="Elever"
+            active={selectedMetric === 'students'}
+            onClick={() => toggleMetric('students')}
             value={
               <div className="flex items-start justify-between gap-3">
                 <span>{stats.overall.studentCount}</span>
@@ -289,9 +437,16 @@ export default function StatsView({ data }: Props) {
               </div>
             }
           />
-          <StatCard label="Gj.snitt fravær" value={`${fmt(stats.overall.avgAbsence, 1)}%`} />
+          <StatCard
+            label="Gj.snitt fravær"
+            value={`${fmt(stats.overall.avgAbsence, 1)}%`}
+            active={selectedMetric === 'avgAbsence'}
+            onClick={() => toggleMetric('avgAbsence')}
+          />
           <StatCard
             label="IV"
+            active={selectedMetric === 'iv'}
+            onClick={() => toggleMetric('iv')}
             value={
               <div className="flex items-start justify-between gap-3">
                 <span>{stats.overall.ivCount}</span>
@@ -304,6 +459,8 @@ export default function StatsView({ data }: Props) {
           />
           <StatCard
             label="Karakter 1"
+            active={selectedMetric === 'grade1'}
+            onClick={() => toggleMetric('grade1')}
             value={
               <div className="flex items-start justify-between gap-3">
                 <span>{stats.overall.grade1Count}</span>
@@ -317,16 +474,62 @@ export default function StatsView({ data }: Props) {
           <StatCard
             label="Karakter 2"
             value={`${stats.overall.grade2Count} (${stats.overall.grade2StudentCount})`}
+            active={selectedMetric === 'grade2'}
+            onClick={() => toggleMetric('grade2')}
           />
-          <StatCard label="Varsler totalt" value={String(stats.overall.totalWarnings)} />
-          <StatCard label="Fraværsvarsler (F)" value={String(stats.overall.fWarnings)} />
-          <StatCard label="Karaktervarsler (G)" value={String(stats.overall.gWarnings)} />
+          <StatCard
+            label="Varsler totalt"
+            value={String(stats.overall.totalWarnings)}
+            active={selectedMetric === 'warningsTotal'}
+            onClick={() => toggleMetric('warningsTotal')}
+          />
+          <StatCard
+            label="Fraværsvarsler (F)"
+            value={String(stats.overall.fWarnings)}
+            active={selectedMetric === 'warningsF'}
+            onClick={() => toggleMetric('warningsF')}
+          />
+          <StatCard
+            label="Karaktervarsler (G)"
+            value={String(stats.overall.gWarnings)}
+            active={selectedMetric === 'warningsG'}
+            onClick={() => toggleMetric('warningsG')}
+          />
           <StatCard
             label="Manglende varsler (>8%)"
             value={String(stats.overall.missingWarnings)}
             highlight
+            active={selectedMetric === 'missingWarnings'}
+            onClick={() => toggleMetric('missingWarnings')}
           />
         </div>
+
+        {selectedMetric && (
+          <div className="mt-5 rounded-lg border border-sky-200 bg-sky-50 p-4">
+            <h3 className="text-sm font-semibold text-slate-900">Detaljer per trinn</h3>
+            <p className="text-xs text-slate-600 mt-1">Valgt nøkkeltall: {metricTitle[selectedMetric]}</p>
+            <div className="overflow-x-auto mt-3">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-sky-200">
+                    <th className="py-2 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Trinn</th>
+                    <th className="py-2 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Klasser</th>
+                    <th className="py-2 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Verdi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {levelStats.map(row => (
+                    <tr key={row.level} className="border-b border-sky-100 last:border-0">
+                      <td className="py-2 px-3 font-medium text-slate-900">{row.level}. trinn</td>
+                      <td className="py-2 px-3 text-slate-700">{row.classCount}</td>
+                      <td className="py-2 px-3 text-slate-700">{metricValueText(selectedMetric, row)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Section 2: Per-class table */}
