@@ -34,138 +34,21 @@ export default function InnsiktView({ data }: Props) {
   const [expandedTeacher, setExpandedTeacher] = useState<string | null>(null)
 
   const teacherStats = useMemo(() => {
-    // Collect all unique teachers and their data
+    // Build teacher and subject statistics from vurderinger (grades) only.
     const teacherData = new Map<string, TeacherStats>()
     const teacherSubjects = new Map<string, Map<string, SubjectStats>>()
-
-    // Process absences to get teachers, their students, and subject-level data
     const teacherStudents = new Map<string, Set<string>>()
-    const subjectStudents = new Map<string, Map<string, Set<string>>>() // teacher -> subject -> students
-    
-    data.absences.forEach(absence => {
-      const teacher = absence.teacher?.trim()
-      if (!teacher) return
-      
-      // Track students per teacher
-      if (!teacherStudents.has(teacher)) {
-        teacherStudents.set(teacher, new Set())
-      }
-      teacherStudents.get(teacher)!.add(normalizeMatch(absence.navn))
-      
-      // Track students per subject
-      if (!subjectStudents.has(teacher)) {
-        subjectStudents.set(teacher, new Map())
-      }
-      if (!subjectStudents.get(teacher)!.has(absence.subject)) {
-        subjectStudents.get(teacher)!.set(absence.subject, new Set())
-      }
-      subjectStudents.get(teacher)!.get(absence.subject)!.add(normalizeMatch(absence.navn))
-    })
+    const subjectStudents = new Map<string, Map<string, Set<string>>>()
 
-    // Initialize teacher stats from absences
-    teacherStudents.forEach((students, teacher) => {
-      teacherData.set(teacher, {
-        name: teacher,
-        studentCount: students.size,
-        totalVarsels: 0,
-        varselsByType: {},
-        gradesCounts: {},
-        subjectStats: [],
-      })
-      
-      // Initialize subject stats for this teacher
-      const subjects = new Map<string, SubjectStats>()
-      subjectStudents.get(teacher)?.forEach((students, subject) => {
-        subjects.set(subject, {
-          subject,
-          studentCount: students.size,
-          totalVarsels: 0,
-          varselsByType: {},
-          gradesCounts: {},
-        })
-      })
-      teacherSubjects.set(teacher, subjects)
-    })
-
-    // Process warnings
-    const warningsByTeacher = new Map<string, Array<{ type: string; date: string }>>()
-    const warningsByTeacherSubject = new Map<string, Map<string, Array<{ type: string; date: string }>>>()
-    
-    data.warnings.forEach(warning => {
-      // Find the teacher(s) for this student in the given subject
-      const matching = data.absences.filter(
-        a => normalizeMatch(a.navn) === normalizeMatch(warning.navn) && 
-             a.subjectGroup === warning.subjectGroup
-      )
-      
-      matching.forEach(absence => {
-        const teacher = absence.teacher?.trim()
-        if (!teacher) return
-        
-        // Track warnings per teacher
-        if (!warningsByTeacher.has(teacher)) {
-          warningsByTeacher.set(teacher, [])
-        }
-        warningsByTeacher.get(teacher)!.push({
-          type: warning.warningType.toLowerCase(),
-          date: warning.sentDate,
-        })
-        
-        // Track warnings per subject
-        if (!warningsByTeacherSubject.has(teacher)) {
-          warningsByTeacherSubject.set(teacher, new Map())
-        }
-        if (!warningsByTeacherSubject.get(teacher)!.has(absence.subject)) {
-          warningsByTeacherSubject.get(teacher)!.set(absence.subject, [])
-        }
-        warningsByTeacherSubject.get(teacher)!.get(absence.subject)!.push({
-          type: warning.warningType.toLowerCase(),
-          date: warning.sentDate,
-        })
-      })
-    })
-
-    // Update warning counts for teachers
-    warningsByTeacher.forEach((warnings, teacher) => {
-      const stats = teacherData.get(teacher)
-      if (!stats) return
-
-      stats.totalVarsels = warnings.length
-
-      warnings.forEach(warning => {
-        const label = warning.type.includes('frav') 
-          ? 'F' 
-          : warning.type.includes('vurdering') || warning.type.includes('grunnlag')
-          ? 'G'
-          : warning.type
-        stats.varselsByType[label] = (stats.varselsByType[label] ?? 0) + 1
-      })
-    })
-    
-    // Update warning counts for subjects
-    warningsByTeacherSubject.forEach((subjectWarnings, teacher) => {
-      subjectWarnings.forEach((warnings, subject) => {
-        const subjectStat = teacherSubjects.get(teacher)?.get(subject)
-        if (!subjectStat) return
-        
-        subjectStat.totalVarsels = warnings.length
-        warnings.forEach(warning => {
-          const label = warning.type.includes('frav') 
-            ? 'F' 
-            : warning.type.includes('vurdering') || warning.type.includes('grunnlag')
-            ? 'G'
-            : warning.type
-          subjectStat.varselsByType[label] = (subjectStat.varselsByType[label] ?? 0) + 1
-        })
-      })
-    })
-
-    // Process grades
     data.grades.forEach(grade => {
       const teacher = grade.subjectTeacher?.trim()
       if (!teacher) return
 
-      // Initialize teacher if not already present
+      const subject = grade.subjectGroup?.trim()
+      if (!subject) return
+
+      const normStudent = normalizeMatch(grade.navn)
+
       if (!teacherData.has(teacher)) {
         teacherData.set(teacher, {
           name: teacher,
@@ -175,32 +58,91 @@ export default function InnsiktView({ data }: Props) {
           gradesCounts: {},
           subjectStats: [],
         })
-        teacherSubjects.set(teacher, new Map())
       }
 
-      const stats = teacherData.get(teacher)!
-      const gradeValue = grade.grade.toUpperCase().trim()
-      stats.gradesCounts[gradeValue] = (stats.gradesCounts[gradeValue] ?? 0) + 1
-      
-      // Add to subject stats
-      if (!teacherSubjects.get(teacher)!.has(grade.subjectGroup)) {
-        teacherSubjects.get(teacher)!.set(grade.subjectGroup, {
-          subject: grade.subjectGroup,
+      if (!teacherStudents.has(teacher)) {
+        teacherStudents.set(teacher, new Set())
+      }
+      teacherStudents.get(teacher)!.add(normStudent)
+
+      if (!subjectStudents.has(teacher)) {
+        subjectStudents.set(teacher, new Map())
+      }
+      if (!subjectStudents.get(teacher)!.has(subject)) {
+        subjectStudents.get(teacher)!.set(subject, new Set())
+      }
+      subjectStudents.get(teacher)!.get(subject)!.add(normStudent)
+
+      if (!teacherSubjects.has(teacher)) {
+        teacherSubjects.set(teacher, new Map())
+      }
+      if (!teacherSubjects.get(teacher)!.has(subject)) {
+        teacherSubjects.get(teacher)!.set(subject, {
+          subject,
           studentCount: 0,
           totalVarsels: 0,
           varselsByType: {},
           gradesCounts: {},
         })
       }
-      
-      const subjectStat = teacherSubjects.get(teacher)!.get(grade.subjectGroup)!
+
+      const stats = teacherData.get(teacher)!
+      const gradeValue = grade.grade.toUpperCase().trim()
+      stats.gradesCounts[gradeValue] = (stats.gradesCounts[gradeValue] ?? 0) + 1
+
+      const subjectStat = teacherSubjects.get(teacher)!.get(subject)!
       subjectStat.gradesCounts[gradeValue] = (subjectStat.gradesCounts[gradeValue] ?? 0) + 1
     })
 
-    // Convert subject stats maps to arrays
-    teacherData.forEach((teacher) => {
+    // Set student counts from vurderinger-derived student sets.
+    teacherData.forEach((stats, teacher) => {
+      stats.studentCount = teacherStudents.get(teacher)?.size ?? 0
+      const subjects = teacherSubjects.get(teacher)
+      subjects?.forEach((subjectStat, subjectName) => {
+        subjectStat.studentCount = subjectStudents.get(teacher)?.get(subjectName)?.size ?? 0
+      })
+    })
+
+    const warningLabel = (warningType: string) => {
+      const type = warningType.toLowerCase()
+      if (type.includes('frav')) return 'F'
+      if (type.includes('vurdering') || type.includes('grunnlag')) return 'G'
+      return warningType
+    }
+
+    // Map warnings to teacher/subject using vurderinger relationships only.
+    data.warnings.forEach(warning => {
+      const warningStudent = normalizeMatch(warning.navn)
+      const warningSubject = warning.subjectGroup?.trim()
+      if (!warningSubject) return
+
+      const matchedGradeRows = data.grades.filter(
+        g =>
+          normalizeMatch(g.navn) === warningStudent &&
+          g.subjectGroup?.trim() === warningSubject &&
+          !!g.subjectTeacher?.trim()
+      )
+
+      const matchedTeachers = new Set(matchedGradeRows.map(g => g.subjectTeacher!.trim()))
+      matchedTeachers.forEach(teacher => {
+        const teacherStats = teacherData.get(teacher)
+        if (!teacherStats) return
+
+        const label = warningLabel(warning.warningType)
+        teacherStats.totalVarsels += 1
+        teacherStats.varselsByType[label] = (teacherStats.varselsByType[label] ?? 0) + 1
+
+        const subjectStat = teacherSubjects.get(teacher)?.get(warningSubject)
+        if (!subjectStat) return
+        subjectStat.totalVarsels += 1
+        subjectStat.varselsByType[label] = (subjectStat.varselsByType[label] ?? 0) + 1
+      })
+    })
+
+    // Convert subject stats maps to sorted arrays.
+    teacherData.forEach(teacher => {
       const subjects = teacherSubjects.get(teacher.name) || new Map()
-      teacher.subjectStats = Array.from(subjects.values()).sort((a, b) => 
+      teacher.subjectStats = Array.from(subjects.values()).sort((a, b) =>
         a.subject.localeCompare(b.subject)
       )
     })
@@ -381,56 +323,39 @@ export default function InnsiktView({ data }: Props) {
                     ))}
                   </tr>
                   {expandedTeacher === teacher.name && (
-                    <tr className="bg-slate-50 border-b border-slate-200">
-                      <td colSpan={12} className="py-4 px-3">
-                        <div className="space-y-3">
-                          <h4 className="text-sm font-semibold text-slate-700">Per fag:</h4>
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-xs">
-                              <thead>
-                                <tr className="border-b border-slate-300">
-                                  <th className="py-2 px-3 text-left font-semibold text-slate-600">Fag</th>
-                                  <th className="py-2 px-3 text-center font-semibold text-slate-600">Elever</th>
-                                  <th className="py-2 px-3 text-center font-semibold text-slate-600">Varsler</th>
-                                  <th className="py-2 px-3 text-center font-semibold text-slate-600">F</th>
-                                  <th className="py-2 px-3 text-center font-semibold text-slate-600">G</th>
-                                  {allGrades.map(grade => (
-                                    <th key={grade} className="py-2 px-3 text-center font-semibold text-slate-600">
-                                      {grade}
-                                    </th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {teacher.subjectStats.map(subject => (
-                                  <tr key={subject.subject} className="border-b border-slate-200 hover:bg-white/50">
-                                    <td className="py-2 px-3 text-left text-slate-700">{subject.subject}</td>
-                                    <td className="py-2 px-3 text-center text-slate-700">{subject.studentCount}</td>
-                                    <td className="py-2 px-3 text-center text-slate-700 font-medium">{subject.totalVarsels}</td>
-                                    <td className="py-2 px-3 text-center text-slate-700">{subject.varselsByType['f'] ?? 0}</td>
-                                    <td className="py-2 px-3 text-center text-slate-700">{subject.varselsByType['g'] ?? 0}</td>
-                                    {allGrades.map(grade => (
-                                      <td
-                                        key={grade}
-                                        className={`py-2 px-3 text-center ${
-                                          grade === 'IV' || grade === '1'
-                                            ? 'bg-red-100 text-red-700 font-medium'
-                                            : grade === '2'
-                                            ? 'bg-amber-100 text-amber-700 font-medium'
-                                            : 'text-slate-700'
-                                        }`}
-                                      >
-                                        {subject.gradesCounts[grade] ?? 0}
-                                      </td>
-                                    ))}
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
+                    <>
+                      {teacher.subjectStats.length > 0 ? (
+                        teacher.subjectStats.map(subject => (
+                          <tr key={`${teacher.name}-${subject.subject}`} className="bg-slate-50 border-b border-slate-200">
+                            <td className="py-2 px-3 text-left text-slate-700 pl-10">- {subject.subject}</td>
+                            <td className="py-2 px-3 text-center text-slate-700">{subject.studentCount}</td>
+                            <td className="py-2 px-3 text-center text-slate-700 font-medium">{subject.totalVarsels}</td>
+                            <td className="py-2 px-3 text-center text-slate-700">{subject.varselsByType['f'] ?? 0}</td>
+                            <td className="py-2 px-3 text-center text-slate-700">{subject.varselsByType['g'] ?? 0}</td>
+                            {allGrades.map(grade => (
+                              <td
+                                key={grade}
+                                className={`py-2 px-3 text-center ${
+                                  grade === 'IV' || grade === '1'
+                                    ? 'bg-red-100 text-red-700 font-medium'
+                                    : grade === '2'
+                                    ? 'bg-amber-100 text-amber-700 font-medium'
+                                    : 'text-slate-700'
+                                }`}
+                              >
+                                {subject.gradesCounts[grade] ?? 0}
+                              </td>
+                            ))}
+                          </tr>
+                        ))
+                      ) : (
+                        <tr className="bg-slate-50 border-b border-slate-200">
+                          <td colSpan={12} className="py-3 px-3 text-center text-slate-500 text-sm">
+                            Ingen fag med vurderingsdata for denne læreren.
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   )}
                 </Fragment>
               ))}
