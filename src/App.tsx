@@ -492,13 +492,16 @@ function App() {
               </button>
             </div>
 
-            {activeTab === 'statistikk' ? (
+            <div className={activeTab === 'statistikk' ? '' : 'hidden'}>
               <StatsView data={data} />
-            ) : activeTab === 'faginnsikt' ? (
+            </div>
+            <div className={activeTab === 'faginnsikt' ? '' : 'hidden'}>
               <FaginnsiktView data={data} />
-            ) : activeTab === 'innsikt' ? (
+            </div>
+            <div className={activeTab === 'innsikt' ? '' : 'hidden'}>
               <InnsiktView data={data} />
-            ) : (
+            </div>
+            <div className={activeTab === 'elever' ? '' : 'hidden'}>
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                 <aside className="lg:col-span-1 no-print">
                   {/* Presets */}
@@ -786,7 +789,7 @@ function App() {
                   )}
                 </section>
               </div>
-            )}
+            </div>
 
           </div>
         )}
