@@ -61,6 +61,19 @@ interface LevelStats {
   avgGrade: number | null
 }
 
+type SortKey =
+  | 'avgAbsence'
+  | 'ivCount'
+  | 'grade1Count'
+  | 'grade2Count'
+  | 'totalWarnings'
+  | 'missingWarnings'
+  | 'avgGrunnskolepoeng'
+  | 'avgGrade'
+  | 'avgGradeDelta'
+
+type SortDirection = 'asc' | 'desc'
+
 function fmt(n: number | null, decimals = 2): string {
   return n === null ? '—' : n.toFixed(decimals).replace('.', ',')
 }
@@ -92,11 +105,38 @@ function StatCard({
   )
 }
 
-function Th({ children, center, right, className = '' }: { children: ReactNode; center?: boolean; right?: boolean; className?: string }) {
+function Th({
+  children,
+  center,
+  right,
+  className = '',
+  onClick,
+  sort,
+}: {
+  children: ReactNode
+  center?: boolean
+  right?: boolean
+  className?: string
+  onClick?: () => void
+  sort?: SortDirection | null
+}) {
   const align = center ? 'text-center' : right ? 'text-right' : 'text-left'
+  const justify = center ? 'justify-center' : right ? 'justify-end' : 'justify-start'
+  const indicator = sort === 'asc' ? '▲' : sort === 'desc' ? '▼' : ''
   return (
     <th className={`py-3 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap ${align} ${className}`}>
-      {children}
+      {onClick ? (
+        <button
+          type="button"
+          onClick={onClick}
+          className={`inline-flex w-full items-center gap-1 ${justify} hover:text-slate-700`}
+        >
+          <span>{children}</span>
+          <span className="text-[10px] leading-none min-w-2">{indicator}</span>
+        </button>
+      ) : (
+        children
+      )}
     </th>
   )
 }
@@ -109,11 +149,29 @@ function Td({ children, warn, center, className = '' }: { children: ReactNode; w
   )
 }
 
+function gradeDelta(avgGrade: number | null, avgGrunnskolepoeng: number | null): number | null {
+  if (avgGrade === null || avgGrunnskolepoeng === null) return null
+  return avgGrade - avgGrunnskolepoeng
+}
+
 export default function StatsView({ data }: Props) {
   const [selectedMetric, setSelectedMetric] = useState<MetricKey | null>(null)
+  const [tableSort, setTableSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null)
 
   const toggleMetric = (metric: MetricKey) => {
     setSelectedMetric(current => (current === metric ? null : metric))
+  }
+
+  const cycleTableSort = (key: SortKey) => {
+    setTableSort(current => {
+      if (!current || current.key !== key) return { key, direction: 'asc' }
+      if (current.direction === 'asc') return { key, direction: 'desc' }
+      return null
+    })
+  }
+
+  const resetTableSort = () => {
+    setTableSort(null)
   }
 
   const stats = useMemo(() => {
@@ -416,6 +474,41 @@ export default function StatsView({ data }: Props) {
     return String(row.missingWarnings)
   }
 
+  const sortedPerClass = useMemo(() => {
+    if (!tableSort) return stats.perClass
+
+    const valueFor = (row: ClassStats): number | null => {
+      if (tableSort.key === 'avgAbsence') return row.avgAbsence
+      if (tableSort.key === 'ivCount') return row.ivCount
+      if (tableSort.key === 'grade1Count') return row.grade1Count
+      if (tableSort.key === 'grade2Count') return row.grade2Count
+      if (tableSort.key === 'totalWarnings') return row.totalWarnings
+      if (tableSort.key === 'missingWarnings') return row.missingWarnings
+      if (tableSort.key === 'avgGrunnskolepoeng') return row.avgGrunnskolepoeng
+      if (tableSort.key === 'avgGrade') return row.avgGrade
+      return gradeDelta(row.avgGrade, row.avgGrunnskolepoeng)
+    }
+
+    return [...stats.perClass].sort((a, b) => {
+      const aVal = valueFor(a)
+      const bVal = valueFor(b)
+
+      if (aVal === null && bVal === null) {
+        return a.className.localeCompare(b.className, 'nb-NO', { numeric: true })
+      }
+      if (aVal === null) return 1
+      if (bVal === null) return -1
+
+      const diff = aVal - bVal
+      if (diff !== 0) return tableSort.direction === 'asc' ? diff : -diff
+      return a.className.localeCompare(b.className, 'nb-NO', { numeric: true })
+    })
+  }, [stats.perClass, tableSort])
+
+  const currentSort = (key: SortKey): SortDirection | null => {
+    return tableSort?.key === key ? tableSort.direction : null
+  }
+
   return (
     <div className="space-y-6">
       {/* Section 1: Overall summary cards */}
@@ -540,24 +633,60 @@ export default function StatsView({ data }: Props) {
             <thead>
               <tr className="border-b-2 border-slate-200">
                 {/* Group: identity */}
-                <Th>Klasse</Th>
+                <Th onClick={resetTableSort}>Klasse</Th>
                 {/* Group: attendance – shaded */}
-                <Th right className="bg-slate-50 border-l border-slate-200">Gj.snitt fravær</Th>
+                <Th
+                  right
+                  className="bg-slate-50 border-l border-slate-200"
+                  onClick={() => cycleTableSort('avgAbsence')}
+                  sort={currentSort('avgAbsence')}
+                >
+                  Gj.snitt fravær
+                </Th>
                 {/* Group: grades */}
-                <Th center className="border-l border-slate-200">IV</Th>
-                <Th center>1</Th>
-                <Th center>2</Th>
+                <Th
+                  center
+                  className="border-l border-slate-200"
+                  onClick={() => cycleTableSort('ivCount')}
+                  sort={currentSort('ivCount')}
+                >
+                  IV
+                </Th>
+                <Th center onClick={() => cycleTableSort('grade1Count')} sort={currentSort('grade1Count')}>1</Th>
+                <Th center onClick={() => cycleTableSort('grade2Count')} sort={currentSort('grade2Count')}>2</Th>
                 {/* Group: warnings – shaded */}
-                <Th center className="bg-slate-50 border-l border-slate-200">Varsler (F+G)</Th>
+                <Th
+                  center
+                  className="bg-slate-50 border-l border-slate-200"
+                  onClick={() => cycleTableSort('totalWarnings')}
+                  sort={currentSort('totalWarnings')}
+                >
+                  Varsler (F+G)
+                </Th>
                 {/* Group: missing – amber */}
-                <Th center className="bg-amber-50 border-l border-slate-200">Manglende varsler</Th>
+                <Th
+                  center
+                  className="bg-amber-50 border-l border-slate-200"
+                  onClick={() => cycleTableSort('missingWarnings')}
+                  sort={currentSort('missingWarnings')}
+                >
+                  Manglende varsler
+                </Th>
                 {/* Group: averages */}
-                <Th right className="border-l border-slate-200">GSK.P</Th>
-                <Th right>Snitt vgs</Th>
+                <Th
+                  right
+                  className="border-l border-slate-200"
+                  onClick={() => cycleTableSort('avgGrunnskolepoeng')}
+                  sort={currentSort('avgGrunnskolepoeng')}
+                >
+                  GSK.P
+                </Th>
+                <Th right onClick={() => cycleTableSort('avgGrade')} sort={currentSort('avgGrade')}>Snitt vgs</Th>
+                <Th right onClick={() => cycleTableSort('avgGradeDelta')} sort={currentSort('avgGradeDelta')}>Delta</Th>
               </tr>
             </thead>
             <tbody>
-              {stats.perClass.map(c => (
+              {sortedPerClass.map(c => (
                 <tr key={c.className} className="border-b border-slate-100 hover:bg-sky-50/40">
                   <td className="py-2 px-3 font-medium text-slate-900">{c.className}</td>
                   <Td className="bg-slate-50 border-l border-slate-200">{fmt(c.avgAbsence, 1)}%</Td>
@@ -568,6 +697,21 @@ export default function StatsView({ data }: Props) {
                   <Td center warn={c.missingWarnings > 0} className="bg-amber-50 border-l border-slate-200">{c.missingWarnings || '—'}</Td>
                   <Td className="border-l border-slate-200">{fmt(c.avgGrunnskolepoeng)}</Td>
                   <Td>{fmt(c.avgGrade)}</Td>
+                  <Td
+                    className={
+                      gradeDelta(c.avgGrade, c.avgGrunnskolepoeng) === null
+                        ? ''
+                        : gradeDelta(c.avgGrade, c.avgGrunnskolepoeng)! < 0
+                          ? 'bg-red-50 text-slate-800 font-semibold'
+                          : gradeDelta(c.avgGrade, c.avgGrunnskolepoeng)! > 0
+                            ? 'bg-emerald-50 text-slate-800 font-semibold'
+                            : ''
+                    }
+                  >
+                    {gradeDelta(c.avgGrade, c.avgGrunnskolepoeng) === null
+                      ? '—'
+                      : fmt(gradeDelta(c.avgGrade, c.avgGrunnskolepoeng), 2)}
+                  </Td>
                 </tr>
               ))}
             </tbody>
@@ -582,6 +726,21 @@ export default function StatsView({ data }: Props) {
                 <Td center warn={stats.overall.missingWarnings > 0} className="bg-amber-100 border-l border-slate-200">{stats.overall.missingWarnings || '—'}</Td>
                 <Td className="bg-slate-50 border-l border-slate-200">{fmt(stats.overall.avgGrunnskolepoeng)}</Td>
                 <Td className="bg-slate-50">{fmt(stats.overall.avgGrade)}</Td>
+                <Td
+                  className={
+                    gradeDelta(stats.overall.avgGrade, stats.overall.avgGrunnskolepoeng) === null
+                      ? 'bg-slate-50'
+                      : gradeDelta(stats.overall.avgGrade, stats.overall.avgGrunnskolepoeng)! < 0
+                        ? 'bg-red-50 text-slate-800'
+                        : gradeDelta(stats.overall.avgGrade, stats.overall.avgGrunnskolepoeng)! > 0
+                          ? 'bg-emerald-50 text-slate-800'
+                          : 'bg-slate-50'
+                  }
+                >
+                  {gradeDelta(stats.overall.avgGrade, stats.overall.avgGrunnskolepoeng) === null
+                    ? '—'
+                    : fmt(gradeDelta(stats.overall.avgGrade, stats.overall.avgGrunnskolepoeng), 2)}
+                </Td>
               </tr>
             </tfoot>
           </table>
