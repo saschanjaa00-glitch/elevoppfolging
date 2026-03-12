@@ -8,6 +8,7 @@ import ClassSelector from './components/ClassSelector'
 import StudentList from './components/StudentList'
 import StatsView from './components/StatsView'
 import InnsiktView from './components/InnsiktView'
+import FaginnsiktView from './components/FaginnsiktView'
 import type { DataStore } from './types'
 import './index.css'
 
@@ -29,7 +30,7 @@ function App() {
   const [absenceThreshold, setAbsenceThreshold] = useState<number>(8)
   const [thresholdEnabled, setThresholdEnabled] = useState<boolean>(true)
   const [noFilter, setNoFilter] = useState<boolean>(false)
-  const [activeTab, setActiveTab] = useState<'elever' | 'statistikk' | 'innsikt'>('elever')
+  const [activeTab, setActiveTab] = useState<'elever' | 'statistikk' | 'faginnsikt' | 'innsikt'>('elever')
   const [studentSearch, setStudentSearch] = useState<string>('')
   const [missingWarningsOnly, setMissingWarningsOnly] = useState<boolean>(false)
   const [lowGradeFilter, setLowGradeFilter] = useState<string[]>(['IV', '1', '2'])
@@ -461,6 +462,16 @@ function App() {
                 Statistikk
               </button>
               <button
+                onClick={() => setActiveTab('faginnsikt')}
+                className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
+                  activeTab === 'faginnsikt'
+                    ? 'text-sky-700 border-b-2 border-sky-600'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Faginnsikt
+              </button>
+              <button
                 onClick={() => setActiveTab('innsikt')}
                 className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
                   activeTab === 'innsikt'
@@ -483,6 +494,8 @@ function App() {
 
             {activeTab === 'statistikk' ? (
               <StatsView data={data} />
+            ) : activeTab === 'faginnsikt' ? (
+              <FaginnsiktView data={data} />
             ) : activeTab === 'innsikt' ? (
               <InnsiktView data={data} />
             ) : (
