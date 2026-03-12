@@ -343,6 +343,11 @@ export default function StudentList({
       // Class chip (slate)
       bx += chip(student.className, bx, bY, [241, 245, 249], [71, 85, 105])
 
+      // T talent program chip
+      if (student.hasTalentProgram) {
+        bx += chip('T', bx, bY, [224, 242, 254], [3, 105, 161], true)
+      }
+
       // Warnings chip
       const warningBreakdown = student.subjects.reduce(
         (acc, s) => {
@@ -372,7 +377,24 @@ export default function StudentList({
 
       // Avbrudd chip
       if (isAvbrudd) {
-        chip('Avbrudd', bx, bY, [254, 215, 170], [120, 53, 15])
+        bx += chip('Avbrudd', bx, bY, [254, 215, 170], [120, 53, 15])
+      }
+
+      // Fritak sidemål chip
+      if (student.sidemalExemption) {
+        bx += chip('Fritak sidemål', bx, bY, [209, 250, 229], [6, 95, 70], true)
+      }
+
+      // Intake points chip
+      {
+        const intake = formatIntakePoints(student.intakePoints)
+        if (intake.empty) {
+          chip('•', bx, bY, [22, 163, 74], [255, 255, 255], true)
+        } else {
+          const intakeBg: [number, number, number] = intake.tone === 'green' ? [220, 252, 231] : [241, 245, 249]
+          const intakeFg: [number, number, number] = intake.tone === 'green' ? [22, 101, 52] : [71, 85, 105]
+          chip(intake.label, bx, bY, intakeBg, intakeFg, true)
+        }
       }
 
       // --- Subject rows ---
@@ -396,19 +418,24 @@ export default function StudentList({
         const pctLabel = `${pct.toFixed(1)}%`
         doc.setFontSize(7.5)
         const pctX = marginX + 5 + subjectChipW + 2
+        let subjectRowX = pctX
         if (isHighRisk) {
-          chip(pctLabel, pctX, subY, [254, 226, 226], [185, 28, 28])
+          subjectRowX += chip(pctLabel, pctX, subY, [254, 226, 226], [185, 28, 28])
         } else if (isMedRisk) {
-          chip(pctLabel, pctX, subY, [254, 243, 199], [180, 83, 9])
+          subjectRowX += chip(pctLabel, pctX, subY, [254, 243, 199], [180, 83, 9])
         } else {
-          chip(pctLabel, pctX, subY, [241, 245, 249], [100, 116, 139])
+          subjectRowX += chip(pctLabel, pctX, subY, [241, 245, 249], [100, 116, 139])
         }
 
         // Grade chip — orange, only for IV/1/2
         if (subjectEntry.grade && ['iv', '1', '2'].includes(subjectEntry.grade.toLowerCase())) {
           const gradeLabel = `Karakter T1: ${subjectEntry.grade}`
-          const gradeX = pctX + doc.getTextWidth(pctLabel) + 6
-          chip(gradeLabel, gradeX, subY, [253, 186, 116], [154, 52, 18], true, 7.5)
+          subjectRowX += chip(gradeLabel, subjectRowX, subY, [253, 186, 116], [154, 52, 18], true, 7.5)
+        }
+
+        // Fritak sidemål chip per subject
+        if (student.sidemalExemption && isNorskSubject(subjectEntry.subject)) {
+          chip('Fritak sidemål', subjectRowX, subY, [209, 250, 229], [6, 95, 70], true, 7.5)
         }
 
         subY += 5
