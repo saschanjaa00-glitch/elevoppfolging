@@ -2,6 +2,7 @@ import { useState } from 'react'
 import * as XLSX from 'xlsx'
 import { Upload } from 'lucide-react'
 import type { DataStore, AbsenceRecord, WarningRecord, StudentInfoRecord } from '../types'
+import { anonymizeData } from '../anonymizeNames'
 
 interface FileUploadProps {
   onDataImport: (data: DataStore) => void
@@ -10,6 +11,7 @@ interface FileUploadProps {
 export default function FileUpload({ onDataImport }: FileUploadProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [anonymize, setAnonymize] = useState(false)
 
   const normalizeHeader = (header: string): string =>
     header
@@ -240,7 +242,7 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
         return
       }
 
-      onDataImport(data)
+      onDataImport(anonymize ? anonymizeData(data) : data)
     } catch (err) {
       setError('Feil ved behandling av filer: ' + (err instanceof Error ? err.message : String(err)))
     } finally {
@@ -260,9 +262,19 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
         <h2 className="text-2xl font-bold text-center text-slate-900 mb-2">
           Importer fraværsdata
         </h2>
-        <p className="text-center text-slate-600 mb-6">
+        <p className="text-center text-slate-600 mb-4">
           Dra og slipp Excel-filer eller klikk for å laste opp
         </p>
+
+        <label className="flex items-center justify-center gap-2 mb-6 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={anonymize}
+            onChange={e => setAnonymize(e.target.checked)}
+            className="w-4 h-4 rounded accent-sky-600"
+          />
+          <span className="text-sm text-slate-700 font-medium">Anonymiser navn (elever og lærere)</span>
+        </label>
 
         <div
           className="border-2 border-dashed border-slate-300 rounded-lg p-12 text-center hover:border-sky-400 hover:bg-sky-50 transition-colors cursor-pointer"
