@@ -139,10 +139,18 @@ export default function StudentList({
       const dobStr = studentDobMap.get(normalizeMatch(record.navn)) ?? ''
       const grade = gradeMap.get(warningKey)
       const subjectTeacher = subjectTeacherMap.get(warningKey) ?? record.teacher
+      const overThreshold = record.percentageAbsence > threshold
+      const matchesSelectedGrade = grade !== undefined && lowGradeFilter.includes(grade)
+      const matchesFullRapportGrade = grade !== undefined && effectiveLowGrades.includes(grade)
+
+      let includeSubject = overThreshold
+      if (fullRapport) {
+        includeSubject = overThreshold || matchesFullRapportGrade
+      } else if (lowGradeFilter.length > 0) {
+        includeSubject = overThreshold || matchesSelectedGrade
+      }
 
       if (!summaryMap.has(key)) {
-        const includeSubject = record.percentageAbsence > threshold ||
-          (fullRapport && grade !== undefined && effectiveLowGrades.includes(grade))
         summaryMap.set(key, {
           navn: record.navn,
           className: record.class,
@@ -160,8 +168,6 @@ export default function StudentList({
         summary.maxPercentage = Math.max(summary.maxPercentage, record.percentageAbsence)
         summary.totalHours += record.hoursAbsence
 
-        const includeSubject = record.percentageAbsence > threshold ||
-          (fullRapport && grade !== undefined && effectiveLowGrades.includes(grade))
         if (includeSubject) {
           const subjectExists = summary.subjects.some(
             s => s.subjectGroup === record.subjectGroup && s.subject === record.subject
@@ -178,24 +184,27 @@ export default function StudentList({
     })
 
     return Array.from(summaryMap.values())
-  }, [data, selectedClasses, threshold, fullRapport, fullRapportInclude2])
+  }, [data, selectedClasses, threshold, lowGradeFilter, fullRapport, fullRapportInclude2])
 
   const atRiskStudents = useMemo(() => {
     const searchNorm = studentSearch.toLowerCase().trim()
+    const isMissingOverride = missingWarningsOnly
     return studentSummaries
       .filter(s => s.subjects.length > 0)
-      .filter(s => !searchNorm || s.navn.toLowerCase().includes(searchNorm))
+      .filter(s => isMissingOverride || !searchNorm || s.navn.toLowerCase().includes(searchNorm))
       .map(s => {
+        if (isMissingOverride) {
+          const subjects = s.subjects.filter(
+            sub => sub.warnings.length === 0 && sub.percentageAbsence > threshold
+          )
+          return { ...s, subjects }
+        }
         if (fullRapport) return s
-        let subjects = s.subjects
-        if (missingWarningsOnly) subjects = subjects.filter(sub => sub.warnings.length === 0)
-        if (lowGradeFilter.length > 0) subjects = subjects.filter(sub => sub.grade !== undefined && lowGradeFilter.includes(sub.grade))
-        return { ...s, subjects }
+        return s
       })
       .filter(s => {
+        if (isMissingOverride) return s.subjects.length > 0
         if (fullRapport) return true
-        if (missingWarningsOnly && s.subjects.length === 0) return false
-        if (lowGradeFilter.length > 0 && s.subjects.length === 0) return false
         return true
       })
       .sort((a, b) => {
@@ -203,7 +212,7 @@ export default function StudentList({
         if (classCompare !== 0) return classCompare
         return a.navn.localeCompare(b.navn, 'nb-NO')
       })
-  }, [studentSummaries, studentSearch, missingWarningsOnly, lowGradeFilter, fullRapport, fullRapportInclude2])
+  }, [studentSummaries, studentSearch, missingWarningsOnly, threshold, fullRapport, fullRapportInclude2])
 
   if (atRiskStudents.length === 0) {
     return (

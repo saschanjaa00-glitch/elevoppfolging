@@ -4,6 +4,7 @@ interface ClassSelectorProps {
   data: DataStore
   selectedClasses: string[]
   onClassChange: (classNames: string[]) => void
+  onPrintClassLists?: () => void
   onExportOppfolgingsark?: () => void
 }
 
@@ -11,6 +12,7 @@ export default function ClassSelector({
   data,
   selectedClasses,
   onClassChange,
+  onPrintClassLists,
   onExportOppfolgingsark,
 }: ClassSelectorProps) {
   const classes = Array.from(new Set(data.absences.map(a => a.class))).sort()
@@ -103,19 +105,37 @@ export default function ClassSelector({
         ))}
       </div>
 
-      {onExportOppfolgingsark && (
-        <button
-          type="button"
-          onClick={onExportOppfolgingsark}
-          disabled={selectedClasses.length === 0}
-          className={`w-full mt-4 px-3 py-2 text-sm font-medium rounded transition-colors ${
-            selectedClasses.length > 0
-              ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-              : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-          }`}
-        >
-          Oppfølgingsark for valgte klasser
-        </button>
+      {(onPrintClassLists || onExportOppfolgingsark) && (
+        <div className="mt-4 space-y-2">
+          {onPrintClassLists && (
+            <button
+              type="button"
+              onClick={onPrintClassLists}
+              disabled={selectedClasses.length === 0}
+              className={`w-full px-3 py-2 text-sm font-medium rounded transition-colors ${
+                selectedClasses.length > 0
+                  ? 'bg-slate-800 text-white hover:bg-slate-700'
+                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+              }`}
+            >
+              Skriv ut klasselister
+            </button>
+          )}
+          {onExportOppfolgingsark && (
+            <button
+              type="button"
+              onClick={onExportOppfolgingsark}
+              disabled={selectedClasses.length === 0}
+              className={`w-full px-3 py-2 text-sm font-medium rounded transition-colors ${
+                selectedClasses.length > 0
+                  ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+              }`}
+            >
+              Oppfølgingsark for valgte klasser
+            </button>
+          )}
+        </div>
       )}
     </div>
   )

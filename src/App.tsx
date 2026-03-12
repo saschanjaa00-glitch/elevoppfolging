@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { AlertCircle } from 'lucide-react'
-import { BorderStyle, Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
+import { AlertTriangle } from 'lucide-react'
+import { BorderStyle, Document, HeadingLevel, HeightRule, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 import { resolveTeacher } from './teacherUtils'
 import FileUpload from './components/FileUpload'
 import ClassSelector from './components/ClassSelector'
@@ -22,17 +22,18 @@ function App() {
   })
 
   const [selectedClasses, setSelectedClasses] = useState<string[]>([])
-  const [absenceThreshold, setAbsenceThreshold] = useState<number>(7.5)
+  const [absenceThreshold, setAbsenceThreshold] = useState<number>(8)
   const [thresholdEnabled, setThresholdEnabled] = useState<boolean>(true)
   const [studentSearch, setStudentSearch] = useState<string>('')
   const [missingWarningsOnly, setMissingWarningsOnly] = useState<boolean>(false)
-  const [lowGradeFilter, setLowGradeFilter] = useState<string[]>([])
+  const [lowGradeFilter, setLowGradeFilter] = useState<string[]>(['IV', '1', '2'])
   const [fullRapport, setFullRapport] = useState<boolean>(false)
   const [fullRapportInclude2, setFullRapportInclude2] = useState<boolean>(false)
 
   const handleDataImport = (importedData: DataStore) => {
     setData(importedData)
-    setSelectedClasses([])
+    const allClasses = Array.from(new Set(importedData.absences.map(a => a.class))).sort()
+    setSelectedClasses(allClasses)
   }
 
   const hasData = data.absences.length > 0
@@ -237,6 +238,129 @@ function App() {
     })
   }
 
+  const handlePrintClassLists = () => {
+    if (selectedClasses.length === 0) return
+
+    const rowsPerPage = 35
+    const children: Array<Paragraph | Table> = []
+    const orderedClasses = [...selectedClasses].sort((a, b) =>
+      a.localeCompare(b, 'nb-NO', { numeric: true })
+    )
+
+    let isFirstPage = true
+
+    orderedClasses.forEach(className => {
+      const students = Array.from(
+        new Map(
+          data.absences
+            .filter(record => record.class === className)
+            .map(record => [normalizeMatch(record.navn), record.navn.trim()])
+        ).values()
+      ).sort((a, b) => a.localeCompare(b, 'nb-NO'))
+
+      const pageCount = Math.max(1, Math.ceil(students.length / rowsPerPage))
+
+      for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+        const pageStudents = students.slice(
+          pageIndex * rowsPerPage,
+          (pageIndex + 1) * rowsPerPage
+        )
+
+        const rowCount = Math.max(1, pageStudents.length)
+        const tableAreaTwips = 12600
+        const rowHeightTwips = Math.max(340, Math.min(900, Math.floor(tableAreaTwips / rowCount)))
+
+        children.push(
+          new Paragraph({
+            text:
+              pageCount > 1
+                ? `Klasseliste ${className} (${pageIndex + 1}/${pageCount})`
+                : `Klasseliste ${className}`,
+            heading: HeadingLevel.HEADING_1,
+            pageBreakBefore: !isFirstPage,
+            spacing: { after: 120 },
+          }),
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: pageStudents.map(name =>
+              new TableRow({
+                height: {
+                  value: rowHeightTwips,
+                  rule: HeightRule.EXACT,
+                },
+                children: [
+                  new TableCell({
+                    borders: {
+                      top: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                      bottom: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                      left: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                      right: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                    },
+                    children: [
+                      new Paragraph({
+                        children: [new TextRun({ text: name, size: 22 })],
+                        spacing: { before: 0, after: 0 },
+                      }),
+                    ],
+                  }),
+                ],
+              })
+            ),
+          })
+        )
+
+        isFirstPage = false
+      }
+    })
+
+    const doc = new Document({
+      styles: {
+        default: {
+          document: {
+            run: {
+              font: 'Calibri',
+              size: 22,
+            },
+          },
+        },
+      },
+      sections: [
+        {
+          properties: {
+            page: {
+              margin: {
+                top: 720,
+                right: 720,
+                bottom: 720,
+                left: 720,
+              },
+            },
+          },
+          children,
+        },
+      ],
+    })
+
+    void Packer.toBlob(doc).then(blob => {
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `klasselister_${orderedClasses.join('-')}_${new Date().toISOString().slice(0, 10)}.docx`
+      a.click()
+      URL.revokeObjectURL(url)
+    })
+  }
+
+  const handleResetFilters = () => {
+    setAbsenceThreshold(8)
+    setThresholdEnabled(true)
+    setStudentSearch('')
+    setMissingWarningsOnly(false)
+    setLowGradeFilter(['IV', '1', '2'])
+    setFullRapport(false)
+    setFullRapportInclude2(false)
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-50">
       {/* Header */}
@@ -387,6 +511,7 @@ function App() {
                     data={data}
                     selectedClasses={selectedClasses}
                     onClassChange={setSelectedClasses}
+                    onPrintClassLists={handlePrintClassLists}
                     onExportOppfolgingsark={handleExportClassOppfolgingsark}
                   />
                 </aside>
@@ -407,30 +532,54 @@ function App() {
                       />
                     </div>
 
-                    {/* Missing warnings filter */}
-                    <div className={fullRapport ? 'opacity-40 pointer-events-none' : ''}>
-                      <button
-                        onClick={() => setMissingWarningsOnly(v => !v)}
-                        disabled={fullRapport}
-                        className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
-                          missingWarningsOnly
-                            ? 'bg-orange-500 text-white border-orange-500 hover:bg-orange-600'
-                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                        }`}
-                      >
-                        {missingWarningsOnly ? '⚠ Kun manglende varsler' : '⚠ Vis kun manglende varsler'}
-                      </button>
-                    </div>
-
-                    {/* Low grade filter + Full rapport */}
+                    {/* Absence threshold + Karakter */}
                     <div className="flex flex-wrap items-end gap-6">
+                      <div className="min-w-[18rem]">
+                        <div className="flex items-center gap-4">
+                          <button
+                            onClick={() => setThresholdEnabled(v => !v)}
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                              thresholdEnabled ? 'bg-sky-600' : 'bg-slate-300'
+                            }`}
+                            aria-pressed={thresholdEnabled}
+                          >
+                            <span
+                              className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${
+                                thresholdEnabled ? 'translate-x-4' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                          <div className={`w-full sm:w-72 ${ !thresholdEnabled ? 'opacity-40 pointer-events-none' : '' }`}>
+                            <label className="block text-sm font-medium text-slate-900 mb-1">
+                              Fraværsgrense (%)
+                            </label>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="range"
+                                min="0"
+                                max="20"
+                                step="0.5"
+                                value={absenceThreshold}
+                                onChange={e =>
+                                  setAbsenceThreshold(parseFloat(e.target.value))
+                                }
+                                className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                              />
+                              <span className="text-lg font-semibold text-sky-600 min-w-12">
+                                {absenceThreshold.toFixed(1)}%
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
                       <div className={data.grades.length === 0 ? 'opacity-40 pointer-events-none' : ''}>
                         <label className={`block text-sm font-medium mb-2 ${fullRapport ? 'text-slate-400' : 'text-slate-900'}`}>
-                          Filter for lav karakter
+                          Karakter
                           {data.grades.length === 0 && <span className="ml-2 text-xs font-normal text-slate-500">(ingen karakterfil importert)</span>}
                         </label>
                         <div className={`flex gap-2 ${fullRapport ? 'opacity-40 pointer-events-none' : ''}`}>
-                          {(['IV', '1', '2'] as const).map(opt => (
+                          {(['IV', '1', '2', '3', '4', '5', '6'] as const).map(opt => (
                             <button
                               key={opt}
                               onClick={() =>
@@ -450,75 +599,78 @@ function App() {
                           ))}
                         </div>
                       </div>
+                    </div>
+
+                    {/* Secondary actions */}
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className={data.grades.length === 0 ? 'opacity-40 pointer-events-none' : ''}>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setFullRapport(v => !v)}
+                              disabled={data.grades.length === 0}
+                              className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                                fullRapport
+                                  ? 'bg-sky-600 text-white border-sky-600 hover:bg-sky-700'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                              }`}
+                            >
+                              {fullRapport ? '✓ Full farerapport' : 'Full farerapport'}
+                            </button>
+                            <button
+                              onClick={() => setFullRapportInclude2(v => !v)}
+                              disabled={data.grades.length === 0 || !fullRapport}
+                              className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                                !fullRapport ? 'opacity-40 pointer-events-none ' : ''
+                              }${
+                                fullRapportInclude2
+                                  ? 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                              }`}
+                            >
+                              Inkluder karakter 2
+                            </button>
+                          </div>
+                        </div>
+                      </div>
 
                       <div className={data.grades.length === 0 ? 'opacity-40 pointer-events-none' : ''}>
-                        <label className="block text-sm font-medium text-slate-900 mb-2">Full farerapport</label>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => setFullRapport(v => !v)}
-                            disabled={data.grades.length === 0}
-                            className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
-                              fullRapport
-                                ? 'bg-sky-600 text-white border-sky-600 hover:bg-sky-700'
-                                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                            }`}
-                          >
-                            {fullRapport ? '✓ Full farerapport' : 'Full farerapport'}
-                          </button>
-                          <button
-                            onClick={() => setFullRapportInclude2(v => !v)}
-                            disabled={data.grades.length === 0 || !fullRapport}
-                            className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
-                              !fullRapport ? 'opacity-40 pointer-events-none ' : ''
-                            }${
-                              fullRapportInclude2
-                                ? 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700'
-                                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                            }`}
-                          >
-                            Inkluder karakter 2
-                          </button>
-                        </div>
-                      </div>
+                      <button
+                        onClick={handleResetFilters}
+                        className="px-3 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors"
+                      >
+                        Reset filtre
+                      </button>
+                    </div>
+                  </div>
+
+                    <div className="border-t border-slate-100 pt-3">
+                      <button
+                        onClick={() =>
+                          setMissingWarningsOnly(prev => {
+                            const next = !prev
+                            if (next) {
+                              setStudentSearch('')
+                              setLowGradeFilter([])
+                              setFullRapport(false)
+                              setFullRapportInclude2(false)
+                            }
+                            return next
+                          })
+                        }
+                        className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                          missingWarningsOnly
+                            ? 'bg-orange-300 text-orange-900 border-orange-300 hover:bg-orange-400'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <AlertTriangle size={15} />
+                          {missingWarningsOnly ? 'Vis manglende varsler' : 'Vis manglende varsler'}
+                        </span>
+                      </button>
                     </div>
 
-                    {/* Absence threshold */}
-                    <div className="flex items-center gap-4">
-                      <button
-                        onClick={() => setThresholdEnabled(v => !v)}
-                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-                          thresholdEnabled ? 'bg-sky-600' : 'bg-slate-300'
-                        }`}
-                        aria-pressed={thresholdEnabled}
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${
-                            thresholdEnabled ? 'translate-x-4' : 'translate-x-0'
-                          }`}
-                        />
-                      </button>
-                      <div className={`w-full sm:w-72 ${ !thresholdEnabled ? 'opacity-40 pointer-events-none' : '' }`}>
-                        <label className="block text-sm font-medium text-slate-900 mb-1">
-                          Fraværsgrense (%)
-                        </label>
-                        <div className="flex items-center space-x-2">
-                          <input
-                            type="range"
-                            min="0"
-                            max="20"
-                            step="0.5"
-                            value={absenceThreshold}
-                            onChange={e =>
-                              setAbsenceThreshold(parseFloat(e.target.value))
-                            }
-                            className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
-                          />
-                          <span className="text-lg font-semibold text-sky-600 min-w-12">
-                            {absenceThreshold.toFixed(1)}%
-                          </span>
-                        </div>
-                      </div>
-                    </div>
                   </div>
 
                   {selectedClasses.length > 0 && (
