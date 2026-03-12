@@ -89,10 +89,10 @@ export default function ClassSelector({
                   key={cls}
                   type="button"
                   onClick={() => toggleClass(cls)}
-                  className={`px-2 py-1.5 rounded text-sm font-medium text-left transition-colors ${
+                  className={`w-full px-2 py-1.5 rounded text-sm font-medium text-left border transition-colors ${
                     selectedClasses.includes(cls)
-                      ? 'bg-sky-500 text-white hover:bg-sky-600'
-                      : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                      ? 'bg-sky-500 text-white hover:bg-sky-600 border-sky-500'
+                      : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border-slate-200'
                   }`}
                 >
                   {cls}

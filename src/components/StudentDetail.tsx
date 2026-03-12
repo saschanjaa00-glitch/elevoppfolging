@@ -130,7 +130,7 @@ export default function StudentDetail({
         const isLowGrade = grade && ['1', '2', 'iv'].includes(grade.toLowerCase())
 
         return (
-          <div key={subject} className="flex items-start justify-between px-4 py-3 gap-4">
+          <div key={subject} className="flex items-start justify-between px-4 py-3 gap-4 transition-colors hover:bg-slate-100">
             <div className="flex-1 min-w-0">
               <p className="font-medium text-slate-900 truncate">{subject}</p>
               <p className="text-xs text-slate-500">{teacher}</p>

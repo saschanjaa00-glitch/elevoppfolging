@@ -878,6 +878,9 @@ export default function StudentList({
                             className="flex flex-col gap-1"
                           >
                             <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="w-fit px-2 py-0.5 rounded text-sm font-medium bg-slate-100 text-slate-700">
+                                {subjectEntry.subject}
+                              </span>
                               <span
                                 className={`w-fit px-2 py-0.5 rounded text-xs font-medium ${
                                   subjectEntry.percentageAbsence > 10
@@ -887,7 +890,6 @@ export default function StudentList({
                                     : 'bg-slate-100 text-slate-600'
                                 }`}
                               >
-                                {subjectEntry.subject} —{' '}
                                 {subjectEntry.percentageAbsence.toFixed(1)}%
                               </span>
                               {subjectEntry.grade && ['1', '2', 'iv'].includes(subjectEntry.grade.toLowerCase()) && (
