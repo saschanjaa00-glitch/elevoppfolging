@@ -26,6 +26,7 @@ function App() {
   const [selectedClasses, setSelectedClasses] = useState<string[]>([])
   const [absenceThreshold, setAbsenceThreshold] = useState<number>(8)
   const [thresholdEnabled, setThresholdEnabled] = useState<boolean>(true)
+  const [noFilter, setNoFilter] = useState<boolean>(false)
   const [studentSearch, setStudentSearch] = useState<string>('')
   const [missingWarningsOnly, setMissingWarningsOnly] = useState<boolean>(false)
   const [lowGradeFilter, setLowGradeFilter] = useState<string[]>(['IV', '1', '2'])
@@ -400,6 +401,7 @@ function App() {
   const handleResetFilters = () => {
     setAbsenceThreshold(8)
     setThresholdEnabled(true)
+    setNoFilter(false)
     setStudentSearch('')
     setMissingWarningsOnly(false)
     setLowGradeFilter(['IV', '1', '2'])
@@ -570,13 +572,25 @@ function App() {
                       <label className="block text-sm font-medium text-slate-900 mb-2">
                         Søk elev
                       </label>
-                      <input
-                        type="text"
-                        placeholder="Navn..."
-                        value={studentSearch}
-                        onChange={e => setStudentSearch(e.target.value)}
-                        className="w-full sm:w-72 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
-                      />
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Navn..."
+                          value={studentSearch}
+                          onChange={e => setStudentSearch(e.target.value)}
+                          className="w-full sm:w-72 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+                        />
+                        <button
+                          onClick={() => setNoFilter(v => !v)}
+                          className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors whitespace-nowrap ${
+                            noFilter
+                              ? 'bg-sky-600 text-white border-sky-600 hover:bg-sky-700'
+                              : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                          }`}
+                        >
+                          Ingen filter
+                        </button>
+                      </div>
                     </div>
 
                     {/* Absence threshold + Karakter */}
@@ -637,7 +651,7 @@ function App() {
                               disabled={data.grades.length === 0 || fullRapport}
                               className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
                                 lowGradeFilter.includes(opt)
-                                  ? 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700'
+                                  ? 'bg-sky-600 text-white border-sky-600 hover:bg-sky-700'
                                   : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
                               }`}
                             >
@@ -737,6 +751,7 @@ function App() {
                       lowGradeFilter={lowGradeFilter}
                       fullRapport={fullRapport}
                       fullRapportInclude2={fullRapportInclude2}
+                      noFilter={noFilter}
                     />
                   )}
 

@@ -16,6 +16,7 @@ interface StudentListProps {
   lowGradeFilter: string[]
   fullRapport: boolean
   fullRapportInclude2: boolean
+  noFilter: boolean
 }
 
 const LOW_GRADES = ['IV', '1', '2']
@@ -35,6 +36,7 @@ export default function StudentList({
   lowGradeFilter,
   fullRapport,
   fullRapportInclude2,
+  noFilter,
 }: StudentListProps) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const studentInfoLookup = useMemo(() => createStudentInfoLookup(data.studentInfo), [data.studentInfo])
@@ -151,10 +153,10 @@ export default function StudentList({
       const matchesSelectedGrade = grade !== undefined && lowGradeFilter.includes(grade)
       const matchesFullRapportGrade = grade !== undefined && effectiveLowGrades.includes(grade)
 
-      let includeSubject = overThreshold
-      if (fullRapport) {
+      let includeSubject = noFilter || overThreshold
+      if (!noFilter && fullRapport) {
         includeSubject = overThreshold || matchesFullRapportGrade
-      } else if (lowGradeFilter.length > 0) {
+      } else if (!noFilter && lowGradeFilter.length > 0) {
         includeSubject = overThreshold || matchesSelectedGrade
       }
 
@@ -202,14 +204,15 @@ export default function StudentList({
     })
 
     return Array.from(summaryMap.values())
-  }, [data, selectedClasses, threshold, lowGradeFilter, fullRapport, fullRapportInclude2, studentInfoLookup])
+  }, [data, selectedClasses, threshold, lowGradeFilter, fullRapport, fullRapportInclude2, noFilter, studentInfoLookup])
 
   const atRiskStudents = useMemo(() => {
     const searchNorm = studentSearch.toLowerCase().trim()
+    const searchWords = searchNorm ? searchNorm.split(/\s+/) : []
     const isMissingOverride = missingWarningsOnly
     return studentSummaries
       .filter(s => s.subjects.length > 0)
-      .filter(s => isMissingOverride || !searchNorm || s.navn.toLowerCase().includes(searchNorm))
+      .filter(s => isMissingOverride || searchWords.length === 0 || searchWords.every(w => s.navn.toLowerCase().includes(w)))
       .map(s => {
         if (isMissingOverride) {
           const subjects = s.subjects.filter(
@@ -288,7 +291,7 @@ export default function StudentList({
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(13)
     doc.setTextColor(255, 255, 255)
-    doc.text('Oppfølging - Risikoutsatte elever', marginX, 11)
+    doc.text('Oppfølging - Elever', marginX, 11)
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(8)
     doc.text(
@@ -931,7 +934,7 @@ export default function StudentList({
     <div className="space-y-4">
       {/* Print header — only visible when printing */}
       <div className="print-header hidden">
-        <h1 className="text-lg font-bold text-slate-900">Oppfølging - Risikoutsatte elever</h1>
+        <h1 className="text-lg font-bold text-slate-900">Oppfølging - Elever</h1>
         <p className="text-xs text-slate-600">
           Klasser: {selectedClasses.join(', ')} &nbsp;|&nbsp; Grense: {threshold.toFixed(1)}% &nbsp;|&nbsp; {atRiskStudents.length} elever &nbsp;|&nbsp; {new Date().toLocaleDateString('nb-NO')}
         </p>
@@ -939,7 +942,7 @@ export default function StudentList({
 
       <div className="flex items-center justify-between no-print">
         <h2 className="text-xl font-bold text-slate-900">
-          Risikoutsatte elever ({atRiskStudents.length})
+          Elever ({atRiskStudents.length})
         </h2>
         <div className="flex items-center gap-3">
           <span className="text-sm text-slate-600">
