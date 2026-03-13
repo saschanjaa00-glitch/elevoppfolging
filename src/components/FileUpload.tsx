@@ -344,7 +344,10 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
 
         <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
           <div className="bg-slate-50 rounded-lg p-4">
-            <h4 className="font-semibold text-slate-900 mb-2">Fraværsfil</h4>
+            <h4 className="font-semibold text-slate-900 mb-2">
+              Fraværsfil
+              <span className="block text-xs font-normal text-slate-500">(fra rapport)</span>
+            </h4>
             <ul className="text-slate-600 space-y-1 text-xs">
               <li>• Navn</li>
               <li>• Klasse</li>
@@ -354,7 +357,10 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
             </ul>
           </div>
           <div className="bg-slate-50 rounded-lg p-4">
-            <h4 className="font-semibold text-slate-900 mb-2">Varselfil</h4>
+            <h4 className="font-semibold text-slate-900 mb-2">
+              Varselfil
+              <span className="block text-xs font-normal text-slate-500">(manuelt fra varseloversikt)</span>
+            </h4>
             <ul className="text-slate-600 space-y-1 text-xs">
               <li>• Navn</li>
               <li>• Faggruppe</li>
@@ -364,7 +370,10 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
             </ul>
           </div>
           <div className="bg-slate-50 rounded-lg p-4">
-            <h4 className="font-semibold text-slate-900 mb-2">Karakterfil</h4>
+            <h4 className="font-semibold text-slate-900 mb-2">
+              Karakterfil
+              <span className="block text-xs font-normal text-slate-500">(fra rapport)</span>
+            </h4>
             <ul className="text-slate-600 space-y-1 text-xs">
               <li>• Elev</li>
               <li>• Gruppe</li>
@@ -374,7 +383,10 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
             </ul>
           </div>
           <div className="bg-slate-50 rounded-lg p-4">
-            <h4 className="font-semibold text-slate-900 mb-2">Elevfil</h4>
+            <h4 className="font-semibold text-slate-900 mb-2">
+              Elevfil
+              <span className="block text-xs font-normal text-slate-500">(eksporter elevliste)</span>
+            </h4>
             <ul className="text-slate-600 space-y-1 text-xs">
               <li>• Fornavn</li>
               <li>• Etternavn</li>
