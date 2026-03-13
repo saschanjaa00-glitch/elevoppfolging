@@ -1,6 +1,5 @@
 import { useMemo, useState, useRef } from 'react'
 import type { ReactNode } from 'react'
-import html2canvas from 'html2canvas'
 import type { DataStore } from '../types'
 import { normalizeMatch } from '../studentInfoUtils'
 
@@ -173,6 +172,8 @@ export default function StatsView({ data }: Props) {
     if (!summaryRef.current || !tableRef.current) return
 
     try {
+      const { default: html2canvas } = await import('html2canvas')
+
       // Capture summary section
       const summaryCanvas = await html2canvas(summaryRef.current, {
         backgroundColor: '#ffffff',

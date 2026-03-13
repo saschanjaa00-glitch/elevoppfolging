@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Download } from 'lucide-react'
 import type { DataStore } from '../types'
+import { sanitizeCsvCell } from '../securityUtils'
 
 interface ReportExportProps {
   data: DataStore
@@ -71,7 +72,10 @@ export default function ReportExport({ data }: ReportExportProps) {
     const csvContent = [
       headers.join(','),
       ...rows.map(row =>
-        row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
+        row
+          .map(cell => sanitizeCsvCell(cell))
+          .map(cell => `"${cell.replace(/"/g, '""')}"`)
+          .join(',')
       ),
     ].join('\n')
 

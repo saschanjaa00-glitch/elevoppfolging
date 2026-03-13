@@ -1,16 +1,42 @@
-import { useMemo, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, AlertCircle } from 'lucide-react'
-import { BorderStyle, Document, HeadingLevel, HeightRule, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 import { resolveTeacher } from './teacherUtils'
 import { createStudentInfoLookup, findStudentInfoInLookup, getDisplayClassName, isNorskSubject, normalizeMatch, normalizeSubjectGroupKey } from './studentInfoUtils'
 import FileUpload from './components/FileUpload'
 import ClassSelector from './components/ClassSelector'
 import StudentList from './components/StudentList'
-import StatsView from './components/StatsView'
-import InnsiktView from './components/InnsiktView'
-import FaginnsiktView from './components/FaginnsiktView'
 import type { DataStore } from './types'
 import './index.css'
+
+const loadStatsView = () => import('./components/StatsView')
+const loadInnsiktView = () => import('./components/InnsiktView')
+const loadFaginnsiktView = () => import('./components/FaginnsiktView')
+
+const StatsView = lazy(loadStatsView)
+const InnsiktView = lazy(loadInnsiktView)
+const FaginnsiktView = lazy(loadFaginnsiktView)
+
+type AppTab = 'elever' | 'statistikk' | 'faginnsikt' | 'innsikt'
+
+const TAB_PREFETCH_ORDER: Record<AppTab, Array<{ key: string; load: () => Promise<unknown> }>> = {
+  elever: [
+    { key: 'statistikk', load: loadStatsView },
+    { key: 'faginnsikt', load: loadFaginnsiktView },
+    { key: 'innsikt', load: loadInnsiktView },
+  ],
+  statistikk: [
+    { key: 'faginnsikt', load: loadFaginnsiktView },
+    { key: 'innsikt', load: loadInnsiktView },
+  ],
+  faginnsikt: [
+    { key: 'statistikk', load: loadStatsView },
+    { key: 'innsikt', load: loadInnsiktView },
+  ],
+  innsikt: [
+    { key: 'statistikk', load: loadStatsView },
+    { key: 'faginnsikt', load: loadFaginnsiktView },
+  ],
+}
 
 const RADGIVER: Record<string, string[]> = {
   Lasse: ['1IDA', '1IDB', '2IDA', '2IDB', '3IDA', '3IDB', '1TMT', '2TMT', '3TMT'],
@@ -30,7 +56,7 @@ function App() {
   const [absenceThreshold, setAbsenceThreshold] = useState<number>(8)
   const [thresholdEnabled, setThresholdEnabled] = useState<boolean>(true)
   const [noFilter, setNoFilter] = useState<boolean>(false)
-  const [activeTab, setActiveTab] = useState<'elever' | 'statistikk' | 'faginnsikt' | 'innsikt'>('elever')
+  const [activeTab, setActiveTab] = useState<AppTab>('elever')
   const [studentSearch, setStudentSearch] = useState<string>('')
   const [missingWarningsOnly, setMissingWarningsOnly] = useState<boolean>(false)
   const [lowGradeFilter, setLowGradeFilter] = useState<string[]>(['IV', '1', '2'])
@@ -51,6 +77,45 @@ function App() {
   }
 
   const hasData = data.absences.length > 0
+  const isNameSearchActive = studentSearch.trim().length > 0
+  const prefetchedChunks = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (!hasData) return
+
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+      cancelIdleCallback?: (handle: number) => void
+    }
+
+    const pending = TAB_PREFETCH_ORDER[activeTab].filter(({ key }) => !prefetchedChunks.current.has(key))
+    if (pending.length === 0) return
+
+    let timeoutId: number | null = null
+    let idleId: number | null = null
+
+    const prefetch = () => {
+      pending.forEach(({ key, load }) => {
+        prefetchedChunks.current.add(key)
+        void load()
+      })
+    }
+
+    if (typeof idleWindow.requestIdleCallback === 'function') {
+      idleId = idleWindow.requestIdleCallback(prefetch, { timeout: 1200 })
+    } else {
+      timeoutId = window.setTimeout(prefetch, 250)
+    }
+
+    return () => {
+      if (idleId !== null && typeof idleWindow.cancelIdleCallback === 'function') {
+        idleWindow.cancelIdleCallback(idleId)
+      }
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId)
+      }
+    }
+  }, [activeTab, hasData])
 
   const ownerForClass = (className: string, mapping: Record<string, string[]>) => {
     const found = Object.entries(mapping).find(([, classes]) => classes.includes(className))
@@ -166,8 +231,21 @@ function App() {
     }
   }
 
-  const handleExportClassOppfolgingsark = () => {
+  const handleExportClassOppfolgingsark = async () => {
     if (selectedClasses.length === 0) return
+
+    const {
+      BorderStyle,
+      Document,
+      HeadingLevel,
+      Packer,
+      Paragraph,
+      Table,
+      TableCell,
+      TableRow,
+      TextRun,
+      WidthType,
+    } = await import('docx')
 
     const students = Array.from(
       new Map(
@@ -181,7 +259,7 @@ function App() {
       return a.navn.localeCompare(b.navn, 'nb-NO')
     })
 
-    const children: Array<Paragraph | Table> = []
+    const children: Array<any> = []
 
     students.forEach((student, index) => {
       const { kontaktlaerer, radgiver, subjects, studentInfo } = getStudentSheetData(student.className, student.navn)
@@ -279,21 +357,34 @@ function App() {
       sections: [{ children }],
     })
 
-    void Packer.toBlob(doc).then(blob => {
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `oppfolgingsark_${selectedClasses.join('-')}_${new Date().toISOString().slice(0, 10)}.docx`
-      a.click()
-      URL.revokeObjectURL(url)
-    })
+    const blob = await Packer.toBlob(doc)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `oppfolgingsark_${selectedClasses.join('-')}_${new Date().toISOString().slice(0, 10)}.docx`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
-  const handlePrintClassLists = () => {
+  const handlePrintClassLists = async () => {
     if (selectedClasses.length === 0) return
 
+    const {
+      BorderStyle,
+      Document,
+      HeadingLevel,
+      HeightRule,
+      Packer,
+      Paragraph,
+      Table,
+      TableCell,
+      TableRow,
+      TextRun,
+      WidthType,
+    } = await import('docx')
+
     const rowsPerPage = 35
-    const children: Array<Paragraph | Table> = []
+    const children: Array<any> = []
     const orderedClasses = [...selectedClasses].sort((a, b) =>
       a.localeCompare(b, 'nb-NO', { numeric: true })
     )
@@ -392,14 +483,13 @@ function App() {
       ],
     })
 
-    void Packer.toBlob(doc).then(blob => {
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `klasselister_${orderedClasses.join('-')}_${new Date().toISOString().slice(0, 10)}.docx`
-      a.click()
-      URL.revokeObjectURL(url)
-    })
+    const blob = await Packer.toBlob(doc)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `klasselister_${orderedClasses.join('-')}_${new Date().toISOString().slice(0, 10)}.docx`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   const handleResetFilters = () => {
@@ -492,16 +582,22 @@ function App() {
               </button>
             </div>
 
-            <div className={activeTab === 'statistikk' ? '' : 'hidden'}>
-              <StatsView data={data} />
-            </div>
-            <div className={activeTab === 'faginnsikt' ? '' : 'hidden'}>
-              <FaginnsiktView data={data} />
-            </div>
-            <div className={activeTab === 'innsikt' ? '' : 'hidden'}>
-              <InnsiktView data={data} />
-            </div>
-            <div className={activeTab === 'elever' ? '' : 'hidden'}>
+            {activeTab === 'statistikk' && (
+              <Suspense fallback={<div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 text-slate-600">Laster statistikk...</div>}>
+                <StatsView data={data} />
+              </Suspense>
+            )}
+            {activeTab === 'faginnsikt' && (
+              <Suspense fallback={<div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 text-slate-600">Laster faginnsikt...</div>}>
+                <FaginnsiktView data={data} />
+              </Suspense>
+            )}
+            {activeTab === 'innsikt' && (
+              <Suspense fallback={<div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 text-slate-600">Laster laererinnsikt...</div>}>
+                <InnsiktView data={data} />
+              </Suspense>
+            )}
+            {activeTab === 'elever' && (
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                 <aside className="lg:col-span-1 no-print">
                   {/* Presets */}
@@ -635,11 +731,12 @@ function App() {
                         />
                         <button
                           onClick={() => setNoFilter(v => !v)}
+                          disabled={isNameSearchActive}
                           className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors whitespace-nowrap ${
                             noFilter
                               ? 'bg-sky-600 text-white border-sky-600 hover:bg-sky-700'
                               : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                          }`}
+                          } ${isNameSearchActive ? 'opacity-40 pointer-events-none' : ''}`}
                         >
                           Ingen filter
                         </button>
@@ -652,9 +749,10 @@ function App() {
                         <div className="flex items-center gap-4">
                           <button
                             onClick={() => setThresholdEnabled(v => !v)}
+                            disabled={isNameSearchActive}
                             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
                               thresholdEnabled ? 'bg-sky-600' : 'bg-slate-300'
-                            }`}
+                            } ${isNameSearchActive ? 'opacity-40 pointer-events-none' : ''}`}
                             aria-pressed={thresholdEnabled}
                           >
                             <span
@@ -663,7 +761,7 @@ function App() {
                               }`}
                             />
                           </button>
-                          <div className={`w-full sm:w-72 ${ !thresholdEnabled ? 'opacity-40 pointer-events-none' : '' }`}>
+                          <div className={`w-full sm:w-72 ${ !thresholdEnabled || isNameSearchActive ? 'opacity-40 pointer-events-none' : '' }`}>
                             <label className="block text-sm font-medium text-slate-900 mb-1">
                               Fraværsgrense (%)
                             </label>
@@ -677,6 +775,7 @@ function App() {
                                 onChange={e =>
                                   setAbsenceThreshold(parseFloat(e.target.value))
                                 }
+                                disabled={isNameSearchActive}
                                 className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
                               />
                               <span className="text-lg font-semibold text-sky-600 min-w-12">
@@ -687,7 +786,7 @@ function App() {
                         </div>
                       </div>
 
-                      <div className={data.grades.length === 0 ? 'opacity-40 pointer-events-none' : ''}>
+                      <div className={data.grades.length === 0 || isNameSearchActive ? 'opacity-40 pointer-events-none' : ''}>
                         <label className={`block text-sm font-medium mb-2 ${fullRapport ? 'text-slate-400' : 'text-slate-900'}`}>
                           Karakter
                           {data.grades.length === 0 && <span className="ml-2 text-xs font-normal text-slate-500">(ingen karakterfil importert)</span>}
@@ -701,7 +800,7 @@ function App() {
                                   prev.includes(opt) ? prev.filter(g => g !== opt) : [...prev, opt]
                                 )
                               }
-                              disabled={data.grades.length === 0 || fullRapport}
+                              disabled={data.grades.length === 0 || fullRapport || isNameSearchActive}
                               className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
                                 lowGradeFilter.includes(opt)
                                   ? 'bg-sky-600 text-white border-sky-600 hover:bg-sky-700'
@@ -750,11 +849,12 @@ function App() {
                             return next
                           })
                         }}
+                        disabled={isNameSearchActive}
                         className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
                           missingWarningsOnly
                             ? 'bg-orange-300 text-orange-900 border-orange-300 hover:bg-orange-400'
                             : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                        }`}
+                        } ${isNameSearchActive ? 'opacity-40 pointer-events-none' : ''}`}
                       >
                         <span className="flex items-center gap-1.5">
                           <AlertTriangle size={15} />
@@ -769,13 +869,13 @@ function App() {
                     <StudentList
                       data={data}
                       selectedClasses={selectedClasses}
-                      threshold={thresholdEnabled ? absenceThreshold : 0}
+                      threshold={isNameSearchActive ? 0 : (thresholdEnabled ? absenceThreshold : 0)}
                       studentSearch={studentSearch}
-                      missingWarningsOnly={missingWarningsOnly}
-                      lowGradeFilter={lowGradeFilter}
-                      fullRapport={fullRapport}
-                      fullRapportInclude2={fullRapportInclude2}
-                      noFilter={noFilter}
+                      missingWarningsOnly={isNameSearchActive ? false : missingWarningsOnly}
+                      lowGradeFilter={isNameSearchActive ? [] : lowGradeFilter}
+                      fullRapport={isNameSearchActive ? false : fullRapport}
+                      fullRapportInclude2={isNameSearchActive ? false : fullRapportInclude2}
+                      noFilter={isNameSearchActive ? true : noFilter}
                     />
                   )}
 
@@ -789,7 +889,7 @@ function App() {
                   )}
                 </section>
               </div>
-            </div>
+            )}
 
           </div>
         )}

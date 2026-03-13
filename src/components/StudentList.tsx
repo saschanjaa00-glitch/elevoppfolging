@@ -1,9 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useDeferredValue, useMemo, useState } from 'react'
 import type { DataStore, StudentAbsenceSummary } from '../types'
 import { Eye, X, Printer, FileText } from 'lucide-react'
 import StudentDetail from './StudentDetail'
-import { jsPDF } from 'jspdf'
-import { BorderStyle, Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 import { resolveTeacher } from '../teacherUtils'
 import { createStudentInfoLookup, findStudentInfoInLookup, formatIntakePoints, getDisplayClassName, hasTalentProgramTag, isNorskSubject, normalizeMatch, normalizeSubjectGroupKey } from '../studentInfoUtils'
 
@@ -27,6 +25,19 @@ const RADGIVER: Record<string, string[]> = {
   Trude: ['1STD', '1STE', '1STF', '2STC', '2STD', '2STE', '2STF', '3STD', '3STE', '3STF'],
 }
 
+let jsPdfModulePromise: Promise<typeof import('jspdf')> | null = null
+let docxModulePromise: Promise<typeof import('docx')> | null = null
+
+const loadJsPdf = async () => {
+  if (!jsPdfModulePromise) jsPdfModulePromise = import('jspdf')
+  return jsPdfModulePromise
+}
+
+const loadDocx = async () => {
+  if (!docxModulePromise) docxModulePromise = import('docx')
+  return docxModulePromise
+}
+
 export default function StudentList({
   data,
   selectedClasses,
@@ -39,6 +50,7 @@ export default function StudentList({
   noFilter,
 }: StudentListProps) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
+  const deferredStudentSearch = useDeferredValue(studentSearch)
   const studentInfoLookup = useMemo(() => createStudentInfoLookup(data.studentInfo), [data.studentInfo])
 
   const ownerForClass = (className: string, mapping: Record<string, string[]>) => {
@@ -101,15 +113,16 @@ export default function StudentList({
   const studentSummaries = useMemo(() => {
     const selectedClassSet = new Set(selectedClasses)
     const classData = data.absences.filter(a => selectedClassSet.has(a.class))
+    const classDataByStudent = new Map<string, typeof classData>()
 
     const warningMap = new Map<string, Array<{ warningType: string; sentDate: string }>>()
     const studentDobMap = new Map<string, string>()
     data.warnings.forEach(warning => {
-      const key = `${normalizeMatch(warning.navn)}::${normalizeSubjectGroupKey(warning.subjectGroup)}`
+      const studentNorm = normalizeMatch(warning.navn)
+      const key = `${studentNorm}::${normalizeSubjectGroupKey(warning.subjectGroup)}`
       if (!warningMap.has(key)) warningMap.set(key, [])
       warningMap.get(key)!.push({ warningType: warning.warningType, sentDate: warning.sentDate })
-      if (warning.dateOfBirth)
-        studentDobMap.set(normalizeMatch(warning.navn), warning.dateOfBirth)
+      if (warning.dateOfBirth) studentDobMap.set(studentNorm, warning.dateOfBirth)
     })
 
     // Grade map: student+subjectGroup -> term 1 grade
@@ -127,40 +140,77 @@ export default function StudentList({
     const effectiveLowGrades = fullRapport
       ? (fullRapportInclude2 ? ['IV', '1', '2'] : ['IV', '1'])
       : LOW_GRADES
+    const lowGradeSet = new Set(lowGradeFilter)
+    const effectiveLowGradeSet = new Set(effectiveLowGrades.map(g => g.toUpperCase()))
 
+    const shouldIncludeSubject = (percentageAbsence: number, grade: string | undefined): boolean => {
+      if (noFilter) return true
+
+      const overThreshold = percentageAbsence > threshold
+      const matchesSelectedGrade = grade !== undefined && lowGradeSet.has(grade)
+      const matchesFullRapportGrade = grade !== undefined && effectiveLowGradeSet.has(grade.toUpperCase())
+
+      if (fullRapport) return overThreshold || matchesFullRapportGrade
+      if (lowGradeFilter.length > 0) return overThreshold || matchesSelectedGrade
+      return overThreshold
+    }
+
+    const ageCache = new Map<string, boolean>()
     const isOver18 = (dobStr: string): boolean => {
       if (!dobStr) return false
+      const cached = ageCache.get(dobStr)
+      if (cached !== undefined) return cached
+
       const match = dobStr.match(/^(\d{1,2})[.\/\-](\d{1,2})[.\/\-](\d{4})$/)
-      if (!match) return false
+      if (!match) {
+        ageCache.set(dobStr, false)
+        return false
+      }
+
       const dob = new Date(parseInt(match[3]), parseInt(match[2]) - 1, parseInt(match[1]))
-      if (isNaN(dob.getTime())) return false
+      if (isNaN(dob.getTime())) {
+        ageCache.set(dobStr, false)
+        return false
+      }
+
       const now = new Date()
-      return now >= new Date(dob.getFullYear() + 18, dob.getMonth(), dob.getDate())
+      const result = now >= new Date(dob.getFullYear() + 18, dob.getMonth(), dob.getDate())
+      ageCache.set(dobStr, result)
+      return result
     }
 
     const summaryMap = new Map<string, StudentAbsenceSummary>()
+    const subjectKeysBySummary = new Map<string, Set<string>>()
+    const studentInfoCache = new Map<string, ReturnType<typeof findStudentInfoInLookup>>()
 
     classData.forEach(record => {
+      const studentNorm = normalizeMatch(record.navn)
+      const subjectGroupKey = normalizeSubjectGroupKey(record.subjectGroup)
       const key = `${record.class}::${record.navn}`
-      const warningKey = `${normalizeMatch(record.navn)}::${normalizeSubjectGroupKey(record.subjectGroup)}`
+      const warningKey = `${studentNorm}::${subjectGroupKey}`
       const warnings = warningMap.get(warningKey) ?? []
       const hasSubjectWarning = warnings.length > 0
-      const dobStr = studentDobMap.get(normalizeMatch(record.navn)) ?? ''
+      const dobStr = studentDobMap.get(studentNorm) ?? ''
       const grade = gradeMap.get(warningKey)
       const subjectTeacher = subjectTeacherMap.get(warningKey) ?? record.teacher
-      const matchedStudentInfo = findStudentInfoInLookup(studentInfoLookup, record.navn, record.class)
-      const overThreshold = record.percentageAbsence > threshold
-      const matchesSelectedGrade = grade !== undefined && lowGradeFilter.includes(grade)
-      const matchesFullRapportGrade = grade !== undefined && effectiveLowGrades.includes(grade)
+      const includeSubject = shouldIncludeSubject(record.percentageAbsence, grade)
 
-      let includeSubject = noFilter || overThreshold
-      if (!noFilter && fullRapport) {
-        includeSubject = overThreshold || matchesFullRapportGrade
-      } else if (!noFilter && lowGradeFilter.length > 0) {
-        includeSubject = overThreshold || matchesSelectedGrade
+      const studentInfoKey = `${record.class}::${studentNorm}`
+      if (!studentInfoCache.has(studentInfoKey)) {
+        studentInfoCache.set(studentInfoKey, findStudentInfoInLookup(studentInfoLookup, record.navn, record.class))
       }
+      const matchedStudentInfo = studentInfoCache.get(studentInfoKey)
+
+      if (!classDataByStudent.has(studentNorm)) classDataByStudent.set(studentNorm, [])
+      classDataByStudent.get(studentNorm)!.push(record)
+
+      const subjectDedupKey = `${record.subject}::${record.subjectGroup}`
 
       if (!summaryMap.has(key)) {
+        const subjectKeys = new Set<string>()
+        if (includeSubject) subjectKeys.add(subjectDedupKey)
+        subjectKeysBySummary.set(key, subjectKeys)
+
         summaryMap.set(key, {
           navn: record.navn,
           className: record.class,
@@ -179,15 +229,14 @@ export default function StudentList({
         })
       } else {
         const summary = summaryMap.get(key)!
+        const subjectKeys = subjectKeysBySummary.get(key)
         summary.maxPercentage = Math.max(summary.maxPercentage, record.percentageAbsence)
         summary.totalHours += record.hoursAbsence
 
         if (includeSubject) {
-          const subjectExists = summary.subjects.some(
-            s => s.subjectGroup === record.subjectGroup && s.subject === record.subject
-          )
-          if (!subjectExists) {
+          if (!subjectKeys?.has(subjectDedupKey)) {
             summary.subjects.push({ subject: record.subject, subjectGroup: record.subjectGroup, teacher: subjectTeacher, percentageAbsence: record.percentageAbsence, warnings, grade })
+            subjectKeys?.add(subjectDedupKey)
           }
           if (hasSubjectWarning) summary.hasWarnings = true
         }
@@ -211,16 +260,15 @@ export default function StudentList({
 
     summaryMap.forEach(summary => {
       const studentNorm = normalizeMatch(summary.navn)
+      const studentRecords = classDataByStudent.get(studentNorm) ?? []
       const requiredCodes = Object.keys(norskSupplements)
 
       // Look up NOR1267 directly from raw absence data regardless of threshold filtering
       const nor1267RawRecord =
-        classData.find(r =>
-          normalizeMatch(r.navn) === studentNorm &&
+        studentRecords.find(r =>
           normalizeSubjectGroupKey(r.subjectGroup) === normalizeSubjectGroupKey('NOR1267')
         ) ??
-        classData.find(r =>
-          normalizeMatch(r.navn) === studentNorm &&
+        studentRecords.find(r =>
           normalizeMatch(r.subject).includes('norsk') &&
           normalizeMatch(r.subject).includes('hoved')
         )
@@ -245,16 +293,12 @@ export default function StudentList({
         const grade = gradeMap.get(gradeKey)
         if (!grade) return
 
-        const gradeUpper = grade.toUpperCase()
-        const matchesSelectedGrade = lowGradeFilter.includes(grade)
-        const matchesFullRapportGrade = effectiveLowGrades.includes(gradeUpper)
+        const matchesSelectedGrade = lowGradeSet.has(grade)
+        const matchesFullRapportGrade = effectiveLowGradeSet.has(grade.toUpperCase())
 
         let includeSubject = noFilter
-        if (!noFilter && fullRapport) {
-          includeSubject = matchesFullRapportGrade
-        } else if (!noFilter && lowGradeFilter.length > 0) {
-          includeSubject = matchesSelectedGrade
-        }
+        if (!noFilter && fullRapport) includeSubject = matchesFullRapportGrade
+        else if (!noFilter && lowGradeFilter.length > 0) includeSubject = matchesSelectedGrade
         if (!includeSubject) return
 
         const alreadyExists = summary.subjects.some(
@@ -284,33 +328,50 @@ export default function StudentList({
   }, [data, selectedClasses, threshold, lowGradeFilter, fullRapport, fullRapportInclude2, noFilter, studentInfoLookup])
 
   const atRiskStudents = useMemo(() => {
-    const searchNorm = studentSearch.toLowerCase().trim()
+    const searchNorm = deferredStudentSearch.toLowerCase().trim()
     const searchWords = searchNorm ? searchNorm.split(/\s+/) : []
     const isMissingOverride = missingWarningsOnly
-    return studentSummaries
-      .filter(s => s.subjects.length > 0)
-      .filter(s => isMissingOverride || searchWords.length === 0 || searchWords.every(w => s.navn.toLowerCase().includes(w)))
-      .map(s => {
-        if (isMissingOverride) {
-          const subjects = s.subjects.filter(
-            sub => sub.warnings.length === 0 && sub.percentageAbsence > threshold
-          )
-          return { ...s, subjects }
-        }
-        if (fullRapport) return s
-        return s
-      })
-      .filter(s => {
-        if (isMissingOverride) return s.subjects.length > 0
-        if (fullRapport) return true
-        return true
-      })
-      .sort((a, b) => {
-        const classCompare = a.className.localeCompare(b.className, 'nb-NO', { numeric: true })
-        if (classCompare !== 0) return classCompare
-        return a.navn.localeCompare(b.navn, 'nb-NO')
-      })
-  }, [studentSummaries, studentSearch, missingWarningsOnly, threshold, fullRapport, fullRapportInclude2])
+    const filtered: StudentAbsenceSummary[] = []
+
+    studentSummaries.forEach(student => {
+      if (student.subjects.length === 0) return
+      if (!isMissingOverride && searchWords.length > 0 && !searchWords.every(w => student.navn.toLowerCase().includes(w))) {
+        return
+      }
+
+      if (!isMissingOverride) {
+        filtered.push(student)
+        return
+      }
+
+      const subjects = student.subjects.filter(
+        sub => sub.warnings.length === 0 && sub.percentageAbsence > threshold
+      )
+      if (subjects.length === 0) return
+      filtered.push({ ...student, subjects })
+    })
+
+    return filtered.sort((a, b) => {
+      const classCompare = a.className.localeCompare(b.className, 'nb-NO', { numeric: true })
+      if (classCompare !== 0) return classCompare
+      return a.navn.localeCompare(b.navn, 'nb-NO')
+    })
+  }, [studentSummaries, deferredStudentSearch, missingWarningsOnly, threshold])
+
+  const getKontaktlaererForStudent = (student: StudentAbsenceSummary) => {
+    const studentRecords = data.absences.filter(
+      record => record.class === student.className && normalizeMatch(record.navn) === normalizeMatch(student.navn)
+    )
+
+    const teacherCounts = new Map<string, number>()
+    studentRecords.forEach(record => {
+      const teacher = record.teacher?.trim()
+      if (!teacher) return
+      teacherCounts.set(teacher, (teacherCounts.get(teacher) ?? 0) + 1)
+    })
+
+    return Array.from(teacherCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'Ukjent'
+  }
 
   if (atRiskStudents.length === 0) {
     return (
@@ -328,7 +389,8 @@ export default function StudentList({
     )
   }
 
-  const generatePDF = () => {
+  const generatePDF = async () => {
+    const { jsPDF } = await loadJsPdf()
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
     const pageW = 210
     const pageH = 297
@@ -379,6 +441,7 @@ export default function StudentList({
     doc.setTextColor(0, 0, 0)
 
     atRiskStudents.forEach(student => {
+      const kontaktlaerer = getKontaktlaererForStudent(student)
       // Calculate card height: name row + per-subject rows
       const rowsPerSubject = student.subjects.map(s => {
         const teacher = resolveTeacher(s.subject, s.teacher ?? '').trim()
@@ -387,7 +450,7 @@ export default function StudentList({
         return 1 + (teacher ? 1 : 0) + warningRows + noWarningRow
       })
       const totalSubjectRows = rowsPerSubject.reduce((a, b) => a + b, 0)
-      const cardHeight = 11 + totalSubjectRows * 5 + 2
+      const cardHeight = 15 + totalSubjectRows * 5 + 2
 
       checkPageBreak(cardHeight + 3)
 
@@ -417,8 +480,14 @@ export default function StudentList({
       doc.setTextColor(isAvbrudd ? 71 : 15, isAvbrudd ? 85 : 23, isAvbrudd ? 105 : 42)
       doc.text(student.navn, marginX + 5, cardY + 6.5)
 
+      // Measure with the same font settings used for the rendered name
       let bx = marginX + 5 + doc.getTextWidth(student.navn) + 3
       const bY = cardY + 6.5
+
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(7)
+      doc.setTextColor(100, 116, 139)
+      doc.text(`Kontaktlærer: ${kontaktlaerer}`, marginX + 5, cardY + 10.5)
 
       // Class chip (slate)
       bx += chip(student.className, bx, bY, [241, 245, 249], [71, 85, 105])
@@ -478,7 +547,7 @@ export default function StudentList({
       }
 
       // --- Subject rows ---
-      let subY = cardY + 12
+      let subY = cardY + 16
       student.subjects.forEach(subjectEntry => {
         const pct = subjectEntry.percentageAbsence
         const isHighRisk = pct > 10
@@ -562,7 +631,20 @@ export default function StudentList({
   const generateOppfolgingsarkForUtvalg = async () => {
     if (atRiskStudents.length === 0) return
 
-    const children: Array<Paragraph | Table> = []
+    const {
+      BorderStyle,
+      Document,
+      HeadingLevel,
+      Packer,
+      Paragraph,
+      Table,
+      TableCell,
+      TableRow,
+      TextRun,
+      WidthType,
+    } = await loadDocx()
+
+    const children: Array<any> = []
 
     atRiskStudents.forEach((student, index) => {
       const { allSubjectEntries, kontaktlaerer, studentInfo } = getAllSubjectEntries(student)
@@ -670,7 +752,8 @@ export default function StudentList({
     URL.revokeObjectURL(url)
   }
 
-  const generateOppfolgingsark = (student: StudentAbsenceSummary) => {
+  const generateOppfolgingsark = async (student: StudentAbsenceSummary) => {
+    const { jsPDF } = await loadJsPdf()
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
     const pageW = 210
     const pageH = 297
@@ -901,11 +984,24 @@ export default function StudentList({
   }
 
   const generateOppfolgingsarkDocx = async (student: StudentAbsenceSummary) => {
+    const {
+      BorderStyle,
+      Document,
+      HeadingLevel,
+      Packer,
+      Paragraph,
+      Table,
+      TableCell,
+      TableRow,
+      TextRun,
+      WidthType,
+    } = await loadDocx()
+
     const { allSubjectEntries, kontaktlaerer, studentInfo } = getAllSubjectEntries(student)
     const radgiver = ownerForClass(student.className, RADGIVER)
     const displayClassName = getDisplayClassName(student.className, studentInfo?.programArea)
 
-    const sections: Array<Paragraph | Table> = [
+    const sections: Array<any> = [
       new Paragraph({ text: 'Oppfølgingsark', heading: HeadingLevel.HEADING_1 }),
       new Paragraph({ children: [new TextRun({ text: `Elev: ${student.navn}` })] }),
       new Paragraph({ children: [new TextRun({ text: `Klasse: ${displayClassName}` })] }),
@@ -1033,7 +1129,7 @@ export default function StudentList({
             Oppfølgingsark for utvalg
           </button>
           <button
-            onClick={generatePDF}
+            onClick={() => void generatePDF()}
             className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors"
           >
             <Printer className="w-4 h-4" />
@@ -1044,6 +1140,7 @@ export default function StudentList({
 
       <div className="space-y-3">
         {atRiskStudents.map(student => {
+          const kontaktlaerer = getKontaktlaererForStudent(student)
           const cardKey = `${student.className}-${student.navn}`
           const isExpanded = expandedKey === cardKey
           const warningBreakdown = student.subjects.reduce(
@@ -1121,6 +1218,9 @@ export default function StudentList({
                         </span>
                       )}
                     </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Kontaktlærer: {kontaktlaerer}
+                    </p>
 
                     <div className="mt-3">
                       <div className="space-y-2">
@@ -1190,7 +1290,7 @@ export default function StudentList({
 
                   <div className="no-print ml-4 flex flex-col gap-2 shrink-0">
                     <button
-                      onClick={() => generateOppfolgingsark(student)}
+                      onClick={() => void generateOppfolgingsark(student)}
                       className="px-3 py-2 bg-emerald-100 text-emerald-800 rounded hover:bg-emerald-200 transition-colors flex items-center space-x-1"
                     >
                       <FileText className="w-4 h-4" />

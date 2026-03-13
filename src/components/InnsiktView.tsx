@@ -1,6 +1,5 @@
 import { useMemo, useState, Fragment } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import jsPDF from 'jspdf'
 import type { DataStore } from '../types'
 import { normalizeMatch } from '../studentInfoUtils'
 
@@ -279,7 +278,8 @@ export default function InnsiktView({ data }: Props) {
     return teacherName
   }
 
-  const exportTeacherPdf = (teacher: TeacherStats) => {
+  const exportTeacherPdf = async (teacher: TeacherStats) => {
+    const { default: jsPDF } = await import('jspdf')
     const doc = new jsPDF({ unit: 'pt', format: 'a4' })
     const pageHeight = doc.internal.pageSize.getHeight()
     const marginLeft = 36
@@ -509,7 +509,7 @@ export default function InnsiktView({ data }: Props) {
                         type="button"
                         onClick={e => {
                           e.stopPropagation()
-                          exportTeacherPdf(teacher)
+                          void exportTeacherPdf(teacher)
                         }}
                         className="px-2 py-1 text-xs font-medium rounded bg-slate-100 text-slate-700 hover:bg-slate-200"
                       >

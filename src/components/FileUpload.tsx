@@ -3,12 +3,17 @@ import * as XLSX from 'xlsx'
 import { Upload } from 'lucide-react'
 import type { DataStore, AbsenceRecord, WarningRecord, StudentInfoRecord } from '../types'
 import { anonymizeData } from '../anonymizeNames'
+import { normalizeCellText } from '../securityUtils'
 
 interface FileUploadProps {
   onDataImport: (data: DataStore) => void
 }
 
 export default function FileUpload({ onDataImport }: FileUploadProps) {
+  const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
+  const MAX_TOTAL_SIZE_BYTES = 100 * 1024 * 1024
+  const MAX_CELL_CHARS = 10000
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [anonymize, setAnonymize] = useState(false)
@@ -24,10 +29,10 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
     const headers = Object.keys(row)
     const normalizedAliases = aliases.map(a => normalizeHeader(a))
     const header = headers.find(h => normalizedAliases.includes(normalizeHeader(h)))
-    return header ? String(row[header] ?? '').trim() : ''
+    return header ? normalizeCellText(row[header], MAX_CELL_CHARS) : ''
   }
 
-  const getRowValueByTokens = (row: Record<string, any>, tokenSets: string[][]): string => {
+  const getRawRowValueByTokens = (row: Record<string, any>, tokenSets: string[][]): unknown => {
     const headers = Object.keys(row)
     for (const tokenSet of tokenSets) {
       const normalizedTokens = tokenSet.map(t => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''))
@@ -35,13 +40,17 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
         const normalized = normalizeHeader(h)
         return normalizedTokens.every(token => normalized.includes(token))
       })
-      if (header) return String(row[header] ?? '').trim()
+      if (header) return row[header]
     }
     return ''
   }
 
+  const getRowValueByTokens = (row: Record<string, any>, tokenSets: string[][]): string => {
+    return normalizeCellText(getRawRowValueByTokens(row, tokenSets), MAX_CELL_CHARS)
+  }
+
   const getDateField = (row: Record<string, any>, tokenSets: string[][]): string => {
-    const value = getRowValueByTokens(row, tokenSets)
+    const value = getRawRowValueByTokens(row, tokenSets)
     if (!value) return ''
 
     if (typeof value === 'object' && value !== null && 'getTime' in value) {
@@ -49,13 +58,14 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
       return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`
     }
 
-    const num = parseFloat(value)
+    const normalizedValue = normalizeCellText(value, MAX_CELL_CHARS)
+    const num = parseFloat(normalizedValue)
     if (num > 10000) {
       const date = new Date((num - 25569) * 86400 * 1000)
       return `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`
     }
 
-    return String(value)
+    return normalizedValue
   }
 
   const getNumericField = (row: Record<string, any>, aliases: string[]): number | null => {
@@ -197,6 +207,19 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
   const handleFileSelect = async (files: FileList) => {
     if (files.length === 0) return
 
+    const selectedFiles = Array.from(files)
+    const oversizedFile = selectedFiles.find(file => file.size > MAX_FILE_SIZE_BYTES)
+    if (oversizedFile) {
+      setError(`Filen "${oversizedFile.name}" er for stor. Maks filstørrelse er 25 MB.`)
+      return
+    }
+
+    const totalSize = selectedFiles.reduce((sum, file) => sum + file.size, 0)
+    if (totalSize > MAX_TOTAL_SIZE_BYTES) {
+      setError('Total filstørrelse er for stor. Last opp maks 100 MB av gangen.')
+      return
+    }
+
     setLoading(true)
     setError(null)
 
@@ -209,7 +232,7 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
       }
 
       // Process all files and detect by content
-      for (const file of Array.from(files)) {
+      for (const file of selectedFiles) {
         try {
           const buffer = await file.arrayBuffer()
           const wb = XLSX.read(buffer)
