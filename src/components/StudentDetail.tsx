@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import type { DataStore } from '../types'
 import { resolveTeacher } from '../teacherUtils'
 import { createStudentInfoLookup, findStudentInfoInLookup, isNorskSubject, normalizeMatch, normalizeSubjectGroupKey } from '../studentInfoUtils'
+import { compareDateStrings, formatDateDdMmYyyy, warningDateColorClass } from '../dateUtils'
 
 interface StudentDetailProps {
   data: DataStore
@@ -18,21 +19,9 @@ export default function StudentDetail({
 }: StudentDetailProps) {
   const studentInfoLookup = useMemo(() => createStudentInfoLookup(data.studentInfo), [data.studentInfo])
 
-  const dateColor = (dateStr: string): string => {
-    const m = dateStr.match(/^(\d{1,2})[.\/\-](\d{1,2})[.\/\-]\d{4}$/)
-    if (!m) return ''
-    const month = parseInt(m[2])
-    if (month >= 8 && month <= 12) return 'text-blue-600 font-semibold'
-    if (month >= 1 && month <= 4) return 'text-green-600 font-semibold'
-    if (month >= 5 && month <= 6) return 'text-orange-500 font-semibold'
-    return ''
-  }
+  const dateColor = (dateStr: string): string => warningDateColorClass(dateStr)
 
   const groupWarnings = (warnings: Array<{ warningType: string; sentDate: string }>) => {
-    const parseDMY = (d: string) => {
-      const m = d.match(/^(\d{1,2})[.\/\-](\d{1,2})[.\/\-](\d{4})$/)
-      return m ? new Date(+m[3], +m[2] - 1, +m[1]).getTime() : 0
-    }
     const getLabel = (wt: string) => {
       const l = wt.toLowerCase()
       if (l.includes('frav')) return 'Fravær'
@@ -45,12 +34,12 @@ export default function StudentDetail({
     warnings.forEach(w => {
       const label = getLabel(w.warningType)
       if (!grouped.has(label)) grouped.set(label, [])
-      if (w.sentDate) grouped.get(label)!.push(w.sentDate)
+      if (w.sentDate) grouped.get(label)!.push(formatDateDdMmYyyy(w.sentDate))
     })
     grouped.forEach((dates, label) =>
       grouped.set(
         label,
-        [...dates].sort((a, b) => parseDMY(a) - parseDMY(b))
+        [...dates].sort((a, b) => compareDateStrings(a, b))
       )
     )
     return Array.from(grouped.entries()).sort(

@@ -4,6 +4,7 @@ import { Eye, X, Printer, FileText } from 'lucide-react'
 import StudentDetail from './StudentDetail'
 import { resolveTeacher } from '../teacherUtils'
 import { createStudentInfoLookup, findStudentInfoInLookup, formatIntakePoints, getDisplayClassName, hasTalentProgramTag, isNorskSubject, normalizeMatch, normalizeSubjectGroupKey } from '../studentInfoUtils'
+import { compareDateStrings, formatDateDdMmYyyy, todayDdMmYyyy, warningDateColorClass } from '../dateUtils'
 
 interface StudentListProps {
   data: DataStore
@@ -50,6 +51,7 @@ export default function StudentList({
   noFilter,
 }: StudentListProps) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
+  const [showPdfMenu, setShowPdfMenu] = useState(false)
   const deferredStudentSearch = useDeferredValue(studentSearch)
   const studentInfoLookup = useMemo(() => createStudentInfoLookup(data.studentInfo), [data.studentInfo])
 
@@ -58,21 +60,9 @@ export default function StudentList({
     return found?.[0] ?? 'Ukjent'
   }
 
-  const dateColor = (dateStr: string): string => {
-    const m = dateStr.match(/^(\d{1,2})[.\/\-](\d{1,2})[.\/\-]\d{4}$/)
-    if (!m) return ''
-    const month = parseInt(m[2])
-    if (month >= 8 && month <= 12) return 'text-blue-600 font-semibold'
-    if (month >= 1 && month <= 4) return 'text-green-600 font-semibold'
-    if (month >= 5 && month <= 6) return 'text-orange-500 font-semibold'
-    return ''
-  }
+  const dateColor = (dateStr: string): string => warningDateColorClass(dateStr)
 
   const groupWarnings = (warnings: Array<{ warningType: string; sentDate: string }>) => {
-    const parseDMY = (d: string) => {
-      const m = d.match(/^(\d{1,2})[.\/\-](\d{1,2})[.\/\-](\d{4})$/)
-      return m ? new Date(+m[3], +m[2] - 1, +m[1]).getTime() : 0
-    }
     const getLabel = (wt: string) => {
       const l = wt.toLowerCase()
       if (l.includes('frav')) return 'Fravær'
@@ -85,12 +75,12 @@ export default function StudentList({
     warnings.forEach(w => {
       const label = getLabel(w.warningType)
       if (!grouped.has(label)) grouped.set(label, [])
-      if (w.sentDate) grouped.get(label)!.push(w.sentDate)
+      if (w.sentDate) grouped.get(label)!.push(formatDateDdMmYyyy(w.sentDate))
     })
     grouped.forEach((dates, label) =>
       grouped.set(
         label,
-        [...dates].sort((a, b) => parseDMY(a) - parseDMY(b))
+        [...dates].sort((a, b) => compareDateStrings(a, b))
       )
     )
     return Array.from(grouped.entries()).sort(
@@ -405,7 +395,7 @@ export default function StudentList({
     )
   }
 
-  const generatePDF = async () => {
+  const generatePDF = async (layout: 'combined' | 'per-student' = 'combined') => {
     const { jsPDF } = await loadJsPdf()
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
     const pageW = 210
@@ -456,7 +446,12 @@ export default function StudentList({
     y = 24
     doc.setTextColor(0, 0, 0)
 
-    atRiskStudents.forEach(student => {
+    atRiskStudents.forEach((student, index) => {
+      if (layout === 'per-student' && index > 0) {
+        doc.addPage()
+        y = 24
+      }
+
       const kontaktlaerer = getKontaktlaererForStudent(student)
       // Calculate card height: name row + per-subject rows
       const rowsPerSubject = student.subjects.map(s => {
@@ -641,7 +636,7 @@ export default function StudentList({
       y = cardY + cardHeight + 3
     })
 
-    doc.save(`oppfolging_${selectedClasses.join('-')}_${new Date().toISOString().slice(0, 10)}.pdf`)
+    doc.save(`oppfolging_${selectedClasses.join('-')}_${todayDdMmYyyy()}.pdf`)
   }
 
   const generateOppfolgingsarkForUtvalg = async () => {
@@ -763,7 +758,7 @@ export default function StudentList({
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `oppfolgingsark_utvalg_${new Date().toISOString().slice(0, 10)}.docx`
+    a.download = `oppfolgingsark_utvalg_${todayDdMmYyyy()}.docx`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -908,7 +903,7 @@ export default function StudentList({
       notesBoxH
     )
 
-    doc.save(`oppfolgingsark_${student.className}_${student.navn.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`)
+    doc.save(`oppfolgingsark_${student.className}_${student.navn.replace(/\s+/g, '_')}_${todayDdMmYyyy()}.pdf`)
   }
 
   const getAllSubjectEntries = (student: StudentAbsenceSummary) => {
@@ -1114,7 +1109,7 @@ export default function StudentList({
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `oppfolgingsark_${student.className}_${student.navn.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`
+    a.download = `oppfolgingsark_${student.className}_${student.navn.replace(/\s+/g, '_')}_${todayDdMmYyyy()}.docx`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -1144,13 +1139,37 @@ export default function StudentList({
             <FileText className="w-4 h-4" />
             Oppfølgingsark for utvalg
           </button>
-          <button
-            onClick={() => void generatePDF()}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors"
-          >
-            <Printer className="w-4 h-4" />
-            Eksporter PDF
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setShowPdfMenu(prev => !prev)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors"
+            >
+              <Printer className="w-4 h-4" />
+              Eksporter PDF
+            </button>
+            {showPdfMenu && (
+              <div className="absolute right-0 mt-2 w-52 rounded-lg border border-slate-200 bg-white shadow-lg z-20">
+                <button
+                  onClick={() => {
+                    setShowPdfMenu(false)
+                    void generatePDF('combined')
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-t-lg"
+                >
+                  Samlet oversikt
+                </button>
+                <button
+                  onClick={() => {
+                    setShowPdfMenu(false)
+                    void generatePDF('per-student')
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-b-lg"
+                >
+                  Side per elev
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

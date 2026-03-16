@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Download } from 'lucide-react'
 import type { DataStore } from '../types'
 import { sanitizeCsvCell } from '../securityUtils'
+import { formatDateDdMmYyyy, todayDdMmYyyy } from '../dateUtils'
 
 interface ReportExportProps {
   data: DataStore
@@ -53,7 +54,7 @@ export default function ReportExport({ data }: ReportExportProps) {
         .map(w => w.warningType)
         .join('; ')
       const sentDates = matchingWarnings
-        .map(w => w.sentDate)
+        .map(w => formatDateDdMmYyyy(w.sentDate))
         .join('; ')
 
       return [
@@ -85,7 +86,7 @@ export default function ReportExport({ data }: ReportExportProps) {
     link.setAttribute('href', url)
     link.setAttribute(
       'download',
-      `oppfolging-report-${new Date().toISOString().split('T')[0]}.csv`
+      `oppfolging-report-${todayDdMmYyyy()}.csv`
     )
     link.click()
   }

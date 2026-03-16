@@ -2,6 +2,7 @@ import { useMemo, useState, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type { DataStore } from '../types'
 import { normalizeMatch } from '../studentInfoUtils'
+import { todayDdMmYyyy } from '../dateUtils'
 
 interface Props {
   data: DataStore
@@ -204,7 +205,7 @@ export default function StatsView({ data }: Props) {
       // Download
       const link = document.createElement('a')
       link.href = combinedCanvas.toDataURL('image/png')
-      link.download = `statistikk-${new Date().toISOString().split('T')[0]}.png`
+      link.download = `statistikk-${todayDdMmYyyy()}.png`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)

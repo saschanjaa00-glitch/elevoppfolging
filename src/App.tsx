@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, AlertCircle } from 'lucide-react'
 import { resolveTeacher } from './teacherUtils'
 import { createStudentInfoLookup, findStudentInfoInLookup, getDisplayClassName, isNorskSubject, normalizeMatch, normalizeSubjectGroupKey } from './studentInfoUtils'
+import { compareDateStrings, formatDateDdMmYyyy, todayDdMmYyyy } from './dateUtils'
 import FileUpload from './components/FileUpload'
 import ClassSelector from './components/ClassSelector'
 import StudentList from './components/StudentList'
@@ -123,10 +124,6 @@ function App() {
   }
 
   const groupWarnings = (warnings: Array<{ warningType: string; sentDate: string }>) => {
-    const parseDMY = (d: string) => {
-      const m = d.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/)
-      return m ? new Date(+m[3], +m[2] - 1, +m[1]).getTime() : 0
-    }
     const order = (label: string) => (label === 'Fravær' ? 0 : label === 'Grunnlag' ? 1 : 2)
     const grouped = new Map<string, string[]>()
 
@@ -134,11 +131,11 @@ function App() {
       const type = warning.warningType.toLowerCase()
       const label = type.includes('frav') ? 'Fravær' : type.includes('vurdering') || type.includes('grunnlag') ? 'Grunnlag' : warning.warningType
       if (!grouped.has(label)) grouped.set(label, [])
-      if (warning.sentDate) grouped.get(label)!.push(warning.sentDate)
+      if (warning.sentDate) grouped.get(label)!.push(formatDateDdMmYyyy(warning.sentDate))
     })
 
     grouped.forEach((dates, label) => {
-      grouped.set(label, [...dates].sort((a, b) => parseDMY(a) - parseDMY(b)))
+      grouped.set(label, [...dates].sort((a, b) => compareDateStrings(a, b)))
     })
 
     return Array.from(grouped.entries()).sort(([a], [b]) => order(a) - order(b))
@@ -361,7 +358,7 @@ function App() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `oppfolgingsark_${selectedClasses.join('-')}_${new Date().toISOString().slice(0, 10)}.docx`
+    a.download = `oppfolgingsark_${selectedClasses.join('-')}_${todayDdMmYyyy()}.docx`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -487,7 +484,7 @@ function App() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `klasselister_${orderedClasses.join('-')}_${new Date().toISOString().slice(0, 10)}.docx`
+    a.download = `klasselister_${orderedClasses.join('-')}_${todayDdMmYyyy()}.docx`
     a.click()
     URL.revokeObjectURL(url)
   }
