@@ -490,18 +490,6 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
-  const handleResetFilters = () => {
-    setAbsenceThreshold(8)
-    setThresholdEnabled(true)
-    setNoFilter(false)
-    setStudentSearch('')
-    setMissingWarningsOnly(false)
-    setLowGradeFilter(['IV', '1', '2'])
-    setFullRapport(false)
-    setFullRapportInclude2(false)
-    setPreOverrideFilters(null)
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-50">
       {/* Header */}
