@@ -101,6 +101,54 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
     return Number.isFinite(parsed) ? parsed : null
   }
 
+  const toIsoDate = (date: Date): string => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
+  const parseDateCandidate = (value: unknown): Date | null => {
+    if (!value) return null
+    if (value instanceof Date) return isNaN(value.getTime()) ? null : value
+    if (typeof value === 'number' && Number.isFinite(value) && value > 10000) {
+      const d = new Date((value - 25569) * 86400 * 1000)
+      return isNaN(d.getTime()) ? null : d
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim()
+      if (!trimmed) return null
+      const parsed = new Date(trimmed)
+      return isNaN(parsed.getTime()) ? null : parsed
+    }
+    return null
+  }
+
+  const getWarningFileCreatedDate = (workbook: XLSX.WorkBook, file: File): string | undefined => {
+    const workbookAny = workbook as unknown as {
+      Props?: { CreatedDate?: unknown; createdate?: unknown }
+      Custprops?: { CreatedDate?: unknown; createdate?: unknown }
+    }
+
+    const metadataCandidates: unknown[] = [
+      workbookAny.Props?.CreatedDate,
+      workbookAny.Props?.createdate,
+      workbookAny.Custprops?.CreatedDate,
+      workbookAny.Custprops?.createdate,
+    ]
+
+    for (const candidate of metadataCandidates) {
+      const parsed = parseDateCandidate(candidate)
+      if (parsed) return toIsoDate(parsed)
+    }
+
+    if (file.lastModified > 0) {
+      return toIsoDate(new Date(file.lastModified))
+    }
+
+    return undefined
+  }
+
   const looksLikeAbsenceWorkbook = (sheet: Record<string, any>[]): boolean => {
     if (sheet.length === 0) return false
     const first = sheet[0]
@@ -256,6 +304,7 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
         warnings: [],
         grades: [],
         studentInfo: [],
+        warningFileCreatedDate: undefined,
       }
 
       // Process all files and detect by content
@@ -273,6 +322,7 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
           } else if (looksLikeWarningWorkbook(sheetRaw)) {
             const parsed = parseWarningsSheet(sheetRaw)
             data.warnings = parsed
+            data.warningFileCreatedDate = getWarningFileCreatedDate(wb, file) ?? data.warningFileCreatedDate
           } else if (looksLikeGradeWorkbook(sheetRaw)) {
             const parsed = parseGradeSheet(sheetRaw)
             data.grades = parsed

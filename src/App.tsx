@@ -79,6 +79,7 @@ function App() {
 
   const hasData = data.absences.length > 0
   const isNameSearchActive = studentSearch.trim().length > 0
+  const filtersDisabled = isNameSearchActive || noFilter
   const prefetchedChunks = useRef<Set<string>>(new Set())
 
   useEffect(() => {
@@ -728,12 +729,11 @@ function App() {
                         />
                         <button
                           onClick={() => setNoFilter(v => !v)}
-                          disabled={isNameSearchActive}
                           className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors whitespace-nowrap ${
                             noFilter
                               ? 'bg-sky-600 text-white border-sky-600 hover:bg-sky-700'
                               : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                          } ${isNameSearchActive ? 'opacity-40 pointer-events-none' : ''}`}
+                          }`}
                         >
                           Ingen filter
                         </button>
@@ -746,10 +746,10 @@ function App() {
                         <div className="flex items-center gap-4">
                           <button
                             onClick={() => setThresholdEnabled(v => !v)}
-                            disabled={isNameSearchActive}
+                            disabled={filtersDisabled}
                             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
                               thresholdEnabled ? 'bg-sky-600' : 'bg-slate-300'
-                            } ${isNameSearchActive ? 'opacity-40 pointer-events-none' : ''}`}
+                            } ${filtersDisabled ? 'opacity-40 pointer-events-none' : ''}`}
                             aria-pressed={thresholdEnabled}
                           >
                             <span
@@ -758,7 +758,7 @@ function App() {
                               }`}
                             />
                           </button>
-                          <div className={`w-full sm:w-72 ${ !thresholdEnabled || isNameSearchActive ? 'opacity-40 pointer-events-none' : '' }`}>
+                          <div className={`w-full sm:w-72 ${!thresholdEnabled || filtersDisabled ? 'opacity-40 pointer-events-none' : ''}`}>
                             <label className="block text-sm font-medium text-slate-900 mb-1">
                               Fraværsgrense (%)
                             </label>
@@ -772,7 +772,7 @@ function App() {
                                 onChange={e =>
                                   setAbsenceThreshold(parseFloat(e.target.value))
                                 }
-                                disabled={isNameSearchActive}
+                                disabled={filtersDisabled}
                                 className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
                               />
                               <span className="text-lg font-semibold text-sky-600 min-w-12">
@@ -783,7 +783,7 @@ function App() {
                         </div>
                       </div>
 
-                      <div className={data.grades.length === 0 || isNameSearchActive ? 'opacity-40 pointer-events-none' : ''}>
+                      <div className={data.grades.length === 0 || filtersDisabled ? 'opacity-40 pointer-events-none' : ''}>
                         <label className={`block text-sm font-medium mb-2 ${fullRapport ? 'text-slate-400' : 'text-slate-900'}`}>
                           Karakter
                           {data.grades.length === 0 && <span className="ml-2 text-xs font-normal text-slate-500">(ingen karakterfil importert)</span>}
@@ -797,7 +797,7 @@ function App() {
                                   prev.includes(opt) ? prev.filter(g => g !== opt) : [...prev, opt]
                                 )
                               }
-                              disabled={data.grades.length === 0 || fullRapport || isNameSearchActive}
+                              disabled={data.grades.length === 0 || fullRapport || filtersDisabled}
                               className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
                                 lowGradeFilter.includes(opt)
                                   ? 'bg-sky-600 text-white border-sky-600 hover:bg-sky-700'
@@ -808,14 +808,6 @@ function App() {
                             </button>
                           ))}
                         </div>
-                      </div>
-                      <div className="ml-auto self-end">
-                        <button
-                          onClick={handleResetFilters}
-                          className="px-3 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors"
-                        >
-                          Tilbakestill filter
-                        </button>
                       </div>
                     </div>
 
@@ -846,12 +838,12 @@ function App() {
                             return next
                           })
                         }}
-                        disabled={isNameSearchActive}
+                        disabled={filtersDisabled}
                         className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
                           missingWarningsOnly
                             ? 'bg-orange-300 text-orange-900 border-orange-300 hover:bg-orange-400'
                             : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                        } ${isNameSearchActive ? 'opacity-40 pointer-events-none' : ''}`}
+                        } ${filtersDisabled ? 'opacity-40 pointer-events-none' : ''}`}
                       >
                         <span className="flex items-center gap-1.5">
                           <AlertTriangle size={15} />

@@ -763,6 +763,212 @@ export default function StudentList({
     URL.revokeObjectURL(url)
   }
 
+  const generateMissingWarningsDocx = async () => {
+    if (!missingWarningsOnly) return
+
+    const {
+      Document,
+      HeadingLevel,
+      Packer,
+      Paragraph,
+      TextRun,
+    } = await loadDocx()
+
+    type MissingWarningEntry = {
+      teacher: string
+      subject: string
+      subjectGroup: string
+      studentName: string
+      percentageAbsence: number
+      grunnlagWarningDate: string | null
+    }
+
+    const selectedClassSet = new Set(selectedClasses)
+    const warningMap = new Map<string, Array<{ warningType: string; sentDate: string }>>()
+
+    data.warnings.forEach(w => {
+      const key = `${normalizeMatch(w.navn)}::${normalizeSubjectGroupKey(w.subjectGroup)}`
+      if (!warningMap.has(key)) warningMap.set(key, [])
+      warningMap.get(key)!.push({ warningType: w.warningType, sentDate: w.sentDate })
+    })
+
+    const dedupedEntries = new Map<string, MissingWarningEntry>()
+
+    data.absences
+      .filter(record => selectedClassSet.has(record.class) && record.percentageAbsence > threshold)
+      .forEach(record => {
+        const studentNorm = normalizeMatch(record.navn)
+        const subjectGroupNorm = normalizeSubjectGroupKey(record.subjectGroup)
+        const warningKey = `${studentNorm}::${subjectGroupNorm}`
+        const warnings = warningMap.get(warningKey) ?? []
+
+        const hasFravaerWarning = warnings.some(w => w.warningType.toLowerCase().includes('frav'))
+        if (hasFravaerWarning) return
+
+        const grunnlagWarningDates = warnings
+          .filter(w => {
+            const type = w.warningType.toLowerCase()
+            return type.includes('vurdering') || type.includes('grunnlag')
+          })
+          .map(w => formatDateDdMmYyyy(w.sentDate))
+
+        const latestGrunnlagWarningDate = grunnlagWarningDates.length > 0
+          ? [...grunnlagWarningDates].sort((a, b) => compareDateStrings(b, a))[0]
+          : null
+
+        const resolvedTeacher = resolveTeacher(record.subject, record.teacher ?? '').trim() || 'Ukjent'
+        const dedupKey = `${studentNorm}::${subjectGroupNorm}::${normalizeMatch(resolvedTeacher)}`
+
+        const nextEntry: MissingWarningEntry = {
+          teacher: resolvedTeacher,
+          subject: record.subject,
+          subjectGroup: record.subjectGroup,
+          studentName: record.navn,
+          percentageAbsence: record.percentageAbsence,
+          grunnlagWarningDate: latestGrunnlagWarningDate,
+        }
+
+        const existing = dedupedEntries.get(dedupKey)
+        if (!existing || nextEntry.percentageAbsence > existing.percentageAbsence) {
+          dedupedEntries.set(dedupKey, nextEntry)
+        }
+      })
+
+    const entries = Array.from(dedupedEntries.values())
+    if (entries.length === 0) return
+
+    const entriesByTeacher = new Map<string, MissingWarningEntry[]>()
+    entries.forEach(entry => {
+      if (!entriesByTeacher.has(entry.teacher)) entriesByTeacher.set(entry.teacher, [])
+      entriesByTeacher.get(entry.teacher)!.push(entry)
+    })
+
+    const thresholdText = `${threshold.toFixed(1).replace('.', ',')}%`
+    const reportPerDate = (() => {
+      const raw = (data.warningFileCreatedDate ?? '').trim()
+      const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+      if (!m) return null
+      const d = new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10))
+      if (isNaN(d.getTime())) return null
+      d.setDate(d.getDate() - 1)
+      const day = String(d.getDate()).padStart(2, '0')
+      const month = String(d.getMonth() + 1).padStart(2, '0')
+      const year = d.getFullYear()
+      return `${day}.${month}.${year}`
+    })()
+    const perDateText = reportPerDate ? ` per ${reportPerDate}` : ''
+    const teacherNames = Array.from(entriesByTeacher.keys()).sort((a, b) => a.localeCompare(b, 'nb-NO'))
+    const children: Array<any> = []
+
+    teacherNames.forEach((teacher, index) => {
+      const teacherFirstName = teacher.trim().split(/\s+/)[0] || teacher
+      const teacherEntries = entriesByTeacher.get(teacher) ?? []
+      const subjectsMap = new Map<string, MissingWarningEntry[]>()
+
+      teacherEntries.forEach(entry => {
+        const subjectKey = `${entry.subject}::${entry.subjectGroup}`
+        if (!subjectsMap.has(subjectKey)) subjectsMap.set(subjectKey, [])
+        subjectsMap.get(subjectKey)!.push(entry)
+      })
+
+      const sortedSubjects = Array.from(subjectsMap.entries()).sort(([a], [b]) => {
+        const [subjectA, groupA] = a.split('::')
+        const [subjectB, groupB] = b.split('::')
+        const subjectCompare = subjectA.localeCompare(subjectB, 'nb-NO')
+        if (subjectCompare !== 0) return subjectCompare
+        return groupA.localeCompare(groupB, 'nb-NO')
+      })
+
+      children.push(
+        new Paragraph({
+          text: 'Melding om manglende varselbrev',
+          heading: HeadingLevel.HEADING_1,
+          pageBreakBefore: index > 0,
+        }),
+        new Paragraph({ children: [new TextRun({ text: `Fraværsgrense: ${thresholdText}` })] }),
+        new Paragraph({ children: [new TextRun({ text: `Lærer: ${teacher}` })] }),
+        new Paragraph({ text: '' }),
+        new Paragraph({
+          children: [
+            new TextRun({ text: `Hei ${teacherFirstName},` }),
+          ],
+        }),
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: `Det er tatt ut rapport på manglende varselbrev${perDateText}. Følgende elever har fravær over ${thresholdText} men har ikke fått varsel på fravær i faget. Ber om at varsler sendes ut snarest.`,
+            }),
+          ],
+        }),
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: 'I noen tilfeller kan det være etter avtale at dette ikke er gjort, sjekk med trinnleder hva som bør gjøres.',
+            }),
+          ],
+        }),
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: 'Vi informerer også her om det er sendt noe på manglende vurderingsgrunnlag, dette er bare informasjon, du som faglærer vurderer om det trengs varsel på vurderingsgrunnlag.',
+            }),
+          ],
+        }),
+        new Paragraph({ text: '' }),
+      )
+
+      sortedSubjects.forEach(([subjectKey, subjectEntries]) => {
+        const [subjectName, subjectGroup] = subjectKey.split('::')
+        const sortedEntries = [...subjectEntries].sort((a, b) => a.studentName.localeCompare(b.studentName, 'nb-NO'))
+
+        children.push(
+          new Paragraph({
+            children: [new TextRun({ text: `${subjectName} (${subjectGroup})`, bold: true })],
+          }),
+        )
+
+        sortedEntries.forEach(entry => {
+          const pctText = `${entry.percentageAbsence.toFixed(1).replace('.', ',')}%`
+          const grunnlagText = entry.grunnlagWarningDate
+            ? `Det har blitt sendt varsel på manglende grunnlag ${entry.grunnlagWarningDate}.`
+            : 'Det er heller ikke sendt varsel på manglende vurderingsgrunnlag.'
+
+          children.push(
+            new Paragraph({
+              bullet: { level: 0 },
+              children: [new TextRun({ text: `${entry.studentName} - ${pctText}` })],
+            }),
+            new Paragraph({
+              indent: { left: 720 },
+              children: [new TextRun({ text: grunnlagText })],
+            }),
+          )
+        })
+
+        children.push(new Paragraph({ text: '' }))
+      })
+    })
+
+    const doc = new Document({
+      styles: {
+        default: {
+          document: {
+            run: { font: 'Calibri' },
+          },
+        },
+      },
+      sections: [{ children }],
+    })
+
+    const blob = await Packer.toBlob(doc)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `manglende_varsler_${todayDdMmYyyy()}.docx`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const generateOppfolgingsark = async (student: StudentAbsenceSummary) => {
     const { jsPDF } = await loadJsPdf()
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
@@ -1132,6 +1338,15 @@ export default function StudentList({
           <span className="text-sm text-slate-600">
             Grense: {threshold.toFixed(1)}%
           </span>
+          {missingWarningsOnly && (
+            <button
+              onClick={() => void generateMissingWarningsDocx()}
+              className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
+            >
+              <FileText className="w-4 h-4" />
+              Generer melding om manglende varsler
+            </button>
+          )}
           <button
             onClick={() => void generateOppfolgingsarkForUtvalg()}
             className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"

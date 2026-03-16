@@ -66,4 +66,5 @@ export interface DataStore {
   warnings: WarningRecord[]
   grades: GradeRecord[]
   studentInfo: StudentInfoRecord[]
+  warningFileCreatedDate?: string
 }

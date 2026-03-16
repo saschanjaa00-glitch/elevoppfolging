@@ -130,5 +130,6 @@ export function anonymizeData(data: DataStore): DataStore {
         etternavn,
       }
     }),
+    warningFileCreatedDate: data.warningFileCreatedDate,
   }
 }
