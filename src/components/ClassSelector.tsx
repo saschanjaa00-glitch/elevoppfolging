@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react'
 import type { DataStore } from '../types'
 
 interface ClassSelectorProps {
@@ -8,19 +9,25 @@ interface ClassSelectorProps {
   onExportOppfolgingsark?: () => void
 }
 
-export default function ClassSelector({
+function ClassSelector({
   data,
   selectedClasses,
   onClassChange,
   onPrintClassLists,
   onExportOppfolgingsark,
 }: ClassSelectorProps) {
-  const classes = Array.from(new Set(data.absences.map(a => a.class))).sort()
+  const classes = useMemo(
+    () => Array.from(new Set(data.absences.map(a => a.class))).sort(),
+    [data.absences]
+  )
 
-  const vg1 = classes.filter(c => /^1/i.test(c))
-  const vg2 = classes.filter(c => /^2/i.test(c))
-  const vg3 = classes.filter(c => /^3/i.test(c))
-  const other = classes.filter(c => !/^[123]/i.test(c))
+  const { vg1, vg2, vg3, other } = useMemo(() => {
+    const nextVg1 = classes.filter(c => /^1/i.test(c))
+    const nextVg2 = classes.filter(c => /^2/i.test(c))
+    const nextVg3 = classes.filter(c => /^3/i.test(c))
+    const nextOther = classes.filter(c => !/^[123]/i.test(c))
+    return { vg1: nextVg1, vg2: nextVg2, vg3: nextVg3, other: nextOther }
+  }, [classes])
 
   const toggleClass = (className: string) => {
     if (selectedClasses.includes(className)) {
@@ -140,3 +147,5 @@ export default function ClassSelector({
     </div>
   )
 }
+
+export default memo(ClassSelector)

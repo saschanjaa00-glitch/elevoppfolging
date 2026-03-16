@@ -17,6 +17,7 @@ export default function StudentDetail({
   selectedStudent,
   threshold,
 }: StudentDetailProps) {
+  const normalizedSelectedStudent = useMemo(() => normalizeMatch(selectedStudent), [selectedStudent])
   const studentInfoLookup = useMemo(() => createStudentInfoLookup(data.studentInfo), [data.studentInfo])
 
   const dateColor = (dateStr: string): string => warningDateColorClass(dateStr)
@@ -47,20 +48,28 @@ export default function StudentDetail({
     )
   }
 
-  const studentData = useMemo(() => {
-    const records = data.absences.filter(
-      a => a.class === selectedClass && a.navn === selectedStudent
-    )
+  const studentRecords = useMemo(
+    () => data.absences.filter(a => a.class === selectedClass && a.navn === selectedStudent),
+    [data.absences, selectedClass, selectedStudent]
+  )
 
-    const warnings = data.warnings.filter(
-      w => normalizeMatch(w.navn) === normalizeMatch(selectedStudent)
-    )
+  const warningsBySubjectGroup = useMemo(() => {
+    const map = new Map<string, Array<{ warningType: string; sentDate: string }>>()
+    data.warnings.forEach(w => {
+      if (normalizeMatch(w.navn) !== normalizedSelectedStudent) return
+      const key = normalizeSubjectGroupKey(w.subjectGroup)
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push({ warningType: w.warningType, sentDate: w.sentDate })
+    })
+    return map
+  }, [data.warnings, normalizedSelectedStudent])
 
-    // Term 1 grades and subject teachers keyed by subjectGroup
+  const gradeLookup = useMemo(() => {
     const gradeMap = new Map<string, string>()
     const subjectTeacherMap = new Map<string, string>()
+
     data.grades.forEach(g => {
-      if (normalizeMatch(g.navn) !== normalizeMatch(selectedStudent)) return
+      if (normalizeMatch(g.navn) !== normalizedSelectedStudent) return
       const key = normalizeSubjectGroupKey(g.subjectGroup)
       if (g.subjectTeacher && !subjectTeacherMap.has(key)) {
         subjectTeacherMap.set(key, g.subjectTeacher)
@@ -71,125 +80,129 @@ export default function StudentDetail({
       }
     })
 
-    const studentInfo = findStudentInfoInLookup(studentInfoLookup, selectedStudent, selectedClass)
+    return { gradeMap, subjectTeacherMap }
+  }, [data.grades, normalizedSelectedStudent])
 
-    return { records, warnings, gradeMap, subjectTeacherMap, studentInfo }
-  }, [data, selectedClass, selectedStudent, studentInfoLookup])
+  const studentInfo = useMemo(
+    () => findStudentInfoInLookup(studentInfoLookup, selectedStudent, selectedClass),
+    [studentInfoLookup, selectedStudent, selectedClass]
+  )
 
-  if (studentData.records.length === 0) {
+  const subjectSummaries = useMemo(() => {
+    if (studentRecords.length === 0) return []
+
+    const subjectGroups = new Map<string, typeof studentRecords>()
+    studentRecords.forEach(record => {
+      if (!subjectGroups.has(record.subject)) {
+        subjectGroups.set(record.subject, [])
+      }
+      subjectGroups.get(record.subject)!.push(record)
+    })
+
+    const summaries = Array.from(subjectGroups.entries())
+      .map(([subject, records]) => {
+        const topRecord = records.reduce((max, current) =>
+          current.percentageAbsence > max.percentageAbsence ? current : max
+        )
+
+        const subjectWarnings = warningsBySubjectGroup.get(normalizeSubjectGroupKey(topRecord.subjectGroup)) ?? []
+        const grade = gradeLookup.gradeMap.get(normalizeSubjectGroupKey(topRecord.subjectGroup))
+        const teacher = resolveTeacher(subject, gradeLookup.subjectTeacherMap.get(normalizeSubjectGroupKey(topRecord.subjectGroup)) ?? topRecord.teacher)
+
+        return {
+          subject,
+          records,
+          topRecord,
+          warnings: subjectWarnings,
+          grade,
+          teacher,
+          noAbsenceData: false,
+          showSidemalExemption: studentInfo?.sidemalExemption ?? false,
+        }
+      })
+      .sort((a, b) => b.topRecord.percentageAbsence - a.topRecord.percentageAbsence)
+
+    // Add Norwegian codes from vurderinger even when no fravær rows exist.
+    const requiredNorskCodes = ['NOR1268', 'NOR1269']
+    const norskDisplayNames: Record<string, string> = {
+      NOR1268: 'Norsk sidemål',
+      NOR1269: 'Norsk muntlig',
+    }
+    const existingSubjectGroupKeys = new Set(
+      summaries.map(s => normalizeSubjectGroupKey(s.topRecord.subjectGroup))
+    )
+
+    const nor1267Record =
+      studentRecords.find(r =>
+        normalizeSubjectGroupKey(r.subjectGroup) === normalizeSubjectGroupKey('NOR1267')
+      ) ??
+      studentRecords.find(r =>
+        normalizeMatch(r.subject).includes('norsk') && normalizeMatch(r.subject).includes('hoved')
+      )
+
+    const norskSupplement = requiredNorskCodes
+      .filter(code => {
+        const key = normalizeSubjectGroupKey(code)
+        return gradeLookup.gradeMap.has(key) && !existingSubjectGroupKeys.has(key)
+      })
+      .map(code => {
+        const subjectGroupKey = normalizeSubjectGroupKey(code)
+        const displayName = norskDisplayNames[code] ?? code
+        const teacher = resolveTeacher(
+          code,
+          gradeLookup.subjectTeacherMap.get(subjectGroupKey) ?? ''
+        )
+        const warnings = warningsBySubjectGroup.get(subjectGroupKey) ?? []
+
+        const inheritedAbsence = nor1267Record?.percentageAbsence ?? 0
+        const inheritedHours = nor1267Record?.hoursAbsence ?? 0
+        const hasAbsenceData = nor1267Record !== undefined
+
+        return {
+          subject: displayName,
+          records: [] as typeof studentRecords,
+          topRecord: {
+            navn: selectedStudent,
+            class: selectedClass,
+            subject: displayName,
+            subjectGroup: code,
+            percentageAbsence: inheritedAbsence,
+            hoursAbsence: inheritedHours,
+            teacher,
+            avbrudd: false,
+          },
+          warnings,
+          grade: gradeLookup.gradeMap.get(subjectGroupKey),
+          teacher,
+          noAbsenceData: !hasAbsenceData,
+          showSidemalExemption: studentInfo?.sidemalExemption ?? false,
+        }
+      })
+
+    if (norskSupplement.length > 0) {
+      const insertAfterIndex = summaries.findIndex(s => {
+        const lower = s.subject.toLowerCase()
+        return lower.includes('norsk') && lower.includes('hoved')
+      })
+
+      if (insertAfterIndex >= 0) {
+        summaries.splice(insertAfterIndex + 1, 0, ...norskSupplement)
+      } else {
+        const firstNorskIndex = summaries.findIndex(s => isNorskSubject(s.subject))
+        if (firstNorskIndex >= 0) summaries.splice(firstNorskIndex + 1, 0, ...norskSupplement)
+        else summaries.push(...norskSupplement)
+      }
+    }
+
+    return summaries
+  }, [studentRecords, warningsBySubjectGroup, gradeLookup, studentInfo, selectedStudent, selectedClass])
+
+  if (studentRecords.length === 0) {
     return (
       <div className="card p-8 text-center">
         <p className="text-slate-600">Fant ikke elevdata</p>
       </div>
     )
-  }
-
-  const subjectGroups = new Map<string, typeof studentData.records>()
-  studentData.records.forEach(record => {
-    if (!subjectGroups.has(record.subject)) {
-      subjectGroups.set(record.subject, [])
-    }
-    subjectGroups.get(record.subject)!.push(record)
-  })
-
-  const subjectSummaries = Array.from(subjectGroups.entries())
-    .map(([subject, records]) => {
-      const topRecord = records.reduce((max, current) =>
-        current.percentageAbsence > max.percentageAbsence ? current : max
-      )
-
-      const subjectWarnings = studentData.warnings
-        .filter(w => normalizeSubjectGroupKey(w.subjectGroup) === normalizeSubjectGroupKey(topRecord.subjectGroup))
-        .map(w => ({ warningType: w.warningType, sentDate: w.sentDate }))
-
-      const grade = studentData.gradeMap.get(normalizeSubjectGroupKey(topRecord.subjectGroup))
-      const teacher = resolveTeacher(subject, studentData.subjectTeacherMap.get(normalizeSubjectGroupKey(topRecord.subjectGroup)) ?? topRecord.teacher)
-
-      return {
-        subject,
-        records,
-        topRecord,
-        warnings: subjectWarnings,
-        grade,
-        teacher,
-        noAbsenceData: false,
-        showSidemalExemption: studentData.studentInfo?.sidemalExemption ?? false,
-      }
-    })
-    .sort((a, b) => b.topRecord.percentageAbsence - a.topRecord.percentageAbsence)
-
-  // Add Norwegian codes from vurderinger even when no fravær rows exist.
-  const requiredNorskCodes = ['NOR1268', 'NOR1269']
-  const norskDisplayNames: Record<string, string> = {
-    NOR1268: 'Norsk sidemål',
-    NOR1269: 'Norsk muntlig',
-  }
-  const existingSubjectGroupKeys = new Set(
-    subjectSummaries.map(s => normalizeSubjectGroupKey(s.topRecord.subjectGroup))
-  )
-  // Find NOR1267 raw record to inherit absence data for NOR1268/1269
-  const nor1267Record =
-    studentData.records.find(r =>
-      normalizeSubjectGroupKey(r.subjectGroup) === normalizeSubjectGroupKey('NOR1267')
-    ) ??
-    studentData.records.find(r =>
-      normalizeMatch(r.subject).includes('norsk') && normalizeMatch(r.subject).includes('hoved')
-    )
-
-  const norskSupplement = requiredNorskCodes
-    .filter(code => {
-      const key = normalizeSubjectGroupKey(code)
-      return studentData.gradeMap.has(key) && !existingSubjectGroupKeys.has(key)
-    })
-    .map(code => {
-      const subjectGroupKey = normalizeSubjectGroupKey(code)
-      const displayName = norskDisplayNames[code] ?? code
-      const teacher = resolveTeacher(
-        code,
-        studentData.subjectTeacherMap.get(subjectGroupKey) ?? ''
-      )
-      const warnings = studentData.warnings
-        .filter(w => normalizeSubjectGroupKey(w.subjectGroup) === subjectGroupKey)
-        .map(w => ({ warningType: w.warningType, sentDate: w.sentDate }))
-
-      const inheritedAbsence = nor1267Record?.percentageAbsence ?? 0
-      const inheritedHours = nor1267Record?.hoursAbsence ?? 0
-      const hasAbsenceData = nor1267Record !== undefined
-
-      return {
-        subject: displayName,
-        records: [] as typeof studentData.records,
-        topRecord: {
-          navn: selectedStudent,
-          class: selectedClass,
-          subject: displayName,
-          subjectGroup: code,
-          percentageAbsence: inheritedAbsence,
-          hoursAbsence: inheritedHours,
-          teacher,
-          avbrudd: false,
-        },
-        warnings,
-        grade: studentData.gradeMap.get(subjectGroupKey),
-        teacher,
-        noAbsenceData: !hasAbsenceData,
-        showSidemalExemption: studentData.studentInfo?.sidemalExemption ?? false,
-      }
-    })
-
-  if (norskSupplement.length > 0) {
-    const insertAfterIndex = subjectSummaries.findIndex(s => {
-      const lower = s.subject.toLowerCase()
-      return lower.includes('norsk') && lower.includes('hoved')
-    })
-
-    if (insertAfterIndex >= 0) {
-      subjectSummaries.splice(insertAfterIndex + 1, 0, ...norskSupplement)
-    } else {
-      const firstNorskIndex = subjectSummaries.findIndex(s => isNorskSubject(s.subject))
-      if (firstNorskIndex >= 0) subjectSummaries.splice(firstNorskIndex + 1, 0, ...norskSupplement)
-      else subjectSummaries.push(...norskSupplement)
-    }
   }
 
   return (

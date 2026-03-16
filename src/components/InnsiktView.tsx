@@ -48,6 +48,36 @@ export default function InnsiktView({ data }: Props) {
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [expandedTeacher, setExpandedTeacher] = useState<string | null>(null)
 
+  const normalizedGrades = useMemo(() => {
+    return data.grades
+      .map(grade => ({
+        teacher: grade.subjectTeacher?.trim() ?? '',
+        subjectDisplay: grade.subjectGroup?.trim() ?? '',
+        subjectNorm: normalizeMatch(grade.subjectGroup),
+        studentNorm: normalizeMatch(grade.navn),
+        gradeValue: grade.grade.toUpperCase().trim(),
+      }))
+      .filter(grade => grade.teacher && grade.subjectDisplay)
+  }, [data.grades])
+
+  const normalizedWarnings = useMemo(() => {
+    return data.warnings
+      .map(warning => ({
+        warningType: warning.warningType,
+        studentNorm: normalizeMatch(warning.navn),
+        subjectDisplay: warning.subjectGroup?.trim() ?? '',
+      }))
+      .filter(warning => warning.subjectDisplay)
+  }, [data.warnings])
+
+  const normalizedAbsences = useMemo(() => {
+    return data.absences.map(absence => ({
+      percentageAbsence: absence.percentageAbsence,
+      studentNorm: normalizeMatch(absence.navn),
+      subjectDisplay: absence.subjectGroup,
+    }))
+  }, [data.absences])
+
   const teacherStats = useMemo(() => {
     // Build teacher and subject statistics from vurderinger (grades) only.
     const teacherData = new Map<string, TeacherStats>()
@@ -58,15 +88,11 @@ export default function InnsiktView({ data }: Props) {
 
     const studentSubjectKey = (student: string, subject: string) => `${student}|||${normalizeMatch(subject)}`
 
-    data.grades.forEach(grade => {
-      const teacher = grade.subjectTeacher?.trim()
-      if (!teacher) return
-
-      const subjectDisplay = grade.subjectGroup?.trim()
-      if (!subjectDisplay) return
-      const subject = normalizeMatch(subjectDisplay)
-
-      const normStudent = normalizeMatch(grade.navn)
+    normalizedGrades.forEach(grade => {
+      const teacher = grade.teacher
+      const subjectDisplay = grade.subjectDisplay
+      const subject = grade.subjectNorm
+      const normStudent = grade.studentNorm
 
       if (!teacherData.has(teacher)) {
         teacherData.set(teacher, {
@@ -114,7 +140,7 @@ export default function InnsiktView({ data }: Props) {
       }
 
       const stats = teacherData.get(teacher)!
-      const gradeValue = grade.grade.toUpperCase().trim()
+      const gradeValue = grade.gradeValue
       stats.gradesCounts[gradeValue] = (stats.gradesCounts[gradeValue] ?? 0) + 1
 
       const subjectStat = teacherSubjects.get(teacher)!.get(subject)!
@@ -138,10 +164,9 @@ export default function InnsiktView({ data }: Props) {
     }
 
     // Map warnings to teacher/subject using vurderinger relationships only.
-    data.warnings.forEach(warning => {
-      const warningStudent = normalizeMatch(warning.navn)
-      const warningSubject = warning.subjectGroup?.trim()
-      if (!warningSubject) return
+    normalizedWarnings.forEach(warning => {
+      const warningStudent = warning.studentNorm
+      const warningSubject = warning.subjectDisplay
 
       const matchedTeachers = gradeTeachersByStudentSubject.get(
         studentSubjectKey(warningStudent, warningSubject)
@@ -165,15 +190,15 @@ export default function InnsiktView({ data }: Props) {
 
     // Missing warnings: absence > 8%, no warning for student+subjectGroup.
     const warningMap = new Map<string, number>()
-    data.warnings.forEach(w => {
-      const key = studentSubjectKey(normalizeMatch(w.navn), w.subjectGroup)
+    normalizedWarnings.forEach(w => {
+      const key = studentSubjectKey(w.studentNorm, w.subjectDisplay)
       warningMap.set(key, (warningMap.get(key) ?? 0) + 1)
     })
 
     const checkedCombos = new Set<string>()
-    data.absences.forEach(a => {
+    normalizedAbsences.forEach(a => {
       if (a.percentageAbsence <= 8) return
-      const comboKey = studentSubjectKey(normalizeMatch(a.navn), a.subjectGroup)
+      const comboKey = studentSubjectKey(a.studentNorm, a.subjectDisplay)
       if (checkedCombos.has(comboKey)) return
       checkedCombos.add(comboKey)
 
@@ -182,7 +207,7 @@ export default function InnsiktView({ data }: Props) {
       const matchedTeachers = gradeTeachersByStudentSubject.get(comboKey)
       if (!matchedTeachers || matchedTeachers.size === 0) return
 
-      const subjectKey = normalizeMatch(a.subjectGroup)
+      const subjectKey = normalizeMatch(a.subjectDisplay)
       matchedTeachers.forEach(teacher => {
         const teacherStat = teacherData.get(teacher)
         if (!teacherStat) return
@@ -203,7 +228,7 @@ export default function InnsiktView({ data }: Props) {
     })
 
     return Array.from(teacherData.values())
-  }, [data])
+  }, [normalizedGrades, normalizedWarnings, normalizedAbsences])
 
   const allGrades = ['IV', '1', '2', '3', '4', '5', '6'] as const
 

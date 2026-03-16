@@ -63,6 +63,42 @@ export default function FaginnsiktView({ data }: Props) {
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [expandedSubject, setExpandedSubject] = useState<string | null>(null)
 
+  const normalizedGrades = useMemo(() => {
+    return data.grades
+      .map(grade => {
+        const teacher = grade.subjectTeacher?.trim() ?? ''
+        const subjectDisplay = grade.subjectGroup?.trim() ?? ''
+        const subjectNorm = subjectMergeKey(subjectDisplay)
+        return {
+          teacher,
+          subjectDisplay,
+          subjectNorm,
+          subjectCode: subjectDisplayCode(subjectDisplay),
+          normStudent: normalizeMatch(grade.navn),
+          gradeValue: grade.grade.toUpperCase().trim(),
+        }
+      })
+      .filter(grade => grade.teacher && grade.subjectDisplay)
+  }, [data.grades])
+
+  const normalizedWarnings = useMemo(() => {
+    return data.warnings
+      .map(warning => ({
+        warningType: warning.warningType,
+        normStudent: normalizeMatch(warning.navn),
+        subjectDisplay: warning.subjectGroup?.trim() ?? '',
+      }))
+      .filter(warning => warning.subjectDisplay)
+  }, [data.warnings])
+
+  const normalizedAbsences = useMemo(() => {
+    return data.absences.map(absence => ({
+      percentageAbsence: absence.percentageAbsence,
+      normStudent: normalizeMatch(absence.navn),
+      subjectDisplay: absence.subjectGroup,
+    }))
+  }, [data.absences])
+
   const subjectRows = useMemo(() => {
     const subjectMap = new Map<string, SubjectRow>()
     // subject(norm) -> teacher -> TeacherInSubject
@@ -83,16 +119,13 @@ export default function FaginnsiktView({ data }: Props) {
       return warningType
     }
 
-    data.grades.forEach(grade => {
-      const teacher = grade.subjectTeacher?.trim()
-      if (!teacher) return
-      const subjectDisplay = grade.subjectGroup?.trim()
-      if (!subjectDisplay) return
-      const subjectNorm = subjectMergeKey(subjectDisplay)
-      // Use just the code after '/' (stripped of group suffix) as display name
-      const subjectCode = subjectDisplayCode(subjectDisplay)
-      const normStudent = normalizeMatch(grade.navn)
-      const gradeValue = grade.grade.toUpperCase().trim()
+    normalizedGrades.forEach(grade => {
+      const teacher = grade.teacher
+      const subjectDisplay = grade.subjectDisplay
+      const subjectNorm = grade.subjectNorm
+      const subjectCode = grade.subjectCode
+      const normStudent = grade.normStudent
+      const gradeValue = grade.gradeValue
 
       // Ensure subject row
       if (!subjectMap.has(subjectNorm)) {
@@ -150,10 +183,9 @@ export default function FaginnsiktView({ data }: Props) {
     })
 
     // Warnings
-    data.warnings.forEach(warning => {
-      const normStudent = normalizeMatch(warning.navn)
-      const subjectDisplay = warning.subjectGroup?.trim()
-      if (!subjectDisplay) return
+    normalizedWarnings.forEach(warning => {
+      const normStudent = warning.normStudent
+      const subjectDisplay = warning.subjectDisplay
       const subjectNorm = subjectMergeKey(subjectDisplay)
       const key = studentSubjectKey(normStudent, subjectDisplay)
       const label = warningLabel(warning.warningType)
@@ -175,20 +207,20 @@ export default function FaginnsiktView({ data }: Props) {
 
     // Missing warnings
     const warningMap = new Map<string, number>()
-    data.warnings.forEach(w => {
-      const key = studentSubjectKey(normalizeMatch(w.navn), w.subjectGroup)
+    normalizedWarnings.forEach(w => {
+      const key = studentSubjectKey(w.normStudent, w.subjectDisplay)
       warningMap.set(key, (warningMap.get(key) ?? 0) + 1)
     })
 
     const checkedCombos = new Set<string>()
-    data.absences.forEach(a => {
+    normalizedAbsences.forEach(a => {
       if (a.percentageAbsence <= 8) return
-      const comboKey = studentSubjectKey(normalizeMatch(a.navn), a.subjectGroup)
+      const comboKey = studentSubjectKey(a.normStudent, a.subjectDisplay)
       if (checkedCombos.has(comboKey)) return
       checkedCombos.add(comboKey)
       if ((warningMap.get(comboKey) ?? 0) > 0) return
 
-      const subjectNorm = subjectMergeKey(a.subjectGroup)
+      const subjectNorm = subjectMergeKey(a.subjectDisplay)
       const row = subjectMap.get(subjectNorm)
       if (row) row.missingWarnings += 1
 
@@ -209,7 +241,7 @@ export default function FaginnsiktView({ data }: Props) {
     })
 
     return Array.from(subjectMap.values())
-  }, [data])
+  }, [normalizedGrades, normalizedWarnings, normalizedAbsences])
 
   const filteredAndSorted = useMemo(() => {
     const filtered = subjectRows.filter(r =>

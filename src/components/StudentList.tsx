@@ -53,7 +53,38 @@ export default function StudentList({
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [showPdfMenu, setShowPdfMenu] = useState(false)
   const deferredStudentSearch = useDeferredValue(studentSearch)
+  const selectedClassSet = useMemo(() => new Set(selectedClasses), [selectedClasses])
+  const classData = useMemo(
+    () => data.absences.filter(a => selectedClassSet.has(a.class)),
+    [data.absences, selectedClassSet]
+  )
   const studentInfoLookup = useMemo(() => createStudentInfoLookup(data.studentInfo), [data.studentInfo])
+  const warningLookup = useMemo(() => {
+    const warningMap = new Map<string, Array<{ warningType: string; sentDate: string }>>()
+    const studentDobMap = new Map<string, string>()
+    data.warnings.forEach(warning => {
+      const studentNorm = normalizeMatch(warning.navn)
+      const key = `${studentNorm}::${normalizeSubjectGroupKey(warning.subjectGroup)}`
+      if (!warningMap.has(key)) warningMap.set(key, [])
+      warningMap.get(key)!.push({ warningType: warning.warningType, sentDate: warning.sentDate })
+      if (warning.dateOfBirth) studentDobMap.set(studentNorm, warning.dateOfBirth)
+    })
+    return { warningMap, studentDobMap }
+  }, [data.warnings])
+
+  const gradeLookup = useMemo(() => {
+    const gradeMap = new Map<string, string>()
+    const subjectTeacherMap = new Map<string, string>()
+    data.grades.forEach(g => {
+      const halvar = g.halvår.toString().trim()
+      if (halvar === '1' || halvar.toLowerCase().includes('1')) {
+        const key = `${normalizeMatch(g.navn)}::${normalizeSubjectGroupKey(g.subjectGroup)}`
+        if (!gradeMap.has(key)) gradeMap.set(key, g.grade)
+        if (g.subjectTeacher && !subjectTeacherMap.has(key)) subjectTeacherMap.set(key, g.subjectTeacher)
+      }
+    })
+    return { gradeMap, subjectTeacherMap }
+  }, [data.grades])
 
   const ownerForClass = (className: string, mapping: Record<string, string[]>) => {
     const found = Object.entries(mapping).find(([, classes]) => classes.includes(className))
@@ -101,31 +132,9 @@ export default function StudentList({
   }
 
   const studentSummaries = useMemo(() => {
-    const selectedClassSet = new Set(selectedClasses)
-    const classData = data.absences.filter(a => selectedClassSet.has(a.class))
+    const { warningMap, studentDobMap } = warningLookup
+    const { gradeMap, subjectTeacherMap } = gradeLookup
     const classDataByStudent = new Map<string, typeof classData>()
-
-    const warningMap = new Map<string, Array<{ warningType: string; sentDate: string }>>()
-    const studentDobMap = new Map<string, string>()
-    data.warnings.forEach(warning => {
-      const studentNorm = normalizeMatch(warning.navn)
-      const key = `${studentNorm}::${normalizeSubjectGroupKey(warning.subjectGroup)}`
-      if (!warningMap.has(key)) warningMap.set(key, [])
-      warningMap.get(key)!.push({ warningType: warning.warningType, sentDate: warning.sentDate })
-      if (warning.dateOfBirth) studentDobMap.set(studentNorm, warning.dateOfBirth)
-    })
-
-    // Grade map: student+subjectGroup -> term 1 grade
-    const gradeMap = new Map<string, string>()
-    const subjectTeacherMap = new Map<string, string>()
-    data.grades.forEach(g => {
-      const halvar = g.halvår.toString().trim()
-      if (halvar === '1' || halvar.toLowerCase().includes('1')) {
-        const key = `${normalizeMatch(g.navn)}::${normalizeSubjectGroupKey(g.subjectGroup)}`
-        if (!gradeMap.has(key)) gradeMap.set(key, g.grade)
-        if (g.subjectTeacher && !subjectTeacherMap.has(key)) subjectTeacherMap.set(key, g.subjectTeacher)
-      }
-    })
 
     const effectiveLowGrades = fullRapport
       ? (fullRapportInclude2 ? ['IV', '1', '2'] : ['IV', '1'])
@@ -331,7 +340,7 @@ export default function StudentList({
     })
 
     return Array.from(summaryMap.values())
-  }, [data, selectedClasses, threshold, lowGradeFilter, fullRapport, fullRapportInclude2, noFilter, studentInfoLookup])
+  }, [classData, warningLookup, gradeLookup, threshold, lowGradeFilter, fullRapport, fullRapportInclude2, noFilter, studentInfoLookup])
 
   const atRiskStudents = useMemo(() => {
     const searchNorm = deferredStudentSearch.toLowerCase().trim()
@@ -364,19 +373,34 @@ export default function StudentList({
     })
   }, [studentSummaries, deferredStudentSearch, missingWarningsOnly, threshold])
 
-  const getKontaktlaererForStudent = (student: StudentAbsenceSummary) => {
-    const studentRecords = data.absences.filter(
-      record => record.class === student.className && normalizeMatch(record.navn) === normalizeMatch(student.navn)
-    )
+  const kontaktlaererByStudentKey = useMemo(() => {
+    const teacherCountsByStudent = new Map<string, Map<string, number>>()
 
-    const teacherCounts = new Map<string, number>()
-    studentRecords.forEach(record => {
+    classData.forEach(record => {
       const teacher = record.teacher?.trim()
       if (!teacher) return
-      teacherCounts.set(teacher, (teacherCounts.get(teacher) ?? 0) + 1)
+
+      const studentKey = `${record.class}::${normalizeMatch(record.navn)}`
+      if (!teacherCountsByStudent.has(studentKey)) {
+        teacherCountsByStudent.set(studentKey, new Map<string, number>())
+      }
+
+      const counts = teacherCountsByStudent.get(studentKey)!
+      counts.set(teacher, (counts.get(teacher) ?? 0) + 1)
     })
 
-    return Array.from(teacherCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'Ukjent'
+    const kontaktlaererMap = new Map<string, string>()
+    teacherCountsByStudent.forEach((counts, studentKey) => {
+      const kontaktlaerer = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'Ukjent'
+      kontaktlaererMap.set(studentKey, kontaktlaerer)
+    })
+
+    return kontaktlaererMap
+  }, [classData])
+
+  const getKontaktlaererForStudent = (student: StudentAbsenceSummary) => {
+    const key = `${student.className}::${normalizeMatch(student.navn)}`
+    return kontaktlaererByStudentKey.get(key) ?? 'Ukjent'
   }
 
   if (atRiskStudents.length === 0) {
