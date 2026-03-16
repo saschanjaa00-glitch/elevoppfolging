@@ -23,6 +23,7 @@ export interface StudentInfoRecord {
   fornavn: string
   etternavn: string
   class?: string
+  dateOfBirth?: string
   programArea: string
   sidemalExemption: boolean
   intakePoints: number | null

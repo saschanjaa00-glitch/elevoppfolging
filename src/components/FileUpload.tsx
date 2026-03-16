@@ -35,7 +35,7 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
   const getRawRowValueByTokens = (row: Record<string, any>, tokenSets: string[][]): unknown => {
     const headers = Object.keys(row)
     for (const tokenSet of tokenSets) {
-      const normalizedTokens = tokenSet.map(t => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''))
+      const normalizedTokens = tokenSet.map(t => normalizeHeader(t))
       const header = headers.find(h => {
         const normalized = normalizeHeader(h)
         return normalizedTokens.every(token => normalized.includes(token))
@@ -50,19 +50,45 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
   }
 
   const getDateField = (row: Record<string, any>, tokenSets: string[][]): string => {
+    const formatAsIsoDate = (date: Date): string => {
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+
+    const dateFromParts = (year: number, month: number, day: number): Date | null => {
+      const d = new Date(year, month - 1, day)
+      if (isNaN(d.getTime())) return null
+      if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null
+      return d
+    }
+
     const value = getRawRowValueByTokens(row, tokenSets)
     if (!value) return ''
 
     if (typeof value === 'object' && value !== null && 'getTime' in value) {
       const d = value as Date
-      return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`
+      return formatAsIsoDate(d)
     }
 
     const normalizedValue = normalizeCellText(value, MAX_CELL_CHARS)
-    const num = parseFloat(normalizedValue)
-    if (num > 10000) {
+    const num = Number(normalizedValue)
+    if (Number.isFinite(num) && num > 10000) {
       const date = new Date((num - 25569) * 86400 * 1000)
-      return `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`
+      return formatAsIsoDate(date)
+    }
+
+    const dmy = normalizedValue.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?:[ T].*)?$/)
+    if (dmy) {
+      const parsed = dateFromParts(parseInt(dmy[3], 10), parseInt(dmy[2], 10), parseInt(dmy[1], 10))
+      if (parsed) return formatAsIsoDate(parsed)
+    }
+
+    const ymd = normalizedValue.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})(?:[ T].*)?$/)
+    if (ymd) {
+      const parsed = dateFromParts(parseInt(ymd[1], 10), parseInt(ymd[2], 10), parseInt(ymd[3], 10))
+      if (parsed) return formatAsIsoDate(parsed)
     }
 
     return normalizedValue
@@ -196,6 +222,7 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
           fornavn,
           etternavn,
           class: getRowValue(row, ['klasse', 'class']),
+          dateOfBirth: getDateField(row, [['fødselsdato'], ['fodselsdato'], ['birthdate'], ['dob']]),
           programArea: getRowValue(row, ['programområde', 'programomrade', 'program area']),
           sidemalExemption: sidemalValue.toLowerCase().includes('assessment exemption'),
           intakePoints: getNumericField(row, ['inntakspoeng', 'intake points']),

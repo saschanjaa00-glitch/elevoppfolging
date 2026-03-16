@@ -5,7 +5,7 @@ export const normalizeMatch = (value: string): string =>
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, '')
+    .replace(/[^a-z0-9]+/g, '')
 
 export const normalizeSubjectGroupKey = (value: string): string => {
   const trimmed = (value ?? '').trim()

@@ -156,19 +156,35 @@ export default function StudentList({
     }
 
     const ageCache = new Map<string, boolean>()
+    const parseDob = (dobStr: string): Date | null => {
+      const value = dobStr.trim()
+      if (!value) return null
+
+      // dd.mm.yyyy / dd-mm-yyyy / dd/mm/yyyy
+      const dmy = value.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/)
+      if (dmy) {
+        const d = new Date(parseInt(dmy[3], 10), parseInt(dmy[2], 10) - 1, parseInt(dmy[1], 10))
+        return isNaN(d.getTime()) ? null : d
+      }
+
+      // yyyy-mm-dd / yyyy/mm/dd (optionally with a time part)
+      const iso = value.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})(?:[ T].*)?$/)
+      if (iso) {
+        const d = new Date(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10))
+        return isNaN(d.getTime()) ? null : d
+      }
+
+      const parsed = new Date(value)
+      return isNaN(parsed.getTime()) ? null : parsed
+    }
+
     const isOver18 = (dobStr: string): boolean => {
       if (!dobStr) return false
       const cached = ageCache.get(dobStr)
       if (cached !== undefined) return cached
 
-      const match = dobStr.match(/^(\d{1,2})[.\/\-](\d{1,2})[.\/\-](\d{4})$/)
-      if (!match) {
-        ageCache.set(dobStr, false)
-        return false
-      }
-
-      const dob = new Date(parseInt(match[3]), parseInt(match[2]) - 1, parseInt(match[1]))
-      if (isNaN(dob.getTime())) {
+      const dob = parseDob(dobStr)
+      if (!dob) {
         ageCache.set(dobStr, false)
         return false
       }
@@ -190,7 +206,6 @@ export default function StudentList({
       const warningKey = `${studentNorm}::${subjectGroupKey}`
       const warnings = warningMap.get(warningKey) ?? []
       const hasSubjectWarning = warnings.length > 0
-      const dobStr = studentDobMap.get(studentNorm) ?? ''
       const grade = gradeMap.get(warningKey)
       const subjectTeacher = subjectTeacherMap.get(warningKey) ?? record.teacher
       const includeSubject = shouldIncludeSubject(record.percentageAbsence, grade)
@@ -200,6 +215,7 @@ export default function StudentList({
         studentInfoCache.set(studentInfoKey, findStudentInfoInLookup(studentInfoLookup, record.navn, record.class))
       }
       const matchedStudentInfo = studentInfoCache.get(studentInfoKey)
+      const dobStr = matchedStudentInfo?.dateOfBirth ?? studentDobMap.get(studentNorm) ?? ''
 
       if (!classDataByStudent.has(studentNorm)) classDataByStudent.set(studentNorm, [])
       classDataByStudent.get(studentNorm)!.push(record)
@@ -520,7 +536,7 @@ export default function StudentList({
       )
 
       // 18+ chip
-      if (student.isAdult && wTotal > 0) {
+      if (student.isAdult) {
         bx += chip('18+', bx, bY, [237, 233, 254], [109, 40, 217], true)
       }
 
@@ -1207,7 +1223,7 @@ export default function StudentList({
                           </>
                         )}
                       </span>
-                      {warningTypesCount > 0 && student.isAdult && (
+                      {student.isAdult && (
                         <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-bold">
                           18+
                         </span>
