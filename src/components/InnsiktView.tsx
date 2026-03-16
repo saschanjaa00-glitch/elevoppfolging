@@ -19,6 +19,7 @@ interface SubjectStats {
 interface TeacherStats {
   name: string
   studentCount: number
+  gradeCount: number
   totalVarsels: number
   missingWarnings: number
   varselsByType: Record<string, number>
@@ -28,7 +29,7 @@ interface TeacherStats {
 
 type SortKey =
   | 'name'
-  | 'students'
+  | 'grades'
   | 'totalVarsels'
   | 'missingWarnings'
   | 'warningsF'
@@ -98,6 +99,7 @@ export default function InnsiktView({ data }: Props) {
         teacherData.set(teacher, {
           name: teacher,
           studentCount: 0,
+          gradeCount: 0,
           totalVarsels: 0,
           missingWarnings: 0,
           varselsByType: {},
@@ -141,6 +143,7 @@ export default function InnsiktView({ data }: Props) {
 
       const stats = teacherData.get(teacher)!
       const gradeValue = grade.gradeValue
+      stats.gradeCount += 1
       stats.gradesCounts[gradeValue] = (stats.gradesCounts[gradeValue] ?? 0) + 1
 
       const subjectStat = teacherSubjects.get(teacher)!.get(subject)!
@@ -248,7 +251,7 @@ export default function InnsiktView({ data }: Props) {
     )
 
     const numericSortValue = (row: TeacherStats, key: SortKey): number => {
-      if (key === 'students') return row.studentCount
+      if (key === 'grades') return row.gradeCount
       if (key === 'totalVarsels') return row.totalVarsels
       if (key === 'missingWarnings') return row.missingWarnings
       if (key === 'warningsF') return row.varselsByType['F'] ?? 0
@@ -389,11 +392,11 @@ export default function InnsiktView({ data }: Props) {
           />
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overflow-y-auto max-h-[70vh]">
           <table className="w-full text-sm border-separate border-spacing-0">
             <thead>
               <tr className="border-b-2 border-slate-200">
-                <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   <button
                     type="button"
                     onClick={() => toggleSort('name')}
@@ -405,19 +408,19 @@ export default function InnsiktView({ data }: Props) {
                     </span>
                   </button>
                 </th>
-                <th className="py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   <button
                     type="button"
-                    onClick={() => toggleSort('students')}
+                    onClick={() => toggleSort('grades')}
                     className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
                   >
-                    <span>Elever</span>
+                    <span>Karakterer</span>
                     <span className="min-w-2 text-[10px] leading-none text-slate-400">
-                      {getSortIndicator('students')}
+                      {getSortIndicator('grades')}
                     </span>
                   </button>
                 </th>
-                <th className="py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   <button
                     type="button"
                     onClick={() => toggleSort('totalVarsels')}
@@ -429,7 +432,7 @@ export default function InnsiktView({ data }: Props) {
                     </span>
                   </button>
                 </th>
-                <th className="py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   <button
                     type="button"
                     onClick={() => toggleSort('missingWarnings')}
@@ -441,7 +444,7 @@ export default function InnsiktView({ data }: Props) {
                     </span>
                   </button>
                 </th>
-                <th className="py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   <button
                     type="button"
                     onClick={() => toggleSort('warningsF')}
@@ -453,7 +456,7 @@ export default function InnsiktView({ data }: Props) {
                     </span>
                   </button>
                 </th>
-                <th className="py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   <button
                     type="button"
                     onClick={() => toggleSort('warningsG')}
@@ -468,7 +471,7 @@ export default function InnsiktView({ data }: Props) {
                 {allGrades.map(grade => (
                   <th
                     key={grade}
-                    className="py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap"
+                    className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap"
                   >
                     <button
                       type="button"
@@ -482,7 +485,7 @@ export default function InnsiktView({ data }: Props) {
                     </button>
                   </th>
                 ))}
-                <th className="py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   PDF
                 </th>
               </tr>
@@ -506,7 +509,7 @@ export default function InnsiktView({ data }: Props) {
                         <span>{formatTeacherDisplay(teacher.name)}</span>
                       </div>
                     </td>
-                    <td className="py-2 px-3 text-center text-slate-700">{teacher.studentCount}</td>
+                    <td className="py-2 px-3 text-center text-slate-700">{teacher.gradeCount}</td>
                     <td className="py-2 px-3 text-center text-slate-700 font-medium">{teacher.totalVarsels}</td>
                     <td className="py-2 px-3 text-center text-amber-700 font-medium">{teacher.missingWarnings > 0 ? teacher.missingWarnings : '—'}</td>
                     <td className="py-2 px-3 text-center text-slate-700">
@@ -548,7 +551,7 @@ export default function InnsiktView({ data }: Props) {
                         teacher.subjectStats.map(subject => (
                           <tr key={`${teacher.name}-${subject.subject}`} className="bg-slate-50 border-b border-slate-200">
                             <td className="py-2 px-3 text-left text-slate-700 pl-10">- {subject.subject}</td>
-                            <td className="py-2 px-3 text-center text-slate-700">{subject.studentCount}</td>
+                            <td className="py-2 px-3 text-center text-slate-700">{Object.values(subject.gradesCounts).reduce((sum, count) => sum + count, 0)}</td>
                             <td className="py-2 px-3 text-center text-slate-700 font-medium">{subject.totalVarsels}</td>
                             <td className="py-2 px-3 text-center text-amber-700 font-medium">{subject.missingWarnings > 0 ? subject.missingWarnings : '—'}</td>
                             <td className="py-2 px-3 text-center text-slate-700">{subject.varselsByType['F'] ?? 0}</td>

@@ -289,7 +289,7 @@ export default function FaginnsiktView({ data }: Props) {
   const indicator = (key: SortKey) => sortKey === key ? (sortDirection === 'asc' ? '▲' : '▼') : ''
 
   const SortTh = ({ label, sk, className = '' }: { label: string; sk: SortKey; className?: string }) => (
-    <th className={`py-3 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap ${className}`}>
+    <th className={`sticky top-0 z-10 bg-white py-3 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap ${className}`}>
       <button
         type="button"
         onClick={() => toggleSort(sk)}
@@ -316,11 +316,11 @@ export default function FaginnsiktView({ data }: Props) {
           />
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overflow-y-auto max-h-[70vh]">
           <table className="w-full text-sm border-separate border-spacing-0">
             <thead>
               <tr className="border-b-2 border-slate-200">
-                <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   <button
                     type="button"
                     onClick={() => toggleSort('name')}
