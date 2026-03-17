@@ -54,11 +54,13 @@ function App() {
   })
 
   const [selectedClasses, setSelectedClasses] = useState<string[]>([])
-  const [absenceThreshold, setAbsenceThreshold] = useState<number>(8)
+  const [absenceThreshold, setAbsenceThreshold] = useState<number>(5)
   const [thresholdEnabled, setThresholdEnabled] = useState<boolean>(true)
   const [noFilter, setNoFilter] = useState<boolean>(false)
   const [activeTab, setActiveTab] = useState<AppTab>('elever')
   const [studentSearch, setStudentSearch] = useState<string>('')
+  const [kontaktlaererSearch, setKontaktlaererSearch] = useState<string>('')
+  const [faglaererSearch, setFaglaererSearch] = useState<string>('')
   const [missingWarningsOnly, setMissingWarningsOnly] = useState<boolean>(false)
   const [lowGradeFilter, setLowGradeFilter] = useState<string[]>(['IV', '1', '2'])
   const [fullRapport, setFullRapport] = useState<boolean>(false)
@@ -81,6 +83,65 @@ function App() {
   const isNameSearchActive = studentSearch.trim().length > 0
   const filtersDisabled = isNameSearchActive || noFilter
   const prefetchedChunks = useRef<Set<string>>(new Set())
+
+  const normalizeTeacherSearch = (value: string): string =>
+    value
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+  const matchesTeacherNameSearch = (teacherName: string, query: string): boolean => {
+    const normalizedQuery = normalizeTeacherSearch(query)
+    if (!normalizedQuery) return true
+
+    const queryTokens = normalizedQuery.split(' ').filter(Boolean)
+    if (queryTokens.length === 0) return true
+
+    const candidateTokens = normalizeTeacherSearch(teacherName).split(' ').filter(Boolean)
+    return queryTokens.every(token => candidateTokens.some(candidate => candidate.includes(token)))
+  }
+
+  const kontaktlaererNames = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          data.absences
+            .map(a => a.kontaktlaerer?.trim())
+            .filter((name): name is string => Boolean(name))
+        )
+      ).sort((a, b) => a.localeCompare(b, 'nb-NO')),
+    [data.absences]
+  )
+
+  const faglaererNames = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            ...data.grades.map(g => g.subjectTeacher?.trim()),
+            ...data.absences.map(a => a.teacher?.trim()),
+          ].filter((name): name is string => Boolean(name))
+        )
+      ).sort((a, b) => a.localeCompare(b, 'nb-NO')),
+    [data.grades, data.absences]
+  )
+
+  const kontaktlaererSuggestions = useMemo(() => {
+    const query = kontaktlaererSearch.trim()
+    if (!query) return []
+    const matches = kontaktlaererNames.filter(name => matchesTeacherNameSearch(name, query))
+    return matches.slice(0, 8)
+  }, [kontaktlaererNames, kontaktlaererSearch])
+
+  const faglaererSuggestions = useMemo(() => {
+    const query = faglaererSearch.trim()
+    if (!query) return []
+    const matches = faglaererNames.filter(name => matchesTeacherNameSearch(name, query))
+    return matches.slice(0, 8)
+  }, [faglaererNames, faglaererSearch])
 
   useEffect(() => {
     if (!hasData) return
@@ -729,6 +790,62 @@ function App() {
                       </div>
                     </div>
 
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-900 mb-2">
+                          Kontaktlærer
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Søk navn..."
+                          value={kontaktlaererSearch}
+                          onChange={e => setKontaktlaererSearch(e.target.value)}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+                        />
+                        {kontaktlaererSuggestions.length > 0 && (
+                          <div className="mt-1.5 border border-emerald-100 rounded-lg bg-emerald-50 max-h-36 overflow-auto">
+                            {kontaktlaererSuggestions.map(name => (
+                              <button
+                                key={name}
+                                type="button"
+                                onClick={() => setKontaktlaererSearch(name)}
+                                className="w-full text-left px-2.5 py-1.5 text-xs text-emerald-900 hover:bg-emerald-100"
+                              >
+                                {name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-slate-900 mb-2">
+                          Faglærer
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Søk navn..."
+                          value={faglaererSearch}
+                          onChange={e => setFaglaererSearch(e.target.value)}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+                        />
+                        {faglaererSuggestions.length > 0 && (
+                          <div className="mt-1.5 border border-emerald-100 rounded-lg bg-emerald-50 max-h-36 overflow-auto">
+                            {faglaererSuggestions.map(name => (
+                              <button
+                                key={name}
+                                type="button"
+                                onClick={() => setFaglaererSearch(name)}
+                                className="w-full text-left px-2.5 py-1.5 text-xs text-emerald-900 hover:bg-emerald-100"
+                              >
+                                {name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
                     {/* Absence threshold + Karakter */}
                     <div className="flex flex-wrap items-end gap-6">
                       <div className="min-w-[18rem]">
@@ -849,6 +966,8 @@ function App() {
                       selectedClasses={selectedClasses}
                       threshold={isNameSearchActive ? 0 : (thresholdEnabled ? absenceThreshold : 0)}
                       studentSearch={studentSearch}
+                      kontaktlaererSearch={kontaktlaererSearch}
+                      faglaererSearch={faglaererSearch}
                       missingWarningsOnly={isNameSearchActive ? false : missingWarningsOnly}
                       lowGradeFilter={isNameSearchActive ? [] : lowGradeFilter}
                       fullRapport={isNameSearchActive ? false : fullRapport}

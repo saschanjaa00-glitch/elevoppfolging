@@ -11,6 +11,8 @@ interface StudentListProps {
   selectedClasses: string[]
   threshold: number
   studentSearch: string
+  kontaktlaererSearch: string
+  faglaererSearch: string
   missingWarningsOnly: boolean
   lowGradeFilter: string[]
   fullRapport: boolean
@@ -44,6 +46,8 @@ export default function StudentList({
   selectedClasses,
   threshold,
   studentSearch,
+  kontaktlaererSearch,
+  faglaererSearch,
   missingWarningsOnly,
   lowGradeFilter,
   fullRapport,
@@ -129,6 +133,26 @@ export default function StudentList({
         return `${shortLabel}: ${dates.join(', ')}`
       })
       .join('   |   ')
+  }
+
+  const normalizeTeacherSearch = (value: string): string =>
+    value
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+  const matchesTeacherNameSearch = (teacherName: string, query: string): boolean => {
+    const normalizedQuery = normalizeTeacherSearch(query)
+    if (!normalizedQuery) return true
+
+    const queryTokens = normalizedQuery.split(' ').filter(Boolean)
+    if (queryTokens.length === 0) return true
+
+    const candidateTokens = normalizeTeacherSearch(teacherName).split(' ').filter(Boolean)
+    return queryTokens.every(token => candidateTokens.some(candidate => candidate.includes(token)))
   }
 
   const studentSummaries = useMemo(() => {
@@ -342,37 +366,6 @@ export default function StudentList({
     return Array.from(summaryMap.values())
   }, [classData, warningLookup, gradeLookup, threshold, lowGradeFilter, fullRapport, fullRapportInclude2, noFilter, studentInfoLookup])
 
-  const atRiskStudents = useMemo(() => {
-    const searchNorm = deferredStudentSearch.toLowerCase().trim()
-    const searchWords = searchNorm ? searchNorm.split(/\s+/) : []
-    const isMissingOverride = missingWarningsOnly
-    const filtered: StudentAbsenceSummary[] = []
-
-    studentSummaries.forEach(student => {
-      if (student.subjects.length === 0) return
-      if (!isMissingOverride && searchWords.length > 0 && !searchWords.every(w => student.navn.toLowerCase().includes(w))) {
-        return
-      }
-
-      if (!isMissingOverride) {
-        filtered.push(student)
-        return
-      }
-
-      const subjects = student.subjects.filter(
-        sub => sub.warnings.length === 0 && sub.percentageAbsence > threshold
-      )
-      if (subjects.length === 0) return
-      filtered.push({ ...student, subjects })
-    })
-
-    return filtered.sort((a, b) => {
-      const classCompare = a.className.localeCompare(b.className, 'nb-NO', { numeric: true })
-      if (classCompare !== 0) return classCompare
-      return a.navn.localeCompare(b.navn, 'nb-NO')
-    })
-  }, [studentSummaries, deferredStudentSearch, missingWarningsOnly, threshold])
-
   const kontaktlaererByStudentKey = useMemo(() => {
     const explicitMap = new Map<string, string>()
     const teacherCountsByStudent = new Map<string, Map<string, number>>()
@@ -408,6 +401,60 @@ export default function StudentList({
 
     return kontaktlaererMap
   }, [classData])
+
+  const atRiskStudents = useMemo(() => {
+    const searchNorm = deferredStudentSearch.toLowerCase().trim()
+    const searchWords = searchNorm ? searchNorm.split(/\s+/) : []
+    const isMissingOverride = missingWarningsOnly
+    const filtered: StudentAbsenceSummary[] = []
+
+    studentSummaries.forEach(student => {
+      if (student.subjects.length === 0) return
+
+      if (!isMissingOverride && searchWords.length > 0 && !searchWords.every(w => student.navn.toLowerCase().includes(w))) {
+        return
+      }
+
+      const studentKey = `${student.className}::${normalizeMatch(student.navn)}`
+      const studentKontaktlaerer = kontaktlaererByStudentKey.get(studentKey) ?? ''
+      if (!matchesTeacherNameSearch(studentKontaktlaerer, kontaktlaererSearch)) return
+
+      const teacherFilteredSubjects = student.subjects.filter(subject =>
+        matchesTeacherNameSearch(subject.teacher ?? '', faglaererSearch)
+      )
+      if (teacherFilteredSubjects.length === 0) return
+
+      const studentWithTeacherFilteredSubjects =
+        teacherFilteredSubjects.length === student.subjects.length
+          ? student
+          : { ...student, subjects: teacherFilteredSubjects }
+
+      if (!isMissingOverride) {
+        filtered.push(studentWithTeacherFilteredSubjects)
+        return
+      }
+
+      const subjects = teacherFilteredSubjects.filter(
+        sub => sub.warnings.length === 0 && sub.percentageAbsence > threshold
+      )
+      if (subjects.length === 0) return
+      filtered.push({ ...studentWithTeacherFilteredSubjects, subjects })
+    })
+
+    return filtered.sort((a, b) => {
+      const classCompare = a.className.localeCompare(b.className, 'nb-NO', { numeric: true })
+      if (classCompare !== 0) return classCompare
+      return a.navn.localeCompare(b.navn, 'nb-NO')
+    })
+  }, [
+    studentSummaries,
+    deferredStudentSearch,
+    missingWarningsOnly,
+    threshold,
+    kontaktlaererByStudentKey,
+    kontaktlaererSearch,
+    faglaererSearch,
+  ])
 
   const getKontaktlaererForStudent = (student: StudentAbsenceSummary) => {
     const key = `${student.className}::${normalizeMatch(student.navn)}`
