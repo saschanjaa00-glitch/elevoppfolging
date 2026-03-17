@@ -8,6 +8,7 @@ interface Props {
 }
 
 interface SubjectStats {
+  subjectKey: string
   subject: string
   studentCount: number
   totalVarsels: number
@@ -79,6 +80,28 @@ export default function InnsiktView({ data }: Props) {
     }))
   }, [data.absences])
 
+  const subjectNameByNorm = useMemo(() => {
+    const nameCounts = new Map<string, Map<string, number>>()
+
+    data.absences.forEach(absence => {
+      const subjectNorm = normalizeMatch(absence.subjectGroup)
+      const subjectName = absence.subject?.trim() ?? ''
+      if (!subjectNorm || !subjectName) return
+
+      if (!nameCounts.has(subjectNorm)) nameCounts.set(subjectNorm, new Map())
+      const counts = nameCounts.get(subjectNorm)!
+      counts.set(subjectName, (counts.get(subjectName) ?? 0) + 1)
+    })
+
+    const result = new Map<string, string>()
+    nameCounts.forEach((counts, subjectNorm) => {
+      const best = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0]
+      if (best) result.set(subjectNorm, best)
+    })
+
+    return result
+  }, [data.absences])
+
   const teacherStats = useMemo(() => {
     // Build teacher and subject statistics from vurderinger (grades) only.
     const teacherData = new Map<string, TeacherStats>()
@@ -132,7 +155,8 @@ export default function InnsiktView({ data }: Props) {
       }
       if (!teacherSubjects.get(teacher)!.has(subject)) {
         teacherSubjects.get(teacher)!.set(subject, {
-          subject: subjectDisplay,
+          subjectKey: subject,
+          subject: subjectNameByNorm.get(subject) ?? subjectDisplay,
           studentCount: 0,
           totalVarsels: 0,
           missingWarnings: 0,
@@ -231,7 +255,7 @@ export default function InnsiktView({ data }: Props) {
     })
 
     return Array.from(teacherData.values())
-  }, [normalizedGrades, normalizedWarnings, normalizedAbsences])
+  }, [normalizedGrades, normalizedWarnings, normalizedAbsences, subjectNameByNorm])
 
   const allGrades = ['IV', '1', '2', '3', '4', '5', '6'] as const
 
@@ -243,6 +267,15 @@ export default function InnsiktView({ data }: Props) {
     '4': 'grade4',
     '5': 'grade5',
     '6': 'grade6',
+  }
+  const sortGradeByKey: Partial<Record<SortKey, (typeof allGrades)[number]>> = {
+    gradeIV: 'IV',
+    grade1: '1',
+    grade2: '2',
+    grade3: '3',
+    grade4: '4',
+    grade5: '5',
+    grade6: '6',
   }
 
   const filteredAndSorted = useMemo(() => {
@@ -256,13 +289,11 @@ export default function InnsiktView({ data }: Props) {
       if (key === 'missingWarnings') return row.missingWarnings
       if (key === 'warningsF') return row.varselsByType['F'] ?? 0
       if (key === 'warningsG') return row.varselsByType['G'] ?? 0
-      if (key === 'gradeIV') return row.gradesCounts['IV'] ?? 0
-      if (key === 'grade1') return row.gradesCounts['1'] ?? 0
-      if (key === 'grade2') return row.gradesCounts['2'] ?? 0
-      if (key === 'grade3') return row.gradesCounts['3'] ?? 0
-      if (key === 'grade4') return row.gradesCounts['4'] ?? 0
-      if (key === 'grade5') return row.gradesCounts['5'] ?? 0
-      if (key === 'grade6') return row.gradesCounts['6'] ?? 0
+      const gradeKey = sortGradeByKey[key]
+      if (gradeKey) {
+        if (row.gradeCount === 0) return 0
+        return ((row.gradesCounts[gradeKey] ?? 0) / row.gradeCount) * 100
+      }
       return 0
     }
 
@@ -296,6 +327,9 @@ export default function InnsiktView({ data }: Props) {
     return sortDirection === 'asc' ? '▲' : '▼'
   }
 
+  const gradePercentLabel = (count: number, total: number): string =>
+    `${total > 0 ? ((count / total) * 100).toFixed(0) : '0'}%`
+
   const formatTeacherDisplay = (teacherName: string) => {
     const splitTeachers = teacherName
       .split(',')
@@ -308,70 +342,185 @@ export default function InnsiktView({ data }: Props) {
 
   const exportTeacherPdf = async (teacher: TeacherStats) => {
     const { default: jsPDF } = await import('jspdf')
-    const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+    const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' })
+    const pageWidth = doc.internal.pageSize.getWidth()
     const pageHeight = doc.internal.pageSize.getHeight()
-    const marginLeft = 36
-    const marginTop = 42
+    const marginX = 28
+    const marginTop = 30
+    const marginBottom = 30
     const lineHeight = 14
     let y = marginTop
 
-    const ensureSpace = (needed = lineHeight) => {
-      if (y + needed > pageHeight - 36) {
+    const gradeOrder = ['IV', '1', '2', '3', '4', '5', '6']
+
+    const tableHeaders = ['Fag', 'Karakterer', 'Varsler', 'Mangl', 'F', 'G', 'IV', '1', '2', '3', '4', '5', '6']
+    const tableWidths = [326, 72, 58, 52, 34, 34, 30, 30, 30, 30, 30, 30, 30]
+    const tableRowHeight = 24
+
+    const drawSummaryHeader = () => {
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(14)
+      doc.text('Lærerinnsikt', marginX, y)
+      y += 20
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(11)
+      doc.text(`Lærer: ${teacher.name}`, marginX, y)
+      y += lineHeight
+
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+      doc.text(`Karakterer satt: ${teacher.gradeCount}`, marginX, y)
+      y += lineHeight
+      doc.text(`Elever: ${teacher.studentCount}`, marginX, y)
+      y += lineHeight
+      doc.text(`Varsler totalt: ${teacher.totalVarsels}  |  F: ${teacher.varselsByType['F'] ?? 0}  |  G: ${teacher.varselsByType['G'] ?? 0}`, marginX, y)
+      y += lineHeight
+      doc.text(`Manglende varsler (>8%): ${teacher.missingWarnings}`, marginX, y)
+      y += 18
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(11)
+      doc.text('Detaljer per fag', marginX, y)
+      y += 12
+    }
+
+    const ensureSpace = (needed: number) => {
+      if (y + needed > pageHeight - marginBottom) {
         doc.addPage()
         y = marginTop
+        drawSummaryHeader()
+        drawTableHeader()
       }
     }
 
-    const writeLine = (text: string, bold = false, size = 10) => {
-      ensureSpace(lineHeight)
-      doc.setFont('helvetica', bold ? 'bold' : 'normal')
-      doc.setFontSize(size)
-      doc.text(text, marginLeft, y)
-      y += lineHeight
+    const drawCellText = (text: string, x: number, width: number, align: 'left' | 'center' = 'center') => {
+      if (align === 'left') {
+        doc.text(text, x + 6, y + 12, { baseline: 'alphabetic' })
+      } else {
+        doc.text(text, x + width / 2, y + 12, { align: 'center', baseline: 'alphabetic' })
+      }
     }
 
-    const gradeOrder = ['IV', '1', '2', '3', '4', '5', '6']
-    const gradesSummary = gradeOrder.map(g => `${g}: ${teacher.gradesCounts[g] ?? 0}`).join('  |  ')
+    const drawTableHeader = () => {
+      doc.setFillColor(248, 250, 252)
+      doc.rect(marginX, y, pageWidth - marginX * 2, tableRowHeight, 'F')
 
-    writeLine('Lærerinnsikt', true, 14)
-    y += 4
-    writeLine(`Lærer: ${teacher.name}`, true, 11)
-    writeLine(`Elever: ${teacher.studentCount}`)
-    writeLine(`Varsler totalt: ${teacher.totalVarsels}  |  F: ${teacher.varselsByType['F'] ?? 0}  |  G: ${teacher.varselsByType['G'] ?? 0}`)
-    writeLine(`Manglende varsler (>8%): ${teacher.missingWarnings}`)
-    writeLine(`Karakterer: ${gradesSummary}`)
-    y += 6
+      doc.setDrawColor(203, 213, 225)
+      doc.setLineWidth(0.6)
+      doc.rect(marginX, y, pageWidth - marginX * 2, tableRowHeight)
 
-    writeLine('Detaljer per fag', true, 11)
-    doc.setFont('courier', 'bold')
-    doc.setFontSize(9)
-    ensureSpace()
-    doc.text('Fag                         Elever Varsler Mangl  F  G  IV  1  2  3  4  5  6', marginLeft, y)
-    y += lineHeight
+      let x = marginX
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(9)
+      tableHeaders.forEach((header, idx) => {
+        const w = tableWidths[idx]
+        if (idx > 0) {
+          doc.line(x, y, x, y + tableRowHeight)
+        }
+        drawCellText(header, x, w, idx === 0 ? 'left' : 'center')
+        x += w
+      })
 
-    doc.setFont('courier', 'normal')
+      y += tableRowHeight
+    }
+
+    const drawDistributionRow = () => {
+      ensureSpace(tableRowHeight)
+
+      doc.setFillColor(248, 250, 252)
+      doc.rect(marginX, y, pageWidth - marginX * 2, tableRowHeight, 'F')
+
+      doc.setDrawColor(203, 213, 225)
+      doc.setLineWidth(0.6)
+      doc.rect(marginX, y, pageWidth - marginX * 2, tableRowHeight)
+
+      let x = marginX
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(9)
+      tableHeaders.forEach((_header, idx) => {
+        const w = tableWidths[idx]
+        if (idx > 0) {
+          doc.line(x, y, x, y + tableRowHeight)
+        }
+
+        if (idx === 0) {
+          drawCellText('Karakterfordeling', x, w, 'left')
+        } else if (idx >= 6) {
+          const gradeKey = gradeOrder[idx - 6]
+          const count = teacher.gradesCounts[gradeKey] ?? 0
+          const pct = gradePercentLabel(count, teacher.gradeCount)
+          doc.text(pct, x + w / 2, y + 10, { align: 'center', baseline: 'alphabetic' })
+          doc.setFontSize(7)
+          doc.setTextColor(100, 116, 139)
+          doc.text(String(count), x + w / 2, y + 18, { align: 'center', baseline: 'alphabetic' })
+          doc.setTextColor(15, 23, 42)
+          doc.setFont('helvetica', 'bold')
+          doc.setFontSize(9)
+        }
+
+        x += w
+      })
+
+      y += tableRowHeight
+    }
+
+    drawSummaryHeader()
+    drawTableHeader()
+
     teacher.subjectStats.forEach(subject => {
-      const subjectName = subject.subject.length > 26 ? `${subject.subject.slice(0, 25)}.` : subject.subject
-      const row = [
-        subjectName.padEnd(26, ' '),
-        String(subject.studentCount).padStart(6, ' '),
-        String(subject.totalVarsels).padStart(7, ' '),
-        String(subject.missingWarnings).padStart(6, ' '),
-        String(subject.varselsByType['F'] ?? 0).padStart(3, ' '),
-        String(subject.varselsByType['G'] ?? 0).padStart(3, ' '),
-        String(subject.gradesCounts['IV'] ?? 0).padStart(4, ' '),
-        String(subject.gradesCounts['1'] ?? 0).padStart(3, ' '),
-        String(subject.gradesCounts['2'] ?? 0).padStart(3, ' '),
-        String(subject.gradesCounts['3'] ?? 0).padStart(3, ' '),
-        String(subject.gradesCounts['4'] ?? 0).padStart(3, ' '),
-        String(subject.gradesCounts['5'] ?? 0).padStart(3, ' '),
-        String(subject.gradesCounts['6'] ?? 0).padStart(3, ' '),
-      ].join(' ')
+      ensureSpace(tableRowHeight)
 
-      ensureSpace()
-      doc.text(row, marginLeft, y)
-      y += lineHeight
+      doc.setDrawColor(226, 232, 240)
+      doc.setLineWidth(0.4)
+      doc.rect(marginX, y, pageWidth - marginX * 2, tableRowHeight)
+
+      const subjectGradeCount = Object.values(subject.gradesCounts).reduce((sum, count) => sum + count, 0)
+      const values = [
+        subject.subject,
+        String(subjectGradeCount),
+        String(subject.totalVarsels),
+        String(subject.missingWarnings),
+        String(subject.varselsByType['F'] ?? 0),
+        String(subject.varselsByType['G'] ?? 0),
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+      ]
+
+      let x = marginX
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(9)
+      values.forEach((value, idx) => {
+        const w = tableWidths[idx]
+        if (idx > 0) {
+          doc.line(x, y, x, y + tableRowHeight)
+        }
+        if (idx >= 6) {
+          const gradeKey = gradeOrder[idx - 6]
+          const count = subject.gradesCounts[gradeKey] ?? 0
+          const pct = gradePercentLabel(count, subjectGradeCount)
+          doc.text(pct, x + w / 2, y + 10, { align: 'center', baseline: 'alphabetic' })
+          doc.setFontSize(7)
+          doc.setTextColor(100, 116, 139)
+          doc.text(String(count), x + w / 2, y + 18, { align: 'center', baseline: 'alphabetic' })
+          doc.setTextColor(15, 23, 42)
+          doc.setFontSize(9)
+        } else {
+          const display = idx === 0 && value.length > 52 ? `${value.slice(0, 51)}…` : value
+          drawCellText(display, x, w, idx === 0 ? 'left' : 'center')
+        }
+        x += w
+      })
+
+      y += tableRowHeight
     })
+
+    drawDistributionRow()
 
     const safeName = teacher.name.replace(/[<>:"/\\|?*]+/g, '_')
     doc.save(`innsikt-${safeName}.pdf`)
@@ -529,7 +678,10 @@ export default function InnsiktView({ data }: Props) {
                             : 'text-slate-700'
                         }`}
                       >
-                        {teacher.gradesCounts[grade] ?? 0}
+                        <div className="leading-tight">
+                          <div>{gradePercentLabel(teacher.gradesCounts[grade] ?? 0, teacher.gradeCount)}</div>
+                          <div className="text-[10px] text-slate-500">{teacher.gradesCounts[grade] ?? 0}</div>
+                        </div>
                       </td>
                     ))}
                     <td className="py-2 px-3 text-center">
@@ -548,10 +700,13 @@ export default function InnsiktView({ data }: Props) {
                   {expandedTeacher === teacher.name && (
                     <>
                       {teacher.subjectStats.length > 0 ? (
-                        teacher.subjectStats.map(subject => (
-                          <tr key={`${teacher.name}-${subject.subject}`} className="bg-slate-50 border-b border-slate-200">
+                        teacher.subjectStats.map(subject => {
+                          const subjectGradeTotal = Object.values(subject.gradesCounts).reduce((sum, count) => sum + count, 0)
+
+                          return (
+                          <tr key={`${teacher.name}-${subject.subjectKey}`} className="bg-slate-50 border-b border-slate-200">
                             <td className="py-2 px-3 text-left text-slate-700 pl-10">- {subject.subject}</td>
-                            <td className="py-2 px-3 text-center text-slate-700">{Object.values(subject.gradesCounts).reduce((sum, count) => sum + count, 0)}</td>
+                            <td className="py-2 px-3 text-center text-slate-700">{subjectGradeTotal}</td>
                             <td className="py-2 px-3 text-center text-slate-700 font-medium">{subject.totalVarsels}</td>
                             <td className="py-2 px-3 text-center text-amber-700 font-medium">{subject.missingWarnings > 0 ? subject.missingWarnings : '—'}</td>
                             <td className="py-2 px-3 text-center text-slate-700">{subject.varselsByType['F'] ?? 0}</td>
@@ -567,12 +722,15 @@ export default function InnsiktView({ data }: Props) {
                                     : 'text-slate-700'
                                 }`}
                               >
-                                {subject.gradesCounts[grade] ?? 0}
+                                <div className="leading-tight">
+                                  <div>{gradePercentLabel(subject.gradesCounts[grade] ?? 0, subjectGradeTotal)}</div>
+                                  <div className="text-[10px] text-slate-500">{subject.gradesCounts[grade] ?? 0}</div>
+                                </div>
                               </td>
                             ))}
                             <td className="py-2 px-3 text-center text-slate-400">-</td>
                           </tr>
-                        ))
+                        )})
                       ) : (
                         <tr className="bg-slate-50 border-b border-slate-200">
                           <td colSpan={14} className="py-3 px-3 text-center text-slate-500 text-sm">

@@ -237,7 +237,8 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
           subjectGroup: getRowValue(row, ['faggruppe', 'fagkode', 'code']),
           percentageAbsence: percentage,
           hoursAbsence: hours,
-          teacher: getRowValue(row, ['lærer', 'larer', 'teacher', 'kontaktlærer', 'leder']),
+          teacher: getRowValue(row, ['lærer', 'larer', 'teacher', 'leder']),
+          kontaktlaerer: getRowValue(row, ['kontaktlærer', 'kontaktansvarlig lærer', 'kontaktlaerer']) || undefined,
           avbrudd: getRowValue(row, ['avbrudd', 'discontinued']).toLowerCase() === 'ja',
         }
       })

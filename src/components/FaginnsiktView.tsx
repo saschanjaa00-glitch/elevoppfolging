@@ -1,11 +1,13 @@
 import { useMemo, useState, Fragment } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { DataStore } from '../types'
-import { normalizeMatch, normalizeSubjectGroupKey } from '../studentInfoUtils'
+import { normalizeMatch } from '../studentInfoUtils'
 
 // Strip trailing group suffix like -1, -2 from subject codes (MAT1023-1 → MAT1023)
-const subjectMergeKey = (value: string): string =>
-  normalizeSubjectGroupKey(value).replace(/-[A-Za-z0-9]+$/, '')
+const subjectMergeKey = (value: string): string => {
+  const tail = (value ?? '').trim().split('/').pop()?.trim() ?? ''
+  return normalizeMatch(tail.replace(/-[A-Za-z0-9]+$/, ''))
+}
 
 const subjectDisplayCode = (value: string): string => {
   const code = (value.split('/').pop() ?? value).trim()
@@ -26,6 +28,7 @@ interface TeacherInSubject {
 }
 
 interface SubjectRow {
+  subjectKey: string
   subject: string
   studentCount: number
   totalVarsels: number
@@ -56,12 +59,29 @@ const gradeSortKey: Record<(typeof allGrades)[number], SortKey> = {
   IV: 'gradeIV', '1': 'grade1', '2': 'grade2', '3': 'grade3',
   '4': 'grade4', '5': 'grade5', '6': 'grade6',
 }
+const sortGradeByKey: Partial<Record<SortKey, (typeof allGrades)[number]>> = {
+  gradeIV: 'IV',
+  grade1: '1',
+  grade2: '2',
+  grade3: '3',
+  grade4: '4',
+  grade5: '5',
+  grade6: '6',
+}
+
+const totalGrades = (gradesCounts: Record<string, number>): number =>
+  allGrades.reduce((sum, grade) => sum + (gradesCounts[grade] ?? 0), 0)
+
+const gradePercentLabel = (count: number, total: number): string =>
+  `${total > 0 ? ((count / total) * 100).toFixed(0) : '0'}%`
 
 export default function FaginnsiktView({ data }: Props) {
   const [searchTerm, setSearchTerm] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [expandedSubject, setExpandedSubject] = useState<string | null>(null)
+  const [subjectForPdfPrompt, setSubjectForPdfPrompt] = useState<SubjectRow | null>(null)
+  const [anonymizedTeacherNames, setAnonymizedTeacherNames] = useState<string[]>([])
 
   const normalizedGrades = useMemo(() => {
     return data.grades
@@ -99,6 +119,28 @@ export default function FaginnsiktView({ data }: Props) {
     }))
   }, [data.absences])
 
+  const subjectNameByNorm = useMemo(() => {
+    const nameCounts = new Map<string, Map<string, number>>()
+
+    data.absences.forEach(absence => {
+      const subjectNorm = subjectMergeKey(absence.subjectGroup)
+      const subjectName = absence.subject?.trim() ?? ''
+      if (!subjectNorm || !subjectName) return
+
+      if (!nameCounts.has(subjectNorm)) nameCounts.set(subjectNorm, new Map())
+      const counts = nameCounts.get(subjectNorm)!
+      counts.set(subjectName, (counts.get(subjectName) ?? 0) + 1)
+    })
+
+    const result = new Map<string, string>()
+    nameCounts.forEach((counts, subjectNorm) => {
+      const best = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0]
+      if (best) result.set(subjectNorm, best)
+    })
+
+    return result
+  }, [data.absences])
+
   const subjectRows = useMemo(() => {
     const subjectMap = new Map<string, SubjectRow>()
     // subject(norm) -> teacher -> TeacherInSubject
@@ -130,7 +172,8 @@ export default function FaginnsiktView({ data }: Props) {
       // Ensure subject row
       if (!subjectMap.has(subjectNorm)) {
         subjectMap.set(subjectNorm, {
-          subject: subjectCode,
+          subjectKey: subjectNorm,
+          subject: subjectNameByNorm.get(subjectNorm) ?? subjectCode,
           studentCount: 0,
           totalVarsels: 0,
           missingWarnings: 0,
@@ -241,7 +284,7 @@ export default function FaginnsiktView({ data }: Props) {
     })
 
     return Array.from(subjectMap.values())
-  }, [normalizedGrades, normalizedWarnings, normalizedAbsences])
+  }, [normalizedGrades, normalizedWarnings, normalizedAbsences, subjectNameByNorm])
 
   const filteredAndSorted = useMemo(() => {
     const filtered = subjectRows.filter(r =>
@@ -254,13 +297,12 @@ export default function FaginnsiktView({ data }: Props) {
       if (key === 'missingWarnings') return row.missingWarnings
       if (key === 'warningsF') return row.varselsByType['F'] ?? 0
       if (key === 'warningsG') return row.varselsByType['G'] ?? 0
-      if (key === 'gradeIV') return row.gradesCounts['IV'] ?? 0
-      if (key === 'grade1') return row.gradesCounts['1'] ?? 0
-      if (key === 'grade2') return row.gradesCounts['2'] ?? 0
-      if (key === 'grade3') return row.gradesCounts['3'] ?? 0
-      if (key === 'grade4') return row.gradesCounts['4'] ?? 0
-      if (key === 'grade5') return row.gradesCounts['5'] ?? 0
-      if (key === 'grade6') return row.gradesCounts['6'] ?? 0
+      const gradeKey = sortGradeByKey[key]
+      if (gradeKey) {
+        const total = totalGrades(row.gradesCounts)
+        if (total === 0) return 0
+        return ((row.gradesCounts[gradeKey] ?? 0) / total) * 100
+      }
       return 0
     }
 
@@ -287,6 +329,186 @@ export default function FaginnsiktView({ data }: Props) {
   }
 
   const indicator = (key: SortKey) => sortKey === key ? (sortDirection === 'asc' ? '▲' : '▼') : ''
+
+  const exportSubjectPdf = async (row: SubjectRow, anonymizedTeacherNameSet: Set<string>) => {
+    const { default: jsPDF } = await import('jspdf')
+    const teacherDisplay = (name: string) => (anonymizedTeacherNameSet.has(name) ? '*** ***' : name)
+
+    const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' })
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const pageHeight = doc.internal.pageSize.getHeight()
+    const marginX = 28
+    const marginTop = 30
+    const marginBottom = 30
+    const lineHeight = 14
+    let y = marginTop
+
+    const gradeOrder = ['IV', '1', '2', '3', '4', '5', '6']
+    const rowGradeTotal = totalGrades(row.gradesCounts)
+    const tableHeaders = ['Lærer', 'Elever', 'Varsler', 'Mangl', 'F', 'G', 'IV', '1', '2', '3', '4', '5', '6']
+    const tableWidths = [330, 68, 58, 52, 34, 34, 30, 30, 30, 30, 30, 30, 30]
+    const tableRowHeight = 24
+
+    const drawSectionHeader = () => {
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(14)
+      doc.text('Faginnsikt', marginX, y)
+      y += 20
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(11)
+      doc.text(`Fag: ${row.subject}`, marginX, y)
+      y += lineHeight
+
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+      doc.text(`Elever: ${row.studentCount}`, marginX, y)
+      y += lineHeight
+      doc.text(`Varsler totalt: ${row.totalVarsels}  |  F: ${row.varselsByType['F'] ?? 0}  |  G: ${row.varselsByType['G'] ?? 0}`, marginX, y)
+      y += lineHeight
+      doc.text(`Manglende varsler (>8%): ${row.missingWarnings}`, marginX, y)
+      y += 18
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(11)
+      doc.text('Detaljer per lærer', marginX, y)
+      y += 12
+    }
+
+    const drawCellText = (text: string, x: number, width: number, align: 'left' | 'center' = 'center') => {
+      if (align === 'left') {
+        doc.text(text, x + 6, y + 12, { baseline: 'alphabetic' })
+      } else {
+        doc.text(text, x + width / 2, y + 12, { align: 'center', baseline: 'alphabetic' })
+      }
+    }
+
+    const drawTableHeader = () => {
+      doc.setFillColor(248, 250, 252)
+      doc.rect(marginX, y, pageWidth - marginX * 2, tableRowHeight, 'F')
+
+      doc.setDrawColor(203, 213, 225)
+      doc.setLineWidth(0.6)
+      doc.rect(marginX, y, pageWidth - marginX * 2, tableRowHeight)
+
+      let x = marginX
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(9)
+      tableHeaders.forEach((header, idx) => {
+        const w = tableWidths[idx]
+        if (idx > 0) doc.line(x, y, x, y + tableRowHeight)
+        drawCellText(header, x, w, idx === 0 ? 'left' : 'center')
+        x += w
+      })
+
+      y += tableRowHeight
+    }
+
+    const ensureSpace = (needed: number) => {
+      if (y + needed > pageHeight - marginBottom) {
+        doc.addPage()
+        y = marginTop
+        drawSectionHeader()
+        drawTableHeader()
+      }
+    }
+
+    const drawDistributionRow = () => {
+      ensureSpace(tableRowHeight)
+
+      doc.setFillColor(248, 250, 252)
+      doc.rect(marginX, y, pageWidth - marginX * 2, tableRowHeight, 'F')
+
+      doc.setDrawColor(203, 213, 225)
+      doc.setLineWidth(0.6)
+      doc.rect(marginX, y, pageWidth - marginX * 2, tableRowHeight)
+
+      let x = marginX
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(9)
+      tableHeaders.forEach((_header, idx) => {
+        const w = tableWidths[idx]
+        if (idx > 0) doc.line(x, y, x, y + tableRowHeight)
+
+        if (idx === 0) {
+          drawCellText('Karakterfordeling', x, w, 'left')
+        } else if (idx >= 6) {
+          const gradeKey = gradeOrder[idx - 6]
+          const count = row.gradesCounts[gradeKey] ?? 0
+          const pct = gradePercentLabel(count, rowGradeTotal)
+          doc.text(pct, x + w / 2, y + 10, { align: 'center', baseline: 'alphabetic' })
+          doc.setFontSize(7)
+          doc.setTextColor(100, 116, 139)
+          doc.text(String(count), x + w / 2, y + 18, { align: 'center', baseline: 'alphabetic' })
+          doc.setTextColor(15, 23, 42)
+          doc.setFont('helvetica', 'bold')
+          doc.setFontSize(9)
+        }
+
+        x += w
+      })
+
+      y += tableRowHeight
+    }
+
+    drawSectionHeader()
+    drawTableHeader()
+
+    row.teachers.forEach(teacher => {
+      ensureSpace(tableRowHeight)
+
+      doc.setDrawColor(226, 232, 240)
+      doc.setLineWidth(0.4)
+      doc.rect(marginX, y, pageWidth - marginX * 2, tableRowHeight)
+
+      const values = [
+        teacherDisplay(teacher.name),
+        String(teacher.studentCount),
+        String(teacher.totalVarsels),
+        String(teacher.missingWarnings),
+        String(teacher.varselsByType['F'] ?? 0),
+        String(teacher.varselsByType['G'] ?? 0),
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+      ]
+      const teacherGradeTotal = totalGrades(teacher.gradesCounts)
+
+      let x = marginX
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(9)
+      values.forEach((value, idx) => {
+        const w = tableWidths[idx]
+        if (idx > 0) doc.line(x, y, x, y + tableRowHeight)
+        if (idx >= 6) {
+          const gradeKey = gradeOrder[idx - 6]
+          const count = teacher.gradesCounts[gradeKey] ?? 0
+          const pct = gradePercentLabel(count, teacherGradeTotal)
+          doc.text(pct, x + w / 2, y + 10, { align: 'center', baseline: 'alphabetic' })
+          doc.setFontSize(7)
+          doc.setTextColor(100, 116, 139)
+          doc.text(String(count), x + w / 2, y + 18, { align: 'center', baseline: 'alphabetic' })
+          doc.setTextColor(15, 23, 42)
+          doc.setFontSize(9)
+        } else {
+          const display = idx === 0 && value.length > 56 ? `${value.slice(0, 55)}…` : value
+          drawCellText(display, x, w, idx === 0 ? 'left' : 'center')
+        }
+        x += w
+      })
+
+      y += tableRowHeight
+    })
+
+    drawDistributionRow()
+
+    const safeName = row.subject.replace(/[<>:"/\\|?*]+/g, '_')
+    doc.save(`faginnsikt-${safeName}.pdf`)
+  }
 
   const SortTh = ({ label, sk, className = '' }: { label: string; sk: SortKey; className?: string }) => (
     <th className={`sticky top-0 z-10 bg-white py-3 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap ${className}`}>
@@ -338,20 +560,26 @@ export default function FaginnsiktView({ data }: Props) {
                 {allGrades.map(grade => (
                   <SortTh key={grade} label={grade} sk={gradeSortKey[grade]} className="text-center" />
                 ))}
+                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                  PDF
+                </th>
               </tr>
             </thead>
             <tbody>
-              {filteredAndSorted.map(row => (
-                <Fragment key={row.subject}>
+              {filteredAndSorted.map(row => {
+                const rowGradeTotal = totalGrades(row.gradesCounts)
+
+                return (
+                <Fragment key={row.subjectKey}>
                   <tr
-                    onClick={() => setExpandedSubject(expandedSubject === row.subject ? null : row.subject)}
+                    onClick={() => setExpandedSubject(expandedSubject === row.subjectKey ? null : row.subjectKey)}
                     className={`border-b border-slate-100 hover:bg-sky-50/40 cursor-pointer transition-opacity ${
-                      expandedSubject && expandedSubject !== row.subject ? 'opacity-35' : 'opacity-100'
+                      expandedSubject && expandedSubject !== row.subjectKey ? 'opacity-35' : 'opacity-100'
                     }`}
                   >
                     <td className="py-2 px-3 font-medium text-slate-900">
                       <div className="flex items-center gap-2">
-                        {expandedSubject === row.subject ? (
+                        {expandedSubject === row.subjectKey ? (
                           <ChevronDown className="w-4 h-4 flex-shrink-0" />
                         ) : (
                           <ChevronRight className="w-4 h-4 flex-shrink-0" />
@@ -375,15 +603,34 @@ export default function FaginnsiktView({ data }: Props) {
                             : 'text-slate-700'
                         }`}
                       >
-                        {row.gradesCounts[grade] ?? 0}
+                        <div className="leading-tight">
+                          <div>{gradePercentLabel(row.gradesCounts[grade] ?? 0, rowGradeTotal)}</div>
+                          <div className="text-[10px] text-slate-500">{row.gradesCounts[grade] ?? 0}</div>
+                        </div>
                       </td>
                     ))}
+                    <td className="py-2 px-3 text-center">
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation()
+                          setSubjectForPdfPrompt(row)
+                          setAnonymizedTeacherNames([])
+                        }}
+                        className="px-2 py-1 text-xs font-medium rounded bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      >
+                        Skriv ut
+                      </button>
+                    </td>
                   </tr>
-                  {expandedSubject === row.subject && (
+                  {expandedSubject === row.subjectKey && (
                     <>
                       {row.teachers.length > 0 ? (
-                        row.teachers.map(teacher => (
-                          <tr key={`${row.subject}-${teacher.name}`} className="bg-slate-50 border-b border-slate-200">
+                        row.teachers.map(teacher => {
+                          const teacherGradeTotal = totalGrades(teacher.gradesCounts)
+
+                          return (
+                          <tr key={`${row.subjectKey}-${teacher.name}`} className="bg-slate-50 border-b border-slate-200">
                             <td className="py-2 px-3 text-left text-slate-700 pl-10">- {teacher.name}</td>
                             <td className="py-2 px-3 text-center text-slate-700">{teacher.studentCount}</td>
                             <td className="py-2 px-3 text-center text-slate-700 font-medium">{teacher.totalVarsels}</td>
@@ -401,14 +648,18 @@ export default function FaginnsiktView({ data }: Props) {
                                     : 'text-slate-700'
                                 }`}
                               >
-                                {teacher.gradesCounts[grade] ?? 0}
+                                <div className="leading-tight">
+                                  <div>{gradePercentLabel(teacher.gradesCounts[grade] ?? 0, teacherGradeTotal)}</div>
+                                  <div className="text-[10px] text-slate-500">{teacher.gradesCounts[grade] ?? 0}</div>
+                                </div>
                               </td>
                             ))}
+                            <td className="py-2 px-3 text-center text-slate-400">-</td>
                           </tr>
-                        ))
+                        )})
                       ) : (
                         <tr className="bg-slate-50 border-b border-slate-200">
-                          <td colSpan={13} className="py-3 px-3 text-center text-slate-500 text-sm">
+                          <td colSpan={14} className="py-3 px-3 text-center text-slate-500 text-sm">
                             Ingen lærere med vurderingsdata for dette faget.
                           </td>
                         </tr>
@@ -416,12 +667,12 @@ export default function FaginnsiktView({ data }: Props) {
                     </>
                   )}
                 </Fragment>
-              ))}
+              )})}
             </tbody>
             {filteredAndSorted.length === 0 && (
               <tbody>
                 <tr>
-                  <td colSpan={13} className="py-6 px-3 text-center text-slate-500">
+                  <td colSpan={14} className="py-6 px-3 text-center text-slate-500">
                     Ingen fag funnet
                   </td>
                 </tr>
@@ -434,6 +685,79 @@ export default function FaginnsiktView({ data }: Props) {
           {filteredAndSorted.length} fag av {subjectRows.length} totalt
         </div>
       </div>
+
+      {subjectForPdfPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-slate-900/35"
+            onClick={() => setSubjectForPdfPrompt(null)}
+          />
+          <div className="relative w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-xl p-5">
+            <h3 className="text-base font-semibold text-slate-900 mb-2">Anonymisering</h3>
+            <p className="text-sm text-slate-700 mb-5">
+              Velg hvilke lærernavn som skal anonymiseres i utskriften.
+            </p>
+            <div className="mb-4 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setAnonymizedTeacherNames(subjectForPdfPrompt.teachers.map(t => t.name))}
+                className="px-2.5 py-1.5 text-xs font-medium rounded border border-slate-300 text-slate-700 hover:bg-slate-50"
+              >
+                Velg alle
+              </button>
+              <button
+                type="button"
+                onClick={() => setAnonymizedTeacherNames([])}
+                className="px-2.5 py-1.5 text-xs font-medium rounded border border-slate-300 text-slate-700 hover:bg-slate-50"
+              >
+                Tøm alle
+              </button>
+            </div>
+            <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100 mb-5">
+              {subjectForPdfPrompt.teachers.map(teacher => {
+                const selected = anonymizedTeacherNames.includes(teacher.name)
+                return (
+                  <label key={teacher.name} className="flex items-center justify-between gap-3 px-3 py-2 cursor-pointer">
+                    <span className="text-sm text-slate-800">{teacher.name}</span>
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => {
+                        setAnonymizedTeacherNames(prev =>
+                          prev.includes(teacher.name)
+                            ? prev.filter(name => name !== teacher.name)
+                            : [...prev, teacher.name]
+                        )
+                      }}
+                      className="h-4 w-4 rounded border-slate-300 text-sky-600"
+                    />
+                  </label>
+                )
+              })}
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setSubjectForPdfPrompt(null)}
+                className="px-3 py-2 text-sm font-medium rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
+              >
+                Avbryt
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const row = subjectForPdfPrompt
+                  setSubjectForPdfPrompt(null)
+                  if (row) void exportSubjectPdf(row, new Set(anonymizedTeacherNames))
+                }}
+                className="px-3 py-2 text-sm font-medium rounded-lg bg-sky-600 text-white hover:bg-sky-700"
+              >
+                Generer PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

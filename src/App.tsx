@@ -156,13 +156,14 @@ function App() {
     )
     const matchedStudentInfo = findStudentInfoInLookup(studentInfoLookup, navn, className)
 
+    const explicitKontaktlaerer = studentRecords.find(r => r.kontaktlaerer?.trim())?.kontaktlaerer?.trim()
     const teacherCountsForStudent = new Map<string, number>()
     studentRecords.forEach(record => {
       const teacher = record.teacher?.trim()
       if (!teacher) return
       teacherCountsForStudent.set(teacher, (teacherCountsForStudent.get(teacher) ?? 0) + 1)
     })
-    const kontaktlaerer =
+    const kontaktlaerer = explicitKontaktlaerer ??
       Array.from(teacherCountsForStudent.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'Ukjent'
 
     const subjectTeacherMap = new Map<string, string>()

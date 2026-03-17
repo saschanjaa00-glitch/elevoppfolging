@@ -374,25 +374,36 @@ export default function StudentList({
   }, [studentSummaries, deferredStudentSearch, missingWarningsOnly, threshold])
 
   const kontaktlaererByStudentKey = useMemo(() => {
+    const explicitMap = new Map<string, string>()
     const teacherCountsByStudent = new Map<string, Map<string, number>>()
 
     classData.forEach(record => {
+      const studentKey = `${record.class}::${normalizeMatch(record.navn)}`
+
+      // Prefer explicit kontaktlærer field from absence file
+      const kl = record.kontaktlaerer?.trim()
+      if (kl && !explicitMap.has(studentKey)) {
+        explicitMap.set(studentKey, kl)
+      }
+
+      // Build frequency map as fallback
       const teacher = record.teacher?.trim()
       if (!teacher) return
-
-      const studentKey = `${record.class}::${normalizeMatch(record.navn)}`
       if (!teacherCountsByStudent.has(studentKey)) {
         teacherCountsByStudent.set(studentKey, new Map<string, number>())
       }
-
       const counts = teacherCountsByStudent.get(studentKey)!
       counts.set(teacher, (counts.get(teacher) ?? 0) + 1)
     })
 
     const kontaktlaererMap = new Map<string, string>()
     teacherCountsByStudent.forEach((counts, studentKey) => {
-      const kontaktlaerer = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'Ukjent'
+      const kontaktlaerer = explicitMap.get(studentKey) ??
+        Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'Ukjent'
       kontaktlaererMap.set(studentKey, kontaktlaerer)
+    })
+    explicitMap.forEach((kl, studentKey) => {
+      if (!kontaktlaererMap.has(studentKey)) kontaktlaererMap.set(studentKey, kl)
     })
 
     return kontaktlaererMap
@@ -816,6 +827,14 @@ export default function StudentList({
       warningMap.get(key)!.push({ warningType: w.warningType, sentDate: w.sentDate })
     })
 
+    // Build subject teacher lookup from grades/vurderinger file (student+subjectGroup -> faglærer)
+    const gradeTeacherMap = new Map<string, string>()
+    data.grades.forEach(g => {
+      if (!g.subjectTeacher) return
+      const key = `${normalizeMatch(g.navn)}::${normalizeSubjectGroupKey(g.subjectGroup)}`
+      if (!gradeTeacherMap.has(key)) gradeTeacherMap.set(key, g.subjectTeacher)
+    })
+
     const dedupedEntries = new Map<string, MissingWarningEntry>()
 
     data.absences
@@ -840,7 +859,10 @@ export default function StudentList({
           ? [...grunnlagWarningDates].sort((a, b) => compareDateStrings(b, a))[0]
           : null
 
-        const resolvedTeacher = resolveTeacher(record.subject, record.teacher ?? '').trim() || 'Ukjent'
+        // Prefer faglærer from vurderinger file; fall back to absence file teacher
+        const gradeTeacher = gradeTeacherMap.get(`${studentNorm}::${subjectGroupNorm}`)
+        const resolvedTeacher = resolveTeacher(record.subject, gradeTeacher ?? record.teacher ?? '').trim() || 'Ukjent'
+
         const dedupKey = `${studentNorm}::${subjectGroupNorm}::${normalizeMatch(resolvedTeacher)}`
 
         const nextEntry: MissingWarningEntry = {

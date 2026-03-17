@@ -6,6 +6,7 @@ export interface AbsenceRecord {
   percentageAbsence: number
   hoursAbsence: number
   teacher: string
+  kontaktlaerer?: string
   avbrudd: boolean
 }
 
