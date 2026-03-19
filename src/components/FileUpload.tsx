@@ -1,15 +1,17 @@
 import { useState } from 'react'
 import * as XLSX from 'xlsx'
 import { Upload } from 'lucide-react'
-import type { DataStore, AbsenceRecord, WarningRecord, StudentInfoRecord } from '../types'
+import type { DataStore, AbsenceRecord, WarningRecord, StudentInfoRecord, PresetRecord } from '../types'
 import { anonymizeData } from '../anonymizeNames'
 import { normalizeCellText } from '../securityUtils'
 
+
 interface FileUploadProps {
-  onDataImport: (data: DataStore) => void
+  onDataImport: (data: DataStore) => void;
+  onPresetImport?: (presets: PresetRecord[]) => void;
 }
 
-export default function FileUpload({ onDataImport }: FileUploadProps) {
+export default function FileUpload({ onDataImport, onPresetImport }: FileUploadProps) {
   const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
   const MAX_TOTAL_SIZE_BYTES = 100 * 1024 * 1024
   const MAX_CELL_CHARS = 10000
@@ -280,6 +282,25 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
       .filter(r => r.navn)
   }
 
+  const looksLikePresetWorkbook = (sheet: Record<string, any>[]): boolean => {
+    if (sheet.length === 0) return false
+    const first = sheet[0]
+    const headers = Object.keys(first).map(h => normalizeHeader(h))
+    const hasNavn = headers.some(h => h === 'navn' || h.includes('navn'))
+    const hasRolle = headers.some(h => h === 'rolle' || h.includes('rolle'))
+    const hasKlasser = headers.some(h => h === 'klasser' || h.includes('klasser'))
+    return hasNavn && hasRolle && hasKlasser
+  }
+
+  const parsePresetSheet = (sheet: Record<string, any>[]): PresetRecord[] => {
+    return sheet.map(row => {
+      const navn = row['Navn']?.toString().trim() || ''
+      const rolle = row['Rolle']?.toString().trim() || ''
+      const klasser = (row['Klasser']?.toString() || '').split(',').map((k: string) => k.trim()).filter(Boolean)
+      return { navn, rolle, klasser }
+    }).filter(r => r.navn && r.rolle && r.klasser.length > 0)
+  }
+
   const handleFileSelect = async (files: FileList) => {
     if (files.length === 0) return
 
@@ -330,6 +351,9 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
           } else if (looksLikeStudentInfoWorkbook(sheetRaw)) {
             const parsed = parseStudentInfoSheet(sheetRaw)
             data.studentInfo = parsed
+          } else if (looksLikePresetWorkbook(sheetRaw)) {
+            const parsed = parsePresetSheet(sheetRaw)
+            if (onPresetImport && parsed.length > 0) onPresetImport(parsed)
           }
         } catch (err) {
           console.error('Error processing file:', err)
@@ -359,7 +383,6 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
             <Upload className="w-8 h-8 text-sky-600" />
           </div>
         </div>
-
         <h2 className="text-2xl font-bold text-center text-slate-900 mb-2">
           Importer fraværsdata
         </h2>
@@ -420,7 +443,7 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
           </div>
         )}
 
-        <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div className="mt-8 grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
           <div className="bg-slate-50 rounded-lg p-4">
             <h4 className="font-semibold text-slate-900 mb-2">
               Fraværsfil
@@ -471,6 +494,17 @@ export default function FileUpload({ onDataImport }: FileUploadProps) {
               <li>• Programområde</li>
               <li>• Fritak i sidemål</li>
               <li>• Inntakspoeng</li>
+            </ul>
+          </div>
+          <div className="bg-slate-50 rounded-lg p-4">
+            <h4 className="font-semibold text-slate-900 mb-2">
+              Preset-fil
+              <span className="block text-xs font-normal text-slate-500">(valgfri)</span>
+            </h4>
+            <ul className="text-slate-600 space-y-1 text-xs">
+              <li>• Navn</li>
+              <li>• Rolle</li>
+              <li>• Klasser</li>
             </ul>
           </div>
         </div>

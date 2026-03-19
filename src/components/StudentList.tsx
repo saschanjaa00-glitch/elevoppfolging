@@ -1,5 +1,5 @@
 import { useDeferredValue, useMemo, useState } from 'react'
-import type { DataStore, StudentAbsenceSummary } from '../types'
+import type { DataStore, PresetRecord, StudentAbsenceSummary } from '../types'
 import { Eye, X, Printer, FileText } from 'lucide-react'
 import StudentDetail from './StudentDetail'
 import { resolveTeacher } from '../teacherUtils'
@@ -18,15 +18,10 @@ interface StudentListProps {
   fullRapport: boolean
   fullRapportInclude2: boolean
   noFilter: boolean
+  presets?: PresetRecord[]
 }
 
 const LOW_GRADES = ['IV', '1', '2']
-
-const RADGIVER: Record<string, string[]> = {
-  Lasse: ['1IDA', '1IDB', '2IDA', '2IDB', '3IDA', '3IDB', '1TMT', '2TMT', '3TMT'],
-  Trond: ['1TID', '2TID', '3TID', '1STA', '1STB', '1STC', '2STA', '2STB', '3STA', '3STB', '3STC'],
-  Trude: ['1STD', '1STE', '1STF', '2STC', '2STD', '2STE', '2STF', '3STD', '3STE', '3STF'],
-}
 
 let jsPdfModulePromise: Promise<typeof import('jspdf')> | null = null
 let docxModulePromise: Promise<typeof import('docx')> | null = null
@@ -53,6 +48,7 @@ export default function StudentList({
   fullRapport,
   fullRapportInclude2,
   noFilter,
+  presets = [],
 }: StudentListProps) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [showPdfMenu, setShowPdfMenu] = useState(false)
@@ -91,9 +87,24 @@ export default function StudentList({
     return { gradeMap, subjectTeacherMap }
   }, [data.grades])
 
+  const presetRoleMappings = useMemo(() => {
+    const result: Record<string, Record<string, string[]>> = {}
+    presets.forEach(p => {
+      if (!result[p.rolle]) result[p.rolle] = {}
+      result[p.rolle][p.navn] = p.klasser
+    })
+    return result
+  }, [presets])
+
   const ownerForClass = (className: string, mapping: Record<string, string[]>) => {
     const found = Object.entries(mapping).find(([, classes]) => classes.includes(className))
     return found?.[0] ?? 'Ukjent'
+  }
+
+  const ownerForClassByRole = (className: string, role: string) => {
+    const mapping = presetRoleMappings[role]
+    if (!mapping) return 'Ukjent'
+    return ownerForClass(className, mapping)
   }
 
   const dateColor = (dateStr: string): string => warningDateColorClass(dateStr)
@@ -742,7 +753,7 @@ export default function StudentList({
 
     atRiskStudents.forEach((student, index) => {
       const { allSubjectEntries, kontaktlaerer, studentInfo } = getAllSubjectEntries(student)
-      const radgiver = ownerForClass(student.className, RADGIVER)
+      const radgiver = ownerForClassByRole(student.className, 'Rådgiver')
       const displayClassName = getDisplayClassName(student.className, studentInfo?.programArea)
 
       children.push(
@@ -990,7 +1001,7 @@ export default function StudentList({
         new Paragraph({
           children: [
             new TextRun({
-              text: `Det er tatt ut rapport på manglende varselbrev${perDateText}. Følgende elever har fravær over ${thresholdText} men har ikke fått varsel på fravær i faget. Ber om at varsler sendes ut snarest.`,
+              text: `Vi har gjort en rutinesjekk på manglende varselbrev${perDateText}. Følgende fag har manglende varsler. Fint hvis du sender ut for de som har gått over ${thresholdText} fravær.`,
             }),
           ],
         }),
@@ -1093,7 +1104,7 @@ export default function StudentList({
     let y = 16
 
     const { allSubjectEntries, kontaktlaerer, studentInfo } = getAllSubjectEntries(student)
-    const radgiver = ownerForClass(student.className, RADGIVER)
+    const radgiver = ownerForClassByRole(student.className, 'Rådgiver')
     const displayClassName = getDisplayClassName(student.className, studentInfo?.programArea)
     const acroSupported =
       typeof (jsPDF as unknown as { AcroFormTextField?: unknown }).AcroFormTextField === 'function' &&
@@ -1329,7 +1340,7 @@ export default function StudentList({
     } = await loadDocx()
 
     const { allSubjectEntries, kontaktlaerer, studentInfo } = getAllSubjectEntries(student)
-    const radgiver = ownerForClass(student.className, RADGIVER)
+    const radgiver = ownerForClassByRole(student.className, 'Rådgiver')
     const displayClassName = getDisplayClassName(student.className, studentInfo?.programArea)
 
     const sections: Array<any> = [

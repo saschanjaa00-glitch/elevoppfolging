@@ -6,7 +6,7 @@ import { compareDateStrings, formatDateDdMmYyyy, todayDdMmYyyy } from './dateUti
 import FileUpload from './components/FileUpload'
 import ClassSelector from './components/ClassSelector'
 import StudentList from './components/StudentList'
-import type { DataStore } from './types'
+import type { DataStore, PresetRecord } from './types'
 import './index.css'
 
 const loadStatsView = () => import('./components/StatsView')
@@ -39,12 +39,6 @@ const TAB_PREFETCH_ORDER: Record<AppTab, Array<{ key: string; load: () => Promis
   ],
 }
 
-const RADGIVER: Record<string, string[]> = {
-  Lasse: ['1IDA', '1IDB', '2IDA', '2IDB', '3IDA', '3IDB', '1TMT', '2TMT', '3TMT'],
-  Trond: ['1TID', '2TID', '3TID', '1STA', '1STB', '1STC', '2STA', '2STB', '3STA', '3STB', '3STC'],
-  Trude: ['1STD', '1STE', '1STF', '2STC', '2STD', '2STE', '2STF', '3STD', '3STE', '3STF'],
-}
-
 function App() {
   const [data, setData] = useState<DataStore>({
     absences: [],
@@ -54,6 +48,7 @@ function App() {
   })
 
   const [selectedClasses, setSelectedClasses] = useState<string[]>([])
+  const [presets, setPresets] = useState<PresetRecord[]>([])
   const [absenceThreshold, setAbsenceThreshold] = useState<number>(5)
   const [thresholdEnabled, setThresholdEnabled] = useState<boolean>(true)
   const [noFilter, setNoFilter] = useState<boolean>(false)
@@ -185,6 +180,21 @@ function App() {
     return found?.[0] ?? 'Ukjent'
   }
 
+  const presetRoleMappings = useMemo(() => {
+    const result: Record<string, Record<string, string[]>> = {}
+    presets.forEach(p => {
+      if (!result[p.rolle]) result[p.rolle] = {}
+      result[p.rolle][p.navn] = p.klasser
+    })
+    return result
+  }, [presets])
+
+  const ownerForClassByRole = (className: string, role: string) => {
+    const mapping = presetRoleMappings[role]
+    if (!mapping) return 'Ukjent'
+    return ownerForClass(className, mapping)
+  }
+
   const groupWarnings = (warnings: Array<{ warningType: string; sentDate: string }>) => {
     const order = (label: string) => (label === 'Fravær' ? 0 : label === 'Grunnlag' ? 1 : 2)
     const grouped = new Map<string, string[]>()
@@ -284,7 +294,7 @@ function App() {
     return {
       kontaktlaerer,
       studentInfo: matchedStudentInfo,
-      radgiver: ownerForClass(className, RADGIVER),
+      radgiver: ownerForClassByRole(className, 'Rådgiver'),
       subjects: Array.from(subjectsMap.values()).sort((a, b) =>
         a.subject.localeCompare(b.subject, 'nb-NO')
       ),
@@ -574,7 +584,7 @@ function App() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {!hasData ? (
-          <FileUpload onDataImport={handleDataImport} />
+          <FileUpload onDataImport={handleDataImport} onPresetImport={setPresets} />
         ) : (
           <div className="space-y-6">
             {/* Top bar */}
@@ -649,109 +659,25 @@ function App() {
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                 <aside className="lg:col-span-1 no-print">
                   {/* Presets */}
-                  <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-4 mb-4">
-                    <h3 className="text-sm font-semibold text-slate-900 mb-3">
-                      Avdelingsleder
-                    </h3>
-                    <div className="space-y-2">
-                      <button
-                        onClick={() =>
-                          setSelectedClasses([
-                            '3STA', '3STB', '3STC', '3STD', '3STE', '3STF',
-                          ])
-                        }
-                        className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
-                      >
-                        Anja
-                      </button>
-                      <button
-                        onClick={() =>
-                          setSelectedClasses([
-                            '1STA', '1STB', '1STC', '1STD', '1STE', '1STF',
-                          ])
-                        }
-                        className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
-                      >
-                        Christin
-                      </button>
-                      <button
-                        onClick={() =>
-                          setSelectedClasses([
-                            '1STA', '2STA', '3STA',
-                            '1TID', '2TID', '3TID',
-                            '1TMT', '2TMT', '3TMT',
-                          ])
-                        }
-                        className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
-                      >
-                        Sigurd
-                      </button>
-                      <button
-                        onClick={() =>
-                          setSelectedClasses([
-                            '1IDA', '1IDB', '2IDA', '2IDB', '3IDA', '3IDB',
-                          ])
-                        }
-                        className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
-                      >
-                        Jørund
-                      </button>
-                      <button
-                        onClick={() =>
-                          setSelectedClasses([
-                            '2STA', '2STB', '2STC', '2STD', '2STE', '2STF',
-                          ])
-                        }
-                        className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
-                      >
-                        Siri
-                      </button>
+                  {/* Dynamic preset buttons grouped by role */}
+                  {presets.length > 0 && Object.entries(presetRoleMappings).map(([role, nameMap]) => (
+                    <div key={role} className="bg-white rounded-lg shadow-sm border border-slate-100 p-4 mb-4">
+                      <h3 className="text-sm font-semibold text-slate-900 mb-3">{role}</h3>
+                      <div className="space-y-2">
+                        {Object.entries(nameMap)
+                          .sort(([a], [b]) => a.localeCompare(b, 'nb-NO'))
+                          .map(([name, klasser]) => (
+                          <button
+                            key={`${name}-${role}`}
+                            onClick={() => setSelectedClasses(klasser)}
+                            className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-
-                  <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-4 mb-4">
-                    <h3 className="text-sm font-semibold text-slate-900 mb-3">
-                      Rådgiver
-                    </h3>
-                    <div className="space-y-2">
-                      <button
-                        onClick={() =>
-                          setSelectedClasses([
-                            '1IDA', '1IDB', '2IDA', '2IDB', '3IDA', '3IDB',
-                            '1TMT', '2TMT', '3TMT',
-                          ])
-                        }
-                        className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
-                      >
-                        Lasse
-                      </button>
-                      <button
-                        onClick={() =>
-                          setSelectedClasses([
-                            '1TID', '2TID', '3TID',
-                            '1STA', '1STB', '1STC',
-                            '2STA', '2STB',
-                            '3STA', '3STB', '3STC',
-                          ])
-                        }
-                        className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
-                      >
-                        Trond
-                      </button>
-                      <button
-                        onClick={() =>
-                          setSelectedClasses([
-                            '1STD', '1STE', '1STF',
-                            '2STC', '2STD', '2STE', '2STF',
-                            '3STD', '3STE', '3STF',
-                          ])
-                        }
-                        className="w-full px-3 py-2 text-xs text-left font-medium bg-sky-50 hover:bg-sky-100 text-sky-700 rounded transition-colors"
-                      >
-                        Trude
-                      </button>
-                    </div>
-                  </div>
+                  ))}
 
                   <ClassSelector
                     data={data}
@@ -973,6 +899,7 @@ function App() {
                       fullRapport={isNameSearchActive ? false : fullRapport}
                       fullRapportInclude2={isNameSearchActive ? false : fullRapportInclude2}
                       noFilter={isNameSearchActive ? true : noFilter}
+                      presets={presets}
                     />
                   )}
 

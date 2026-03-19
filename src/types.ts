@@ -1,3 +1,10 @@
+export type PresetRole = 'Avdelingsleder' | 'Rådgiver' | string;
+
+export interface PresetRecord {
+  navn: string;
+  rolle: PresetRole;
+  klasser: string[];
+}
 export interface AbsenceRecord {
   navn: string
   class: string
