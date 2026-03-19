@@ -67,6 +67,7 @@ export function anonymizeData(data: DataStore): DataStore {
   // Collect all unique teacher names
   const teacherNamesSet = new Set<string>()
   data.absences.forEach(r => { if (r.teacher) teacherNamesSet.add(r.teacher) })
+  data.absences.forEach(r => { if (r.kontaktlaerer) teacherNamesSet.add(r.kontaktlaerer) })
   data.grades.forEach(r => { if (r.subjectTeacher) teacherNamesSet.add(r.subjectTeacher) })
 
   // Build normalized → canonical real name maps (avoid duplicates from casing/spacing)
@@ -108,6 +109,7 @@ export function anonymizeData(data: DataStore): DataStore {
       ...r,
       navn: fakeStudent(r.navn),
       teacher: r.teacher ? fakeTeacher(r.teacher) : r.teacher,
+      kontaktlaerer: r.kontaktlaerer ? fakeTeacher(r.kontaktlaerer) : r.kontaktlaerer,
     })),
     warnings: data.warnings.map(r => ({
       ...r,

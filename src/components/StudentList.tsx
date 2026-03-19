@@ -56,6 +56,7 @@ export default function StudentList({
 }: StudentListProps) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [showPdfMenu, setShowPdfMenu] = useState(false)
+  const [showMissingWarningsMenu, setShowMissingWarningsMenu] = useState(false)
   const deferredStudentSearch = useDeferredValue(studentSearch)
   const selectedClassSet = useMemo(() => new Set(selectedClasses), [selectedClasses])
   const classData = useMemo(
@@ -845,7 +846,7 @@ export default function StudentList({
     URL.revokeObjectURL(url)
   }
 
-  const generateMissingWarningsDocx = async () => {
+  const generateMissingWarningsDocx = async (mode: 'detailed' | 'summary' = 'detailed') => {
     if (!missingWarningsOnly) return
 
     const {
@@ -1000,13 +1001,17 @@ export default function StudentList({
             }),
           ],
         }),
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: 'Vi informerer også her om det er sendt noe på manglende vurderingsgrunnlag, dette er bare informasjon, du som faglærer vurderer om det trengs varsel på vurderingsgrunnlag.',
+        ...(mode === 'detailed'
+          ? [
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: 'Vi informerer også her om det er sendt noe på manglende vurderingsgrunnlag, dette er bare informasjon, du som faglærer vurderer om det trengs varsel på vurderingsgrunnlag.',
+                }),
+              ],
             }),
-          ],
-        }),
+          ]
+          : []),
         new Paragraph({ text: '' }),
       )
 
@@ -1020,23 +1025,39 @@ export default function StudentList({
           }),
         )
 
-        sortedEntries.forEach(entry => {
-          const pctText = `${entry.percentageAbsence.toFixed(1).replace('.', ',')}%`
-          const grunnlagText = entry.grunnlagWarningDate
-            ? `Det har blitt sendt varsel på manglende grunnlag ${entry.grunnlagWarningDate}.`
-            : 'Det er heller ikke sendt varsel på manglende vurderingsgrunnlag.'
+        if (mode === 'detailed') {
+          sortedEntries.forEach(entry => {
+            const pctText = `${entry.percentageAbsence.toFixed(1).replace('.', ',')}%`
+            const grunnlagText = entry.grunnlagWarningDate
+              ? `Det har blitt sendt varsel på manglende grunnlag ${entry.grunnlagWarningDate}.`
+              : 'Det er heller ikke sendt varsel på manglende vurderingsgrunnlag.'
+
+            children.push(
+              new Paragraph({
+                bullet: { level: 0 },
+                children: [new TextRun({ text: `${entry.studentName} - ${pctText}` })],
+              }),
+              new Paragraph({
+                indent: { left: 720 },
+                children: [new TextRun({ text: grunnlagText })],
+              }),
+            )
+          })
+        } else {
+          const percentages = sortedEntries.map(entry => entry.percentageAbsence)
+          const minPct = Math.min(...percentages)
+          const maxPct = Math.max(...percentages)
+          const minPctText = `${minPct.toFixed(1).replace('.', ',')}%`
+          const maxPctText = `${maxPct.toFixed(1).replace('.', ',')}%`
+          const studentCount = sortedEntries.length
 
           children.push(
             new Paragraph({
               bullet: { level: 0 },
-              children: [new TextRun({ text: `${entry.studentName} - ${pctText}` })],
-            }),
-            new Paragraph({
-              indent: { left: 720 },
-              children: [new TextRun({ text: grunnlagText })],
+              children: [new TextRun({ text: `${studentCount} elever - fravær fra ${minPctText} til ${maxPctText}` })],
             }),
           )
-        })
+        }
 
         children.push(new Paragraph({ text: '' }))
       })
@@ -1057,7 +1078,7 @@ export default function StudentList({
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `manglende_varsler_${todayDdMmYyyy()}.docx`
+    a.download = `manglende_varsler_${mode === 'summary' ? 'oppsummert' : 'detaljert'}_${todayDdMmYyyy()}.docx`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -1432,13 +1453,37 @@ export default function StudentList({
             Grense: {threshold.toFixed(1)}%
           </span>
           {missingWarningsOnly && (
-            <button
-              onClick={() => void generateMissingWarningsDocx()}
-              className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
-            >
-              <FileText className="w-4 h-4" />
-              Generer melding om manglende varsler
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowMissingWarningsMenu(prev => !prev)}
+                className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
+              >
+                <FileText className="w-4 h-4" />
+                Generer melding om manglende varsler
+              </button>
+              {showMissingWarningsMenu && (
+                <div className="absolute right-0 mt-2 w-44 rounded-lg border border-slate-200 bg-white shadow-lg z-20">
+                  <button
+                    onClick={() => {
+                      setShowMissingWarningsMenu(false)
+                      void generateMissingWarningsDocx('detailed')
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-t-lg"
+                  >
+                    Detaljert
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowMissingWarningsMenu(false)
+                      void generateMissingWarningsDocx('summary')
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-b-lg"
+                  >
+                    Oppsummert
+                  </button>
+                </div>
+              )}
+            </div>
           )}
           <button
             onClick={() => void generateOppfolgingsarkForUtvalg()}
