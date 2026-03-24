@@ -79,6 +79,41 @@ function App() {
   const filtersDisabled = isNameSearchActive || noFilter
   const prefetchedChunks = useRef<Set<string>>(new Set())
 
+  const effectiveThreshold = isNameSearchActive ? 0 : (thresholdEnabled ? absenceThreshold : 0)
+
+  const missingWarningsStats = useMemo(() => {
+    if (selectedClasses.length === 0) return { count: 0, teacherCount: 0 }
+    const selectedSet = new Set(selectedClasses)
+    const warningMap = new Map<string, number>()
+    data.warnings.forEach(w => {
+      const key = `${normalizeMatch(w.navn)}::${normalizeSubjectGroupKey(w.subjectGroup)}`
+      warningMap.set(key, (warningMap.get(key) ?? 0) + 1)
+    })
+    let count = 0
+    const teachers = new Set<string>()
+    const seen = new Set<string>()
+    data.absences.forEach(r => {
+      if (!selectedSet.has(r.class)) return
+      const comboKey = `${normalizeMatch(r.navn)}::${normalizeSubjectGroupKey(r.subjectGroup)}`
+      if (seen.has(comboKey)) return
+      seen.add(comboKey)
+      if (r.percentageAbsence > effectiveThreshold && !(warningMap.get(comboKey) ?? 0)) {
+        count++
+        const teacherField = r.teacher?.trim()
+        const kl = r.kontaktlaerer?.trim()
+        const klNorm = kl ? normalizeMatch(kl) : ''
+        if (teacherField) {
+          const primaryTeacher = teacherField.split(',')[0].trim()
+          if (primaryTeacher) {
+            const norm = normalizeMatch(primaryTeacher)
+            if (norm && norm !== klNorm) teachers.add(norm)
+          }
+        }
+      }
+    })
+    return { count, teacherCount: teachers.size }
+  }, [data.absences, data.warnings, selectedClasses, effectiveThreshold])
+
   const normalizeTeacherSearch = (value: string): string =>
     value
       .toLowerCase()
@@ -642,7 +677,7 @@ function App() {
 
             {activeTab === 'statistikk' && (
               <Suspense fallback={<div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 text-slate-600">Laster statistikk...</div>}>
-                <StatsView data={data} />
+                <StatsView data={data} threshold={thresholdEnabled ? absenceThreshold : 0} />
               </Suspense>
             )}
             {activeTab === 'faginnsikt' && (
@@ -652,7 +687,7 @@ function App() {
             )}
             {activeTab === 'innsikt' && (
               <Suspense fallback={<div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 text-slate-600">Laster laererinnsikt...</div>}>
-                <InnsiktView data={data} />
+                <InnsiktView data={data} threshold={thresholdEnabled ? absenceThreshold : 0} />
               </Suspense>
             )}
             {activeTab === 'elever' && (
@@ -879,7 +914,12 @@ function App() {
                       >
                         <span className="flex items-center gap-1.5">
                           <AlertTriangle size={15} />
-                          {missingWarningsOnly ? 'Vis manglende varsler' : 'Vis manglende varsler'}
+                          Vis manglende varsler
+                          {missingWarningsOnly && missingWarningsStats.count > 0 && (
+                            <span className="ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-bold rounded-full bg-orange-500 text-white">
+                              {missingWarningsStats.count} · {missingWarningsStats.teacherCount} lærere
+                            </span>
+                          )}
                         </span>
                       </button>
                     </div>

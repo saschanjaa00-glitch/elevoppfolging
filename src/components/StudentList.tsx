@@ -1,6 +1,6 @@
 import { useDeferredValue, useMemo, useState } from 'react'
 import type { DataStore, PresetRecord, StudentAbsenceSummary } from '../types'
-import { Eye, X, Printer, FileText } from 'lucide-react'
+import { Eye, X, Printer, FileText, Table } from 'lucide-react'
 import StudentDetail from './StudentDetail'
 import { resolveTeacher } from '../teacherUtils'
 import { createStudentInfoLookup, findStudentInfoInLookup, formatIntakePoints, getDisplayClassName, hasTalentProgramTag, isNorskSubject, normalizeMatch, normalizeSubjectGroupKey } from '../studentInfoUtils'
@@ -25,6 +25,7 @@ const LOW_GRADES = ['IV', '1', '2']
 
 let jsPdfModulePromise: Promise<typeof import('jspdf')> | null = null
 let docxModulePromise: Promise<typeof import('docx')> | null = null
+let excelJsModulePromise: Promise<typeof import('exceljs')> | null = null
 
 const loadJsPdf = async () => {
   if (!jsPdfModulePromise) jsPdfModulePromise = import('jspdf')
@@ -34,6 +35,11 @@ const loadJsPdf = async () => {
 const loadDocx = async () => {
   if (!docxModulePromise) docxModulePromise = import('docx')
   return docxModulePromise
+}
+
+const loadExcelJs = async () => {
+  if (!excelJsModulePromise) excelJsModulePromise = import('exceljs')
+  return excelJsModulePromise
 }
 
 export default function StudentList({
@@ -1094,6 +1100,242 @@ export default function StudentList({
     URL.revokeObjectURL(url)
   }
 
+  const generateOppfolgingsoversikt = async () => {
+    const ExcelJS = await loadExcelJs()
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('Oppfølgingsoversikt')
+
+    // Build trinnleder list from presets
+    const trinnlederMapping = presetRoleMappings['Trinnleder'] ?? {}
+    const trinnlederNames = Object.keys(trinnlederMapping).sort((a, b) => a.localeCompare(b, 'nb-NO'))
+    const trinnlederListStr = trinnlederNames.length > 0 ? `"${trinnlederNames.join(',')}"` : '"Ukjent"'
+
+    // Headers
+    const headers = [
+      'Elevnavn',
+      'Klasse',
+      'Fag',
+      'Lærer',
+      'Får standpunkt\n/ IV / Stryk',
+      'Fare for IV',
+      'Fare for 1',
+      'Varsel OK?',
+      'Oppfølgingsansv.',
+      'Kommentar trinnleder\n(eks. når neste vurdering skal være)',
+    ]
+
+    const headerRow = sheet.addRow(headers)
+    headerRow.height = 36
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, size: 10, name: 'Calibri' }
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } }
+      cell.font = { bold: true, size: 10, name: 'Calibri', color: { argb: 'FFFFFFFF' } }
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFD0D5DD' } },
+        bottom: { style: 'thin', color: { argb: 'FFD0D5DD' } },
+        left: { style: 'thin', color: { argb: 'FFD0D5DD' } },
+        right: { style: 'thin', color: { argb: 'FFD0D5DD' } },
+      }
+    })
+
+    // Column widths
+    sheet.getColumn(1).width = 32  // Elevnavn
+    sheet.getColumn(2).width = 10  // Klasse
+    sheet.getColumn(3).width = 28  // Fag
+    sheet.getColumn(4).width = 26  // Lærer
+    sheet.getColumn(5).width = 18  // Får standpunkt / IV / Stryk
+    sheet.getColumn(6).width = 12  // Fare for IV
+    sheet.getColumn(7).width = 12  // Fare for 1
+    sheet.getColumn(8).width = 12  // Varsel OK?
+    sheet.getColumn(9).width = 20  // Oppfølgingsansv.
+    sheet.getColumn(10).width = 36 // Kommentar
+
+    // Add 50 blank template rows with dropdowns and formatting
+    const templateRowCount = 50
+    const standpunktCol = 5  // E
+    const fareIVCol = 6      // F
+    const fare1Col = 7       // G
+    const varselCol = 8      // H
+    const oppfolgCol = 9     // I
+
+    for (let i = 0; i < templateRowCount; i++) {
+      const dataRowNum = i + 2
+      const excelRow = sheet.addRow(['', '', '', '', '', '', '', '', '', ''])
+
+      excelRow.eachCell((cell) => {
+        cell.font = { size: 10, name: 'Calibri' }
+        cell.alignment = { vertical: 'middle', wrapText: false }
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFD0D5DD' } },
+          bottom: { style: 'thin', color: { argb: 'FFD0D5DD' } },
+          left: { style: 'thin', color: { argb: 'FFD0D5DD' } },
+          right: { style: 'thin', color: { argb: 'FFD0D5DD' } },
+        }
+      })
+
+      // Data validation: Får standpunkt / IV / Stryk
+      sheet.getCell(dataRowNum, standpunktCol).dataValidation = {
+        type: 'list',
+        allowBlank: true,
+        formulae: ['"Får standpunkt,IV,Stryk"'],
+        showErrorMessage: true,
+        errorTitle: 'Ugyldig valg',
+        error: 'Velg Får standpunkt, IV eller Stryk',
+      }
+
+      // Data validation: Fare for IV
+      sheet.getCell(dataRowNum, fareIVCol).dataValidation = {
+        type: 'list',
+        allowBlank: true,
+        formulae: ['"Ja,Nei"'],
+        showErrorMessage: true,
+      }
+
+      // Data validation: Fare for 1
+      sheet.getCell(dataRowNum, fare1Col).dataValidation = {
+        type: 'list',
+        allowBlank: true,
+        formulae: ['"Ja,Nei"'],
+        showErrorMessage: true,
+      }
+
+      // Data validation: Varsel OK?
+      sheet.getCell(dataRowNum, varselCol).dataValidation = {
+        type: 'list',
+        allowBlank: true,
+        formulae: ['"Ja,Nei,Sendt"'],
+        showErrorMessage: true,
+      }
+
+      // Data validation: Oppfølgingsansv.
+      if (trinnlederNames.length > 0) {
+        sheet.getCell(dataRowNum, oppfolgCol).dataValidation = {
+          type: 'list',
+          allowBlank: true,
+          formulae: [trinnlederListStr],
+          showErrorMessage: true,
+        }
+      }
+    }
+
+    // Conditional formatting
+    const lastDataRow = templateRowCount + 1
+    const fullRange = `A2:J${lastDataRow}`
+
+    // Fare for IV = Ja → light yellow (lowest priority)
+    sheet.addConditionalFormatting({
+      ref: fullRange,
+      rules: [
+        {
+          type: 'expression',
+          formulae: ['$F2="Ja"'],
+          priority: 5,
+          style: {
+            fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFFF2CC' } },
+            font: { color: { argb: 'FF7F6003' } },
+          },
+        },
+      ],
+    })
+
+    // Fare for 1 = Ja → orange
+    sheet.addConditionalFormatting({
+      ref: fullRange,
+      rules: [
+        {
+          type: 'expression',
+          formulae: ['$G2="Ja"'],
+          priority: 4,
+          style: {
+            fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFCE4D6' } },
+            font: { color: { argb: 'FF833C0B' } },
+          },
+        },
+      ],
+    })
+
+    // Fare for IV = Ja + Varsel OK = Ja → orange
+    sheet.addConditionalFormatting({
+      ref: fullRange,
+      rules: [
+        {
+          type: 'expression',
+          formulae: ['($F2="Ja")*($H2="Ja")'],
+          priority: 3,
+          style: {
+            fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFCE4D6' } },
+            font: { color: { argb: 'FF833C0B' } },
+          },
+        },
+      ],
+    })
+
+    // IV (without Sendt) → red
+    sheet.addConditionalFormatting({
+      ref: fullRange,
+      rules: [
+        {
+          type: 'expression',
+          formulae: ['$E2="IV"'],
+          priority: 6,
+          style: {
+            fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFFC7CE' } },
+            font: { color: { argb: 'FF9C0006' } },
+          },
+        },
+      ],
+    })
+
+    // Stryk → dark red
+    sheet.addConditionalFormatting({
+      ref: fullRange,
+      rules: [
+        {
+          type: 'expression',
+          formulae: ['$E2="Stryk"'],
+          priority: 2,
+          style: {
+            fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFFC7CE' } },
+            font: { color: { argb: 'FF660000' } },
+          },
+        },
+      ],
+    })
+
+    // Får standpunkt → green (highest priority)
+    sheet.addConditionalFormatting({
+      ref: fullRange,
+      rules: [
+        {
+          type: 'expression',
+          formulae: ['$E2="Får standpunkt"'],
+          priority: 1,
+          style: {
+            fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFC6EFCE' } },
+            font: { color: { argb: 'FF006100' } },
+          },
+        },
+      ],
+    })
+
+    // Freeze the header row
+    sheet.views = [{ state: 'frozen', ySplit: 1 }]
+
+    // Auto-filter
+    sheet.autoFilter = { from: 'A1', to: `J${lastDataRow}` }
+
+    // Generate and download
+    const buffer = await workbook.xlsx.writeBuffer()
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `oppfolgingsoversikt_${selectedClasses.join('-')}_${todayDdMmYyyy()}.xlsx`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const generateOppfolgingsark = async (student: StudentAbsenceSummary) => {
     const { jsPDF } = await loadJsPdf()
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
@@ -1502,6 +1744,13 @@ export default function StudentList({
           >
             <FileText className="w-4 h-4" />
             Oppfølgingsark for utvalg
+          </button>
+          <button
+            onClick={() => void generateOppfolgingsoversikt()}
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
+          >
+            <Table className="w-4 h-4" />
+            Generer oppfølgingsoversikt
           </button>
           <div className="relative">
             <button

@@ -5,6 +5,7 @@ import { normalizeMatch } from '../studentInfoUtils'
 
 interface Props {
   data: DataStore
+  threshold: number
 }
 
 interface SubjectStats {
@@ -44,7 +45,7 @@ type SortKey =
   | 'grade6'
 type SortDirection = 'asc' | 'desc'
 
-export default function InnsiktView({ data }: Props) {
+export default function InnsiktView({ data, threshold }: Props) {
   const [searchTerm, setSearchTerm] = useState<string>('')
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
@@ -215,7 +216,7 @@ export default function InnsiktView({ data }: Props) {
       })
     })
 
-    // Missing warnings: absence > 8%, no warning for student+subjectGroup.
+    // Missing warnings: absence > threshold%, no warning for student+subjectGroup.
     const warningMap = new Map<string, number>()
     normalizedWarnings.forEach(w => {
       const key = studentSubjectKey(w.studentNorm, w.subjectDisplay)
@@ -224,7 +225,7 @@ export default function InnsiktView({ data }: Props) {
 
     const checkedCombos = new Set<string>()
     normalizedAbsences.forEach(a => {
-      if (a.percentageAbsence <= 8) return
+      if (a.percentageAbsence <= threshold) return
       const comboKey = studentSubjectKey(a.studentNorm, a.subjectDisplay)
       if (checkedCombos.has(comboKey)) return
       checkedCombos.add(comboKey)
@@ -255,7 +256,7 @@ export default function InnsiktView({ data }: Props) {
     })
 
     return Array.from(teacherData.values())
-  }, [normalizedGrades, normalizedWarnings, normalizedAbsences, subjectNameByNorm])
+  }, [normalizedGrades, normalizedWarnings, normalizedAbsences, subjectNameByNorm, threshold])
 
   const allGrades = ['IV', '1', '2', '3', '4', '5', '6'] as const
 
@@ -376,7 +377,7 @@ export default function InnsiktView({ data }: Props) {
       y += lineHeight
       doc.text(`Varsler totalt: ${teacher.totalVarsels}  |  F: ${teacher.varselsByType['F'] ?? 0}  |  G: ${teacher.varselsByType['G'] ?? 0}`, marginX, y)
       y += lineHeight
-      doc.text(`Manglende varsler (>8%): ${teacher.missingWarnings}`, marginX, y)
+      doc.text(`Manglende varsler (>${threshold}%): ${teacher.missingWarnings}`, marginX, y)
       y += 18
 
       doc.setFont('helvetica', 'bold')

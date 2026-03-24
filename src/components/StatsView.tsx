@@ -6,6 +6,7 @@ import { todayDdMmYyyy } from '../dateUtils'
 
 interface Props {
   data: DataStore
+  threshold: number
 }
 
 interface ClassStats {
@@ -158,7 +159,7 @@ function gradeDelta(avgGrade: number | null, avgGrunnskolepoeng: number | null):
   return avgGrade - avgGrunnskolepoeng
 }
 
-export default function StatsView({ data }: Props) {
+export default function StatsView({ data, threshold }: Props) {
   const [selectedMetric, setSelectedMetric] = useState<MetricKey | null>(null)
   const [tableSort, setTableSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null)
   const [vgFilter, setVgFilter] = useState<string | null>(null)
@@ -326,7 +327,7 @@ export default function StatsView({ data }: Props) {
           else if (t.includes('vurdering') || t.includes('grunnlag')) gWarnings++
         })
 
-      // Missing warnings: absence > 8%, no warnings for that subject (unique student+subject combos)
+      // Missing warnings: absence > threshold%, no warnings for that subject (unique student+subject combos)
       let missingWarnings = 0
       const checkedCombos = new Set<string>()
       const missingWarningStudents = new Set<string>()
@@ -335,7 +336,7 @@ export default function StatsView({ data }: Props) {
         if (checkedCombos.has(comboKey)) return
         checkedCombos.add(comboKey)
         const warnings = warningMap.get(comboKey) ?? []
-        if (r.percentageAbsence > 8 && warnings.length === 0) {
+        if (r.percentageAbsence > threshold && warnings.length === 0) {
           missingWarnings++
           missingWarningStudents.add(normalizeMatch(r.navn))
         }
@@ -442,7 +443,7 @@ export default function StatsView({ data }: Props) {
     }
 
     return { overall, perClass }
-  }, [data])
+  }, [data, threshold])
 
   const levelStats = useMemo((): LevelStats[] => {
     const levels = ['1', '2', '3']
