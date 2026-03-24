@@ -916,8 +916,8 @@ function App() {
                           <AlertTriangle size={15} />
                           Vis manglende varsler
                           {missingWarningsOnly && missingWarningsStats.count > 0 && (
-                            <span className="ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-bold rounded-full bg-orange-500 text-white">
-                              {missingWarningsStats.count} · {missingWarningsStats.teacherCount} lærere
+                            <span className="ml-1 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold rounded-full bg-orange-500 text-white">
+                              {missingWarningsStats.count}
                             </span>
                           )}
                         </span>
