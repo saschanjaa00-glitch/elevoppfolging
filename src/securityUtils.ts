@@ -15,3 +15,14 @@ export function sanitizeCsvCell(value: unknown): string {
   }
   return text
 }
+
+export function sanitizeFilenamePart(value: unknown): string {
+  const sanitized = String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase()
+
+  return sanitized || 'ukjent'
+}

@@ -1,7 +1,15 @@
 import { useMemo } from 'react'
 import type { DataStore } from '../types'
 import { resolveTeacher } from '../teacherUtils'
-import { createStudentInfoLookup, findStudentInfoInLookup, isNorskSubject, normalizeMatch, normalizeSubjectGroupKey } from '../studentInfoUtils'
+import {
+  createAbsenceSubjectClassLookup,
+  createStudentInfoLookup,
+  findStudentInfoInLookup,
+  isNorskSubject,
+  normalizeMatch,
+  normalizeSubjectGroupKey,
+  resolveClassFromSubjectLookup,
+} from '../studentInfoUtils'
 import { compareDateStrings, formatDateDdMmYyyy, warningDateColorClass } from '../dateUtils'
 
 interface StudentDetailProps {
@@ -19,6 +27,10 @@ export default function StudentDetail({
 }: StudentDetailProps) {
   const normalizedSelectedStudent = useMemo(() => normalizeMatch(selectedStudent), [selectedStudent])
   const studentInfoLookup = useMemo(() => createStudentInfoLookup(data.studentInfo), [data.studentInfo])
+  const absenceSubjectClassLookup = useMemo(
+    () => createAbsenceSubjectClassLookup(data.absences),
+    [data.absences]
+  )
 
   const dateColor = (dateStr: string): string => warningDateColorClass(dateStr)
 
@@ -56,6 +68,7 @@ export default function StudentDetail({
   const warningsBySubjectGroup = useMemo(() => {
     const map = new Map<string, Array<{ warningType: string; sentDate: string }>>()
     data.warnings.forEach(w => {
+      if (w.class !== selectedClass) return
       if (normalizeMatch(w.navn) !== normalizedSelectedStudent) return
       const key = normalizeSubjectGroupKey(w.subjectGroup)
       if (!map.has(key)) map.set(key, [])
@@ -69,6 +82,8 @@ export default function StudentDetail({
     const subjectTeacherMap = new Map<string, string>()
 
     data.grades.forEach(g => {
+      const resolvedClass = g.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, g.navn, g.subjectGroup)
+      if (resolvedClass !== selectedClass) return
       if (normalizeMatch(g.navn) !== normalizedSelectedStudent) return
       const key = normalizeSubjectGroupKey(g.subjectGroup)
       if (g.subjectTeacher && !subjectTeacherMap.has(key)) {
@@ -81,7 +96,7 @@ export default function StudentDetail({
     })
 
     return { gradeMap, subjectTeacherMap }
-  }, [data.grades, normalizedSelectedStudent])
+  }, [data.grades, normalizedSelectedStudent, absenceSubjectClassLookup, selectedClass])
 
   const studentInfo = useMemo(
     () => findStudentInfoInLookup(studentInfoLookup, selectedStudent, selectedClass),

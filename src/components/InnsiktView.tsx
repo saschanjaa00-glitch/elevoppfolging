@@ -1,7 +1,12 @@
 import { useMemo, useState, Fragment } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { DataStore } from '../types'
-import { normalizeMatch } from '../studentInfoUtils'
+import {
+  buildStudentClassKey,
+  createAbsenceSubjectClassLookup,
+  normalizeMatch,
+  resolveClassFromSubjectLookup,
+} from '../studentInfoUtils'
 
 interface Props {
   data: DataStore
@@ -50,24 +55,39 @@ export default function InnsiktView({ data, threshold }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [expandedTeacher, setExpandedTeacher] = useState<string | null>(null)
+  const absenceSubjectClassLookup = useMemo(
+    () => createAbsenceSubjectClassLookup(data.absences),
+    [data.absences]
+  )
 
   const normalizedGrades = useMemo(() => {
     return data.grades
-      .map(grade => ({
-        teacher: grade.subjectTeacher?.trim() ?? '',
-        subjectDisplay: grade.subjectGroup?.trim() ?? '',
-        subjectNorm: normalizeMatch(grade.subjectGroup),
-        studentNorm: normalizeMatch(grade.navn),
-        gradeValue: grade.grade.toUpperCase().trim(),
-      }))
-      .filter(grade => grade.teacher && grade.subjectDisplay)
-  }, [data.grades])
+      .map(grade => {
+        const resolvedClass = grade.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, grade.navn, grade.subjectGroup)
+        if (!resolvedClass) return null
+
+        return {
+          teacher: grade.subjectTeacher?.trim() ?? '',
+          subjectDisplay: grade.subjectGroup?.trim() ?? '',
+          subjectNorm: normalizeMatch(grade.subjectGroup),
+          studentKey: buildStudentClassKey(grade.navn, resolvedClass),
+          gradeValue: grade.grade.toUpperCase().trim(),
+        }
+      })
+      .filter((grade): grade is {
+        teacher: string
+        subjectDisplay: string
+        subjectNorm: string
+        studentKey: string
+        gradeValue: string
+      } => Boolean(grade?.teacher && grade.subjectDisplay))
+  }, [data.grades, absenceSubjectClassLookup])
 
   const normalizedWarnings = useMemo(() => {
     return data.warnings
       .map(warning => ({
         warningType: warning.warningType,
-        studentNorm: normalizeMatch(warning.navn),
+        studentKey: buildStudentClassKey(warning.navn, warning.class),
         subjectDisplay: warning.subjectGroup?.trim() ?? '',
       }))
       .filter(warning => warning.subjectDisplay)
@@ -76,7 +96,7 @@ export default function InnsiktView({ data, threshold }: Props) {
   const normalizedAbsences = useMemo(() => {
     return data.absences.map(absence => ({
       percentageAbsence: absence.percentageAbsence,
-      studentNorm: normalizeMatch(absence.navn),
+      studentKey: buildStudentClassKey(absence.navn, absence.class),
       subjectDisplay: absence.subjectGroup,
     }))
   }, [data.absences])
@@ -111,13 +131,13 @@ export default function InnsiktView({ data, threshold }: Props) {
     const subjectStudents = new Map<string, Map<string, Set<string>>>()
     const gradeTeachersByStudentSubject = new Map<string, Set<string>>()
 
-    const studentSubjectKey = (student: string, subject: string) => `${student}|||${normalizeMatch(subject)}`
+    const studentSubjectKey = (studentKey: string, subject: string) => `${studentKey}|||${normalizeMatch(subject)}`
 
     normalizedGrades.forEach(grade => {
       const teacher = grade.teacher
       const subjectDisplay = grade.subjectDisplay
       const subject = grade.subjectNorm
-      const normStudent = grade.studentNorm
+      const studentKey = grade.studentKey
 
       if (!teacherData.has(teacher)) {
         teacherData.set(teacher, {
@@ -135,7 +155,7 @@ export default function InnsiktView({ data, threshold }: Props) {
       if (!teacherStudents.has(teacher)) {
         teacherStudents.set(teacher, new Set())
       }
-      teacherStudents.get(teacher)!.add(normStudent)
+      teacherStudents.get(teacher)!.add(studentKey)
 
       if (!subjectStudents.has(teacher)) {
         subjectStudents.set(teacher, new Map())
@@ -143,9 +163,9 @@ export default function InnsiktView({ data, threshold }: Props) {
       if (!subjectStudents.get(teacher)!.has(subject)) {
         subjectStudents.get(teacher)!.set(subject, new Set())
       }
-      subjectStudents.get(teacher)!.get(subject)!.add(normStudent)
+      subjectStudents.get(teacher)!.get(subject)!.add(studentKey)
 
-      const lookupKey = studentSubjectKey(normStudent, subject)
+      const lookupKey = studentSubjectKey(studentKey, subject)
       if (!gradeTeachersByStudentSubject.has(lookupKey)) {
         gradeTeachersByStudentSubject.set(lookupKey, new Set())
       }
@@ -193,7 +213,7 @@ export default function InnsiktView({ data, threshold }: Props) {
 
     // Map warnings to teacher/subject using vurderinger relationships only.
     normalizedWarnings.forEach(warning => {
-      const warningStudent = warning.studentNorm
+      const warningStudent = warning.studentKey
       const warningSubject = warning.subjectDisplay
 
       const matchedTeachers = gradeTeachersByStudentSubject.get(
@@ -219,14 +239,14 @@ export default function InnsiktView({ data, threshold }: Props) {
     // Missing warnings: absence > threshold%, no warning for student+subjectGroup.
     const warningMap = new Map<string, number>()
     normalizedWarnings.forEach(w => {
-      const key = studentSubjectKey(w.studentNorm, w.subjectDisplay)
+      const key = studentSubjectKey(w.studentKey, w.subjectDisplay)
       warningMap.set(key, (warningMap.get(key) ?? 0) + 1)
     })
 
     const checkedCombos = new Set<string>()
     normalizedAbsences.forEach(a => {
       if (a.percentageAbsence <= threshold) return
-      const comboKey = studentSubjectKey(a.studentNorm, a.subjectDisplay)
+      const comboKey = studentSubjectKey(a.studentKey, a.subjectDisplay)
       if (checkedCombos.has(comboKey)) return
       checkedCombos.add(comboKey)
 

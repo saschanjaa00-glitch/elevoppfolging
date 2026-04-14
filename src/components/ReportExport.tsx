@@ -3,6 +3,7 @@ import { Download } from 'lucide-react'
 import type { DataStore } from '../types'
 import { sanitizeCsvCell } from '../securityUtils'
 import { formatDateDdMmYyyy, todayDdMmYyyy } from '../dateUtils'
+import { buildStudentSubjectKey } from '../studentInfoUtils'
 
 interface ReportExportProps {
   data: DataStore
@@ -12,13 +13,6 @@ export default function ReportExport({ data }: ReportExportProps) {
   const [selectedClasses, setSelectedClasses] = useState<string[]>(
     Array.from(new Set(data.absences.map(a => a.class))).sort()
   )
-
-  const normalizeMatch = (value: string): string =>
-    value
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/\s+/g, '')
 
   const generateCSV = () => {
     const filteredAbsences = data.absences.filter(a =>
@@ -45,9 +39,8 @@ export default function ReportExport({ data }: ReportExportProps) {
     const rows = filteredAbsences.map(absence => {
       const matchingWarnings = data.warnings.filter(
         w =>
-          normalizeMatch(w.navn) === normalizeMatch(absence.navn) &&
-          normalizeMatch(w.subjectGroup) ===
-            normalizeMatch(absence.subjectGroup)
+          buildStudentSubjectKey(w.navn, w.class, w.subjectGroup) ===
+            buildStudentSubjectKey(absence.navn, absence.class, absence.subjectGroup)
       )
 
       const warningTypes = matchingWarnings
@@ -170,10 +163,8 @@ export default function ReportExport({ data }: ReportExportProps) {
                   .map((absence, idx) => {
                     const matched = data.warnings.find(
                       w =>
-                        normalizeMatch(w.navn) ===
-                          normalizeMatch(absence.navn) &&
-                        normalizeMatch(w.subjectGroup) ===
-                          normalizeMatch(absence.subjectGroup)
+                        buildStudentSubjectKey(w.navn, w.class, w.subjectGroup) ===
+                          buildStudentSubjectKey(absence.navn, absence.class, absence.subjectGroup)
                     )
                     return (
                       <tr

@@ -1,7 +1,13 @@
 import { useMemo, useState, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type { DataStore } from '../types'
-import { normalizeMatch } from '../studentInfoUtils'
+import {
+  buildStudentClassKey,
+  buildStudentSubjectKey,
+  createAbsenceSubjectClassLookup,
+  normalizeMatch,
+  resolveClassFromSubjectLookup,
+} from '../studentInfoUtils'
 import { todayDdMmYyyy } from '../dateUtils'
 
 interface Props {
@@ -229,29 +235,34 @@ export default function StatsView({ data, threshold }: Props) {
   }
 
   const stats = useMemo(() => {
+    const absenceSubjectClassLookup = createAbsenceSubjectClassLookup(data.absences)
+
     // Warning map: normalizedNavn::normalizedSubjectGroup -> count by type
     const warningMap = new Map<string, { type: string }[]>()
     data.warnings.forEach(w => {
-      const key = `${normalizeMatch(w.navn)}::${normalizeMatch(w.subjectGroup)}`
+      const key = buildStudentSubjectKey(w.navn, w.class, w.subjectGroup)
       if (!warningMap.has(key)) warningMap.set(key, [])
       warningMap.get(key)!.push({ type: w.warningType })
     })
 
-    // Grade map: normalizedNavn -> grades[] (halvår 1 only)
+    // Grade map: normalizedNavn::normalizedClass -> grades[] (halvår 1 only)
     const gradesByStudent = new Map<string, string[]>()
     data.grades.forEach(g => {
       const h = g.halvår.toString().trim()
       if (h === '1' || h.toLowerCase().includes('1')) {
-        const key = normalizeMatch(g.navn)
+        const resolvedClass = g.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, g.navn, g.subjectGroup)
+        if (!resolvedClass) return
+        const key = buildStudentClassKey(g.navn, resolvedClass)
         if (!gradesByStudent.has(key)) gradesByStudent.set(key, [])
         gradesByStudent.get(key)!.push(g.grade)
       }
     })
 
-    // Intake points map: normalizedNavn -> intakePoints
+    // Intake points map: normalizedNavn::normalizedClass -> intakePoints
     const intakeByStudent = new Map<string, number | null>()
     data.studentInfo.forEach(si => {
-      intakeByStudent.set(normalizeMatch(si.navn), si.intakePoints)
+      if (!si.class) return
+      intakeByStudent.set(buildStudentClassKey(si.navn, si.class), si.intakePoints)
     })
 
     // All unique classes sorted
@@ -263,8 +274,8 @@ export default function StatsView({ data, threshold }: Props) {
 
     const computeClassStats = (absences: typeof data.absences, className: string): ClassStats => {
       // Unique students
-      const studentNames = new Set(absences.map(r => normalizeMatch(r.navn)))
-      const studentCount = studentNames.size
+      const studentKeys = new Set(absences.map(r => buildStudentClassKey(r.navn, r.class)))
+      const studentCount = studentKeys.size
 
       // Avg absence
       const avgAbsence =
@@ -281,8 +292,8 @@ export default function StatsView({ data, threshold }: Props) {
       let grade2StudentCount = 0
       let bothIvAnd1StudentCount = 0
       const numericGrades: number[] = []
-      studentNames.forEach(normNavn => {
-        const grades = gradesByStudent.get(normNavn) ?? []
+      studentKeys.forEach(studentKey => {
+        const grades = gradesByStudent.get(studentKey) ?? []
         let hasIv = false
         let hasGrade1 = false
         let hasGrade2 = false
@@ -332,20 +343,20 @@ export default function StatsView({ data, threshold }: Props) {
       const checkedCombos = new Set<string>()
       const missingWarningStudents = new Set<string>()
       absences.forEach(r => {
-        const comboKey = `${normalizeMatch(r.navn)}::${normalizeMatch(r.subjectGroup)}`
+        const comboKey = buildStudentSubjectKey(r.navn, r.class, r.subjectGroup)
         if (checkedCombos.has(comboKey)) return
         checkedCombos.add(comboKey)
         const warnings = warningMap.get(comboKey) ?? []
         if (r.percentageAbsence > threshold && warnings.length === 0) {
           missingWarnings++
-          missingWarningStudents.add(normalizeMatch(r.navn))
+          missingWarningStudents.add(buildStudentClassKey(r.navn, r.class))
         }
       })
 
       // Grunnskolepoeng
       const gpValues: number[] = []
-      studentNames.forEach(normNavn => {
-        const ip = intakeByStudent.get(normNavn)
+      studentKeys.forEach(studentKey => {
+        const ip = intakeByStudent.get(studentKey)
         if (ip === null || ip === undefined) return
         if (ip > 400 && ip < 500) gpValues.push((ip - 400) / 10)
         else if (ip > 900 && ip < 1000) gpValues.push((ip - 900) / 10)
@@ -409,7 +420,7 @@ export default function StatsView({ data, threshold }: Props) {
 
     const overall: ClassStats = {
       className: 'Totalt',
-      studentCount: new Set(data.absences.map(r => normalizeMatch(r.navn))).size,
+      studentCount: new Set(data.absences.map(r => buildStudentClassKey(r.navn, r.class))).size,
       avgAbsence:
         data.absences.length > 0
           ? data.absences.reduce((s, r) => s + r.percentageAbsence, 0) / data.absences.length
@@ -424,9 +435,9 @@ export default function StatsView({ data, threshold }: Props) {
       negativeStudentsCount:
         overallIvStudentCount + overallGrade1StudentCount - overallBothIvAnd1StudentCount,
       negativeStudentsPct:
-        new Set(data.absences.map(r => normalizeMatch(r.navn))).size > 0
+        new Set(data.absences.map(r => buildStudentClassKey(r.navn, r.class))).size > 0
           ? ((overallIvStudentCount + overallGrade1StudentCount - overallBothIvAnd1StudentCount) /
-              new Set(data.absences.map(r => normalizeMatch(r.navn))).size) *
+              new Set(data.absences.map(r => buildStudentClassKey(r.navn, r.class))).size) *
             100
           : 0,
       totalWarnings: perClass.reduce((s, c) => s + c.totalWarnings, 0),

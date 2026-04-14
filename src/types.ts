@@ -23,7 +23,7 @@ export interface WarningRecord {
   subjectGroup: string
   warningType: string
   sentDate: string
-  dateOfBirth: string
+  isAdult: boolean
 }
 
 export interface StudentInfoRecord {
@@ -31,7 +31,7 @@ export interface StudentInfoRecord {
   fornavn: string
   etternavn: string
   class?: string
-  dateOfBirth?: string
+  isAdult: boolean
   programArea: string
   sidemalExemption: boolean
   intakePoints: number | null
@@ -62,6 +62,7 @@ export interface StudentAbsenceSummary {
 
 export interface GradeRecord {
   navn: string
+  class?: string
   subjectGroup: string
   fagkode: string
   grade: string

@@ -126,6 +126,19 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
     return null
   }
 
+  const isAdultAtImport = (value: unknown): boolean => {
+    const parsed = parseDateCandidate(value)
+    if (!parsed) return false
+
+    const today = new Date()
+    const adultDate = new Date(parsed.getFullYear() + 18, parsed.getMonth(), parsed.getDate())
+    return today >= adultDate
+  }
+
+  const getAdultStatus = (row: Record<string, any>, tokenSets: string[][]): boolean => {
+    return isAdultAtImport(getRawRowValueByTokens(row, tokenSets))
+  }
+
   const getWarningFileCreatedDate = (workbook: XLSX.WorkBook, file: File): string | undefined => {
     const workbookAny = workbook as unknown as {
       Props?: { CreatedDate?: unknown; createdate?: unknown }
@@ -186,6 +199,7 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
     return sheet
       .map(row => ({
         navn: getRowValue(row, ['elev', 'navn', 'student']),
+        class: getRowValue(row, ['klasse', 'klassegruppe', 'class']) || undefined,
         subjectGroup: getRowValue(row, ['gruppe', 'group', 'faggruppe']),
         fagkode: getRowValue(row, ['fagkode']),
         grade: getRowValue(row, ['grade', 'karakter']),
@@ -251,11 +265,11 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
     return sheet
       .map(row => ({
         navn: getRowValue(row, ['elevnavn', 'navn', 'name', 'student']),
-        class: getRowValue(row, ['klasse', 'class']),
+        class: getRowValue(row, ['klasse', 'klassegruppe', 'class']),
         subjectGroup: getRowValue(row, ['faggruppe']),
         warningType: getRowValue(row, ['type varsel', 'varseltype', 'type', 'varselbrev type']),
         sentDate: getDateField(row, [['sendt'], ['sent']]),
-        dateOfBirth: getDateField(row, [['fdselsdato'], ['fodselsdato'], ['birthdate']]),
+        isAdult: getAdultStatus(row, [['fdselsdato'], ['fodselsdato'], ['birthdate']]),
       }))
       .filter(r => r.navn && r.class)
   }
@@ -272,8 +286,8 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
           navn,
           fornavn,
           etternavn,
-          class: getRowValue(row, ['klasse', 'class']),
-          dateOfBirth: getDateField(row, [['fødselsdato'], ['fodselsdato'], ['birthdate'], ['dob']]),
+          class: getRowValue(row, ['klasse', 'klassegruppe', 'class']) || undefined,
+          isAdult: getAdultStatus(row, [['fødselsdato'], ['fodselsdato'], ['birthdate'], ['dob']]),
           programArea: getRowValue(row, ['programområde', 'programomrade', 'program area']),
           sidemalExemption: sidemalValue.toLowerCase().includes('assessment exemption'),
           intakePoints: getNumericField(row, ['inntakspoeng', 'intake points']),

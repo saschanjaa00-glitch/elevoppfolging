@@ -1,4 +1,4 @@
-import type { StudentInfoRecord } from './types'
+import type { AbsenceRecord, StudentInfoRecord } from './types'
 
 export const normalizeMatch = (value: string): string =>
   value
@@ -6,6 +6,54 @@ export const normalizeMatch = (value: string): string =>
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '')
+
+export const buildStudentClassKey = (navn: string, className?: string): string => {
+  const normalizedName = normalizeMatch(navn)
+  const normalizedClass = normalizeMatch(className ?? '')
+  return normalizedClass ? `${normalizedName}::${normalizedClass}` : normalizedName
+}
+
+export const buildStudentSubjectKey = (navn: string, className: string | undefined, subjectGroup: string): string => {
+  const studentKey = buildStudentClassKey(navn, className)
+  const normalizedSubjectGroup = normalizeSubjectGroupKey(subjectGroup)
+  return normalizedSubjectGroup ? `${studentKey}::${normalizedSubjectGroup}` : studentKey
+}
+
+const buildNameSubjectLookupKey = (navn: string, subjectGroup: string): string =>
+  `${normalizeMatch(navn)}::${normalizeSubjectGroupKey(subjectGroup)}`
+
+export const createAbsenceSubjectClassLookup = (
+  absences: Array<Pick<AbsenceRecord, 'navn' | 'class' | 'subjectGroup'>>
+): Map<string, string | null> => {
+  const lookup = new Map<string, string | null>()
+
+  absences.forEach(record => {
+    const key = buildNameSubjectLookupKey(record.navn, record.subjectGroup)
+    const className = record.class?.trim() ?? ''
+    if (!key || !className) return
+
+    const existing = lookup.get(key)
+    if (existing === undefined) {
+      lookup.set(key, className)
+      return
+    }
+
+    if (existing !== null && normalizeMatch(existing) !== normalizeMatch(className)) {
+      lookup.set(key, null)
+    }
+  })
+
+  return lookup
+}
+
+export const resolveClassFromSubjectLookup = (
+  lookup: Map<string, string | null>,
+  navn: string,
+  subjectGroup: string,
+): string | undefined => {
+  const resolved = lookup.get(buildNameSubjectLookupKey(navn, subjectGroup))
+  return resolved ?? undefined
+}
 
 export const normalizeSubjectGroupKey = (value: string): string => {
   const trimmed = (value ?? '').trim()
@@ -50,16 +98,10 @@ export const createStudentInfoLookup = (studentInfo: StudentInfoRecord[]): Map<s
   const lookup = new Map<string, StudentInfoRecord>()
 
   studentInfo.forEach(info => {
-    const normalizedName = normalizeMatch(info.navn)
-    if (!normalizedName) return
-
-    if (!lookup.has(normalizedName)) {
-      lookup.set(normalizedName, info)
-    }
-
-    if (info.class) {
-      lookup.set(`${normalizedName}::${normalizeMatch(info.class)}`, info)
-    }
+    if (!info.class) return
+    const classKey = buildStudentClassKey(info.navn, info.class)
+    if (!classKey) return
+    lookup.set(classKey, info)
   })
 
   return lookup
@@ -70,9 +112,7 @@ export const findStudentInfoInLookup = (
   navn: string,
   className?: string
 ): StudentInfoRecord | undefined => {
-  const normalizedName = normalizeMatch(navn)
-  const byClass = className ? lookup.get(`${normalizedName}::${normalizeMatch(className)}`) : undefined
-  return byClass ?? lookup.get(normalizedName)
+  return className ? lookup.get(buildStudentClassKey(navn, className)) : undefined
 }
 
 export const formatIntakePoints = (intakePoints: number | null): {

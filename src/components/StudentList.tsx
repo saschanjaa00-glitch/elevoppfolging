@@ -3,8 +3,22 @@ import type { DataStore, PresetRecord, StudentAbsenceSummary } from '../types'
 import { Eye, X, Printer, FileText, Table } from 'lucide-react'
 import StudentDetail from './StudentDetail'
 import { resolveTeacher } from '../teacherUtils'
-import { createStudentInfoLookup, findStudentInfoInLookup, formatIntakePoints, getDisplayClassName, hasTalentProgramTag, isNorskSubject, normalizeMatch, normalizeSubjectGroupKey } from '../studentInfoUtils'
+import {
+  buildStudentClassKey,
+  buildStudentSubjectKey,
+  createAbsenceSubjectClassLookup,
+  createStudentInfoLookup,
+  findStudentInfoInLookup,
+  formatIntakePoints,
+  getDisplayClassName,
+  hasTalentProgramTag,
+  isNorskSubject,
+  normalizeMatch,
+  normalizeSubjectGroupKey,
+  resolveClassFromSubjectLookup,
+} from '../studentInfoUtils'
 import { compareDateStrings, formatDateDdMmYyyy, todayDdMmYyyy, warningDateColorClass } from '../dateUtils'
+import { sanitizeFilenamePart } from '../securityUtils'
 
 interface StudentListProps {
   data: DataStore
@@ -15,6 +29,7 @@ interface StudentListProps {
   faglaererSearch: string
   missingWarningsOnly: boolean
   lowGradeFilter: string[]
+  filterLogic?: 'og' | 'eller'
   fullRapport: boolean
   fullRapportInclude2: boolean
   noFilter: boolean
@@ -42,6 +57,17 @@ const loadExcelJs = async () => {
   return excelJsModulePromise
 }
 
+const exportTimestamp = (): string => {
+  const now = new Date()
+  const hh = String(now.getHours()).padStart(2, '0')
+  const mm = String(now.getMinutes()).padStart(2, '0')
+  const ss = String(now.getSeconds()).padStart(2, '0')
+  return `${todayDdMmYyyy()}_${hh}${mm}${ss}`
+}
+
+const buildSingleStudentExportName = (className: string, extension: 'pdf' | 'docx'): string =>
+  `oppfolgingsark_klasse-${sanitizeFilenamePart(className)}_${exportTimestamp()}.${extension}`
+
 export default function StudentList({
   data,
   selectedClasses,
@@ -51,6 +77,7 @@ export default function StudentList({
   faglaererSearch,
   missingWarningsOnly,
   lowGradeFilter,
+  filterLogic = 'eller',
   fullRapport,
   fullRapportInclude2,
   noFilter,
@@ -66,17 +93,23 @@ export default function StudentList({
     [data.absences, selectedClassSet]
   )
   const studentInfoLookup = useMemo(() => createStudentInfoLookup(data.studentInfo), [data.studentInfo])
+  const absenceSubjectClassLookup = useMemo(
+    () => createAbsenceSubjectClassLookup(data.absences),
+    [data.absences]
+  )
   const warningLookup = useMemo(() => {
     const warningMap = new Map<string, Array<{ warningType: string; sentDate: string }>>()
-    const studentDobMap = new Map<string, string>()
+    const studentAdultMap = new Map<string, boolean>()
     data.warnings.forEach(warning => {
-      const studentNorm = normalizeMatch(warning.navn)
-      const key = `${studentNorm}::${normalizeSubjectGroupKey(warning.subjectGroup)}`
+      const key = buildStudentSubjectKey(warning.navn, warning.class, warning.subjectGroup)
       if (!warningMap.has(key)) warningMap.set(key, [])
       warningMap.get(key)!.push({ warningType: warning.warningType, sentDate: warning.sentDate })
-      if (warning.dateOfBirth) studentDobMap.set(studentNorm, warning.dateOfBirth)
+      const studentKey = buildStudentClassKey(warning.navn, warning.class)
+      if (!studentAdultMap.has(studentKey) || warning.isAdult) {
+        studentAdultMap.set(studentKey, warning.isAdult)
+      }
     })
-    return { warningMap, studentDobMap }
+    return { warningMap, studentAdultMap }
   }, [data.warnings])
 
   const gradeLookup = useMemo(() => {
@@ -85,13 +118,15 @@ export default function StudentList({
     data.grades.forEach(g => {
       const halvar = g.halvår.toString().trim()
       if (halvar === '1' || halvar.toLowerCase().includes('1')) {
-        const key = `${normalizeMatch(g.navn)}::${normalizeSubjectGroupKey(g.subjectGroup)}`
+        const resolvedClass = g.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, g.navn, g.subjectGroup)
+        if (!resolvedClass) return
+        const key = buildStudentSubjectKey(g.navn, resolvedClass, g.subjectGroup)
         if (!gradeMap.has(key)) gradeMap.set(key, g.grade)
         if (g.subjectTeacher && !subjectTeacherMap.has(key)) subjectTeacherMap.set(key, g.subjectTeacher)
       }
     })
     return { gradeMap, subjectTeacherMap }
-  }, [data.grades])
+  }, [data.grades, absenceSubjectClassLookup])
 
   const presetRoleMappings = useMemo(() => {
     const result: Record<string, Record<string, string[]>> = {}
@@ -174,7 +209,7 @@ export default function StudentList({
   }
 
   const studentSummaries = useMemo(() => {
-    const { warningMap, studentDobMap } = warningLookup
+    const { warningMap, studentAdultMap } = warningLookup
     const { gradeMap, subjectTeacherMap } = gradeLookup
     const classDataByStudent = new Map<string, typeof classData>()
 
@@ -192,48 +227,12 @@ export default function StudentList({
       const matchesFullRapportGrade = grade !== undefined && effectiveLowGradeSet.has(grade.toUpperCase())
 
       if (fullRapport) return overThreshold || matchesFullRapportGrade
-      if (lowGradeFilter.length > 0) return overThreshold || matchesSelectedGrade
+      if (lowGradeFilter.length > 0) {
+        return filterLogic === 'og'
+          ? overThreshold && matchesSelectedGrade
+          : overThreshold || matchesSelectedGrade
+      }
       return overThreshold
-    }
-
-    const ageCache = new Map<string, boolean>()
-    const parseDob = (dobStr: string): Date | null => {
-      const value = dobStr.trim()
-      if (!value) return null
-
-      // dd.mm.yyyy / dd-mm-yyyy / dd/mm/yyyy
-      const dmy = value.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/)
-      if (dmy) {
-        const d = new Date(parseInt(dmy[3], 10), parseInt(dmy[2], 10) - 1, parseInt(dmy[1], 10))
-        return isNaN(d.getTime()) ? null : d
-      }
-
-      // yyyy-mm-dd / yyyy/mm/dd (optionally with a time part)
-      const iso = value.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})(?:[ T].*)?$/)
-      if (iso) {
-        const d = new Date(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10))
-        return isNaN(d.getTime()) ? null : d
-      }
-
-      const parsed = new Date(value)
-      return isNaN(parsed.getTime()) ? null : parsed
-    }
-
-    const isOver18 = (dobStr: string): boolean => {
-      if (!dobStr) return false
-      const cached = ageCache.get(dobStr)
-      if (cached !== undefined) return cached
-
-      const dob = parseDob(dobStr)
-      if (!dob) {
-        ageCache.set(dobStr, false)
-        return false
-      }
-
-      const now = new Date()
-      const result = now >= new Date(dob.getFullYear() + 18, dob.getMonth(), dob.getDate())
-      ageCache.set(dobStr, result)
-      return result
     }
 
     const summaryMap = new Map<string, StudentAbsenceSummary>()
@@ -242,21 +241,20 @@ export default function StudentList({
 
     classData.forEach(record => {
       const studentNorm = normalizeMatch(record.navn)
-      const subjectGroupKey = normalizeSubjectGroupKey(record.subjectGroup)
       const key = `${record.class}::${record.navn}`
-      const warningKey = `${studentNorm}::${subjectGroupKey}`
+      const warningKey = buildStudentSubjectKey(record.navn, record.class, record.subjectGroup)
       const warnings = warningMap.get(warningKey) ?? []
       const hasSubjectWarning = warnings.length > 0
       const grade = gradeMap.get(warningKey)
       const subjectTeacher = subjectTeacherMap.get(warningKey) ?? record.teacher
       const includeSubject = shouldIncludeSubject(record.percentageAbsence, grade)
 
-      const studentInfoKey = `${record.class}::${studentNorm}`
+      const studentInfoKey = buildStudentClassKey(record.navn, record.class)
       if (!studentInfoCache.has(studentInfoKey)) {
         studentInfoCache.set(studentInfoKey, findStudentInfoInLookup(studentInfoLookup, record.navn, record.class))
       }
       const matchedStudentInfo = studentInfoCache.get(studentInfoKey)
-      const dobStr = matchedStudentInfo?.dateOfBirth ?? studentDobMap.get(studentNorm) ?? ''
+      const isAdult = matchedStudentInfo?.isAdult ?? studentAdultMap.get(studentInfoKey) ?? false
 
       if (!classDataByStudent.has(studentNorm)) classDataByStudent.set(studentNorm, [])
       classDataByStudent.get(studentNorm)!.push(record)
@@ -278,7 +276,7 @@ export default function StudentList({
             : [],
           avbrudd: record.avbrudd,
           hasWarnings: includeSubject ? hasSubjectWarning : false,
-          isAdult: isOver18(dobStr),
+          isAdult,
           programArea: matchedStudentInfo?.programArea,
           sidemalExemption: matchedStudentInfo?.sidemalExemption ?? false,
           intakePoints: matchedStudentInfo?.intakePoints ?? null,
@@ -299,7 +297,7 @@ export default function StudentList({
         }
 
         summary.avbrudd = summary.avbrudd || record.avbrudd
-        if (!summary.isAdult && dobStr) summary.isAdult = isOver18(dobStr)
+        if (!summary.isAdult && isAdult) summary.isAdult = true
         if (!summary.programArea && matchedStudentInfo?.programArea) {
           summary.programArea = matchedStudentInfo.programArea
           summary.sidemalExemption = matchedStudentInfo.sidemalExemption
@@ -346,7 +344,7 @@ export default function StudentList({
 
       requiredCodes.forEach(code => {
         const codeKey = normalizeSubjectGroupKey(code)
-        const gradeKey = `${studentNorm}::${codeKey}`
+        const gradeKey = buildStudentSubjectKey(summary.navn, summary.className, code)
         const grade = gradeMap.get(gradeKey)
         if (!grade) return
 
@@ -355,7 +353,11 @@ export default function StudentList({
 
         let includeSubject = noFilter
         if (!noFilter && fullRapport) includeSubject = matchesFullRapportGrade
-        else if (!noFilter && lowGradeFilter.length > 0) includeSubject = matchesSelectedGrade
+        else if (!noFilter && lowGradeFilter.length > 0) {
+          includeSubject = filterLogic === 'og'
+            ? matchesSelectedGrade && sourceAbsencePercentage > threshold
+            : matchesSelectedGrade
+        }
         if (!includeSubject) return
 
         const alreadyExists = summary.subjects.some(
@@ -382,7 +384,7 @@ export default function StudentList({
     })
 
     return Array.from(summaryMap.values())
-  }, [classData, warningLookup, gradeLookup, threshold, lowGradeFilter, fullRapport, fullRapportInclude2, noFilter, studentInfoLookup])
+  }, [classData, warningLookup, gradeLookup, threshold, lowGradeFilter, filterLogic, fullRapport, fullRapportInclude2, noFilter, studentInfoLookup])
 
   const kontaktlaererByStudentKey = useMemo(() => {
     const explicitMap = new Map<string, string>()
@@ -887,7 +889,7 @@ export default function StudentList({
     const warningMap = new Map<string, Array<{ warningType: string; sentDate: string }>>()
 
     data.warnings.forEach(w => {
-      const key = `${normalizeMatch(w.navn)}::${normalizeSubjectGroupKey(w.subjectGroup)}`
+      const key = buildStudentSubjectKey(w.navn, w.class, w.subjectGroup)
       if (!warningMap.has(key)) warningMap.set(key, [])
       warningMap.get(key)!.push({ warningType: w.warningType, sentDate: w.sentDate })
     })
@@ -896,7 +898,9 @@ export default function StudentList({
     const gradeTeacherMap = new Map<string, string>()
     data.grades.forEach(g => {
       if (!g.subjectTeacher) return
-      const key = `${normalizeMatch(g.navn)}::${normalizeSubjectGroupKey(g.subjectGroup)}`
+      const resolvedClass = g.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, g.navn, g.subjectGroup)
+      if (!resolvedClass) return
+      const key = buildStudentSubjectKey(g.navn, resolvedClass, g.subjectGroup)
       if (!gradeTeacherMap.has(key)) gradeTeacherMap.set(key, g.subjectTeacher)
     })
 
@@ -907,7 +911,7 @@ export default function StudentList({
       .forEach(record => {
         const studentNorm = normalizeMatch(record.navn)
         const subjectGroupNorm = normalizeSubjectGroupKey(record.subjectGroup)
-        const warningKey = `${studentNorm}::${subjectGroupNorm}`
+        const warningKey = buildStudentSubjectKey(record.navn, record.class, record.subjectGroup)
         const warnings = warningMap.get(warningKey) ?? []
 
         const hasFravaerWarning = warnings.some(w => w.warningType.toLowerCase().includes('frav'))
@@ -925,7 +929,7 @@ export default function StudentList({
           : null
 
         // Prefer faglærer from vurderinger file; fall back to absence file teacher
-        const gradeTeacher = gradeTeacherMap.get(`${studentNorm}::${subjectGroupNorm}`)
+        const gradeTeacher = gradeTeacherMap.get(buildStudentSubjectKey(record.navn, record.class, record.subjectGroup))
         const resolvedTeacher = resolveTeacher(record.subject, gradeTeacher ?? record.teacher ?? '').trim() || 'Ukjent'
 
         const dedupKey = `${studentNorm}::${subjectGroupNorm}::${normalizeMatch(resolvedTeacher)}`
@@ -1469,14 +1473,14 @@ export default function StudentList({
     const notesBoxH = 48 - 12
     doc.rect(marginX + 3, notesBoxY, usableW - 6, notesBoxH)
     addMultilineField(
-      `oppfolging_${student.className}_${student.navn.replace(/\s+/g, '_')}_andre_notater`,
+      `oppfolging_${sanitizeFilenamePart(student.className)}_andre_notater`,
       marginX + 3,
       notesBoxY,
       usableW - 6,
       notesBoxH
     )
 
-    doc.save(`oppfolgingsark_${student.className}_${student.navn.replace(/\s+/g, '_')}_${todayDdMmYyyy()}.pdf`)
+    doc.save(buildSingleStudentExportName(student.className, 'pdf'))
   }
 
   const getAllSubjectEntries = (student: StudentAbsenceSummary) => {
@@ -1498,6 +1502,8 @@ export default function StudentList({
     data.grades
       .filter(g => normalizeMatch(g.navn) === normalizeMatch(student.navn))
       .forEach(g => {
+        const resolvedClass = g.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, g.navn, g.subjectGroup)
+        if (resolvedClass !== student.className) return
         const key = normalizeSubjectGroupKey(g.subjectGroup)
         if (g.subjectTeacher && key && !subjectTeacherMap.has(key)) {
           subjectTeacherMap.set(key, g.subjectTeacher)
@@ -1506,7 +1512,7 @@ export default function StudentList({
 
     const studentWarningMap = new Map<string, Array<{ warningType: string; sentDate: string }>>()
     data.warnings
-      .filter(w => normalizeMatch(w.navn) === normalizeMatch(student.navn))
+      .filter(w => normalizeMatch(w.navn) === normalizeMatch(student.navn) && w.class === student.className)
       .forEach(w => {
         const key = normalizeSubjectGroupKey(w.subjectGroup)
         if (!studentWarningMap.has(key)) studentWarningMap.set(key, [])
@@ -1517,6 +1523,8 @@ export default function StudentList({
     data.grades
       .filter(g => normalizeMatch(g.navn) === normalizeMatch(student.navn))
       .forEach(g => {
+        const resolvedClass = g.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, g.navn, g.subjectGroup)
+        if (resolvedClass !== student.className) return
         const halvar = g.halvår.toString().trim().toLowerCase()
         if (halvar === '1' || halvar.includes('1')) {
           const key = normalizeSubjectGroupKey(g.subjectGroup)
@@ -1682,7 +1690,7 @@ export default function StudentList({
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `oppfolgingsark_${student.className}_${student.navn.replace(/\s+/g, '_')}_${todayDdMmYyyy()}.docx`
+    a.download = buildSingleStudentExportName(student.className, 'docx')
     a.click()
     URL.revokeObjectURL(url)
   }

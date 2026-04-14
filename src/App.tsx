@@ -1,7 +1,17 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, AlertCircle } from 'lucide-react'
 import { resolveTeacher } from './teacherUtils'
-import { createStudentInfoLookup, findStudentInfoInLookup, getDisplayClassName, isNorskSubject, normalizeMatch, normalizeSubjectGroupKey } from './studentInfoUtils'
+import {
+  buildStudentSubjectKey,
+  createAbsenceSubjectClassLookup,
+  createStudentInfoLookup,
+  findStudentInfoInLookup,
+  getDisplayClassName,
+  isNorskSubject,
+  normalizeMatch,
+  normalizeSubjectGroupKey,
+  resolveClassFromSubjectLookup,
+} from './studentInfoUtils'
 import { compareDateStrings, formatDateDdMmYyyy, todayDdMmYyyy } from './dateUtils'
 import FileUpload from './components/FileUpload'
 import ClassSelector from './components/ClassSelector'
@@ -18,6 +28,8 @@ const InnsiktView = lazy(loadInnsiktView)
 const FaginnsiktView = lazy(loadFaginnsiktView)
 
 type AppTab = 'elever' | 'statistikk' | 'faginnsikt' | 'innsikt'
+
+const IDLE_TIMEOUT_MS = 45 * 60 * 1000
 
 const TAB_PREFETCH_ORDER: Record<AppTab, Array<{ key: string; load: () => Promise<unknown> }>> = {
   elever: [
@@ -58,8 +70,10 @@ function App() {
   const [faglaererSearch, setFaglaererSearch] = useState<string>('')
   const [missingWarningsOnly, setMissingWarningsOnly] = useState<boolean>(false)
   const [lowGradeFilter, setLowGradeFilter] = useState<string[]>(['IV', '1', '2'])
+  const [filterLogic, setFilterLogic] = useState<'og' | 'eller'>('eller')
   const [fullRapport, setFullRapport] = useState<boolean>(false)
   const [fullRapportInclude2, setFullRapportInclude2] = useState<boolean>(false)
+  const [idleRemainingMs, setIdleRemainingMs] = useState<number>(IDLE_TIMEOUT_MS)
   const [preOverrideFilters, setPreOverrideFilters] = useState<{
     studentSearch: string
     lowGradeFilter: string[]
@@ -67,6 +81,24 @@ function App() {
     fullRapportInclude2: boolean
   } | null>(null)
   const studentInfoLookup = useMemo(() => createStudentInfoLookup(data.studentInfo), [data.studentInfo])
+  const absenceSubjectClassLookup = useMemo(
+    () => createAbsenceSubjectClassLookup(data.absences),
+    [data.absences]
+  )
+  const idleDeadlineRef = useRef<number | null>(null)
+
+  const clearImportedData = () => {
+    setData({ absences: [], warnings: [], grades: [], studentInfo: [] })
+    setSelectedClasses([])
+    setActiveTab('elever')
+    setStudentSearch('')
+    setKontaktlaererSearch('')
+    setFaglaererSearch('')
+    setMissingWarningsOnly(false)
+    setPreOverrideFilters(null)
+    setIdleRemainingMs(IDLE_TIMEOUT_MS)
+    idleDeadlineRef.current = null
+  }
 
   const handleDataImport = (importedData: DataStore) => {
     setData(importedData)
@@ -78,6 +110,12 @@ function App() {
   const isNameSearchActive = studentSearch.trim().length > 0
   const filtersDisabled = isNameSearchActive || noFilter
   const prefetchedChunks = useRef<Set<string>>(new Set())
+  const idleCountdownLabel = useMemo(() => {
+    const totalSeconds = Math.max(0, Math.ceil(idleRemainingMs / 1000))
+    const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0')
+    const seconds = String(totalSeconds % 60).padStart(2, '0')
+    return `${minutes}:${seconds}`
+  }, [idleRemainingMs])
 
   const effectiveThreshold = isNameSearchActive ? 0 : (thresholdEnabled ? absenceThreshold : 0)
 
@@ -86,7 +124,7 @@ function App() {
     const selectedSet = new Set(selectedClasses)
     const warningMap = new Map<string, number>()
     data.warnings.forEach(w => {
-      const key = `${normalizeMatch(w.navn)}::${normalizeSubjectGroupKey(w.subjectGroup)}`
+      const key = buildStudentSubjectKey(w.navn, w.class, w.subjectGroup)
       warningMap.set(key, (warningMap.get(key) ?? 0) + 1)
     })
     let count = 0
@@ -94,7 +132,7 @@ function App() {
     const seen = new Set<string>()
     data.absences.forEach(r => {
       if (!selectedSet.has(r.class)) return
-      const comboKey = `${normalizeMatch(r.navn)}::${normalizeSubjectGroupKey(r.subjectGroup)}`
+      const comboKey = buildStudentSubjectKey(r.navn, r.class, r.subjectGroup)
       if (seen.has(comboKey)) return
       seen.add(comboKey)
       if (r.percentageAbsence > effectiveThreshold && !(warningMap.get(comboKey) ?? 0)) {
@@ -210,6 +248,54 @@ function App() {
     }
   }, [activeTab, hasData])
 
+  useEffect(() => {
+    if (!hasData) {
+      idleDeadlineRef.current = null
+      setIdleRemainingMs(IDLE_TIMEOUT_MS)
+      return
+    }
+
+    const resetIdleDeadline = () => {
+      idleDeadlineRef.current = Date.now() + IDLE_TIMEOUT_MS
+    }
+
+    const updateRemaining = () => {
+      const deadline = idleDeadlineRef.current
+      if (!deadline) return
+
+      const remaining = Math.max(0, deadline - Date.now())
+      setIdleRemainingMs(remaining)
+
+      if (remaining === 0) {
+        clearImportedData()
+      }
+    }
+
+    resetIdleDeadline()
+    setIdleRemainingMs(IDLE_TIMEOUT_MS)
+
+    const activityEvents: Array<keyof WindowEventMap> = [
+      'pointerdown',
+      'keydown',
+      'scroll',
+      'touchstart',
+      'mousemove',
+    ]
+
+    activityEvents.forEach(eventName => {
+      window.addEventListener(eventName, resetIdleDeadline, { passive: true })
+    })
+
+    const intervalId = window.setInterval(updateRemaining, 1000)
+
+    return () => {
+      activityEvents.forEach(eventName => {
+        window.removeEventListener(eventName, resetIdleDeadline)
+      })
+      window.clearInterval(intervalId)
+    }
+  }, [hasData])
+
   const ownerForClass = (className: string, mapping: Record<string, string[]>) => {
     const found = Object.entries(mapping).find(([, classes]) => classes.includes(className))
     return found?.[0] ?? 'Ukjent'
@@ -277,6 +363,8 @@ function App() {
     data.grades
       .filter(g => normalizeMatch(g.navn) === normalizeMatch(navn))
       .forEach(g => {
+        const resolvedClass = g.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, g.navn, g.subjectGroup)
+        if (resolvedClass !== className) return
         const subjectKey = normalizeSubjectGroupKey(g.subjectGroup)
         if (g.subjectTeacher && subjectKey && !subjectTeacherMap.has(subjectKey)) {
           subjectTeacherMap.set(subjectKey, g.subjectTeacher)
@@ -289,7 +377,7 @@ function App() {
 
     const warningMap = new Map<string, Array<{ warningType: string; sentDate: string }>>()
     data.warnings
-      .filter(w => normalizeMatch(w.navn) === normalizeMatch(navn))
+      .filter(w => normalizeMatch(w.navn) === normalizeMatch(navn) && w.class === className)
       .forEach(w => {
         const key = normalizeSubjectGroupKey(w.subjectGroup)
         if (!warningMap.has(key)) warningMap.set(key, [])
@@ -609,9 +697,16 @@ function App() {
               </div>
               <h1 className="text-2xl font-bold text-slate-900">Oppfølging</h1>
             </div>
-            <p className="text-sm text-slate-600">
-              Fraværs- og oppfølgingsverktøy for elever
-            </p>
+            <div className="text-right">
+              <p className="text-sm text-slate-600">
+                Fraværs- og oppfølgingsverktøy for elever
+              </p>
+              {hasData && (
+                <p className="text-xs font-medium text-slate-500 mt-1">
+                  Autotømmer ved inaktivitet om {idleCountdownLabel}
+                </p>
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -665,10 +760,7 @@ function App() {
                 Lærerinnsikt
               </button>
               <button
-                onClick={() => {
-                  setData({ absences: [], warnings: [], grades: [], studentInfo: [] })
-                  setSelectedClasses([])
-                }}
+                onClick={clearImportedData}
                 className="ml-auto px-4 py-2 text-slate-600 hover:text-slate-900 font-medium transition-colors"
               >
                 Last opp nye filer
@@ -851,6 +943,30 @@ function App() {
                       </div>
 
                       <div className={data.grades.length === 0 || filtersDisabled ? 'opacity-40 pointer-events-none' : ''}>
+                        <label className="block text-sm font-medium text-slate-900 mb-2">
+                          Filterlogikk
+                        </label>
+                        <div className={`flex rounded-lg border border-slate-300 overflow-hidden text-sm font-medium ${!thresholdEnabled || lowGradeFilter.length === 0 ? 'opacity-40 pointer-events-none' : ''}`}>
+                          <button
+                            type="button"
+                            onClick={() => setFilterLogic('eller')}
+                            disabled={data.grades.length === 0 || filtersDisabled}
+                            className={`px-3 py-2 transition-colors ${filterLogic === 'eller' ? 'bg-sky-600 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
+                          >
+                            ELLER
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFilterLogic('og')}
+                            disabled={data.grades.length === 0 || filtersDisabled}
+                            className={`px-3 py-2 border-l border-slate-300 transition-colors ${filterLogic === 'og' ? 'bg-sky-600 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
+                          >
+                            OG
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className={data.grades.length === 0 || filtersDisabled ? 'opacity-40 pointer-events-none' : ''}>
                         <label className={`block text-sm font-medium mb-2 ${fullRapport ? 'text-slate-400' : 'text-slate-900'}`}>
                           Karakter
                           {data.grades.length === 0 && <span className="ml-2 text-xs font-normal text-slate-500">(ingen karakterfil importert)</span>}
@@ -936,6 +1052,7 @@ function App() {
                       faglaererSearch={faglaererSearch}
                       missingWarningsOnly={isNameSearchActive ? false : missingWarningsOnly}
                       lowGradeFilter={isNameSearchActive ? [] : lowGradeFilter}
+                      filterLogic={filterLogic}
                       fullRapport={isNameSearchActive ? false : fullRapport}
                       fullRapportInclude2={isNameSearchActive ? false : fullRapportInclude2}
                       noFilter={isNameSearchActive ? true : noFilter}
