@@ -1,6 +1,6 @@
-import { useDeferredValue, useMemo, useState } from 'react'
+import { useEffect, useDeferredValue, useMemo, useRef, useState } from 'react'
 import type { DataStore, PresetRecord, StudentAbsenceSummary } from '../types'
-import { Eye, X, Printer, FileText, Table } from 'lucide-react'
+import { Eye, X, Printer, FileText } from 'lucide-react'
 import StudentDetail from './StudentDetail'
 import { resolveTeacher } from '../teacherUtils'
 import {
@@ -36,6 +36,8 @@ interface StudentListProps {
   fullRapportInclude2: boolean
   noFilter: boolean
   presets?: PresetRecord[]
+  oversiktModalOpen?: boolean
+  onOversiktModalClose?: () => void
 }
 
 const LOW_GRADES = ['IV', '1', '2']
@@ -86,10 +88,22 @@ export default function StudentList({
   fullRapportInclude2,
   noFilter,
   presets = [],
+  oversiktModalOpen = false,
+  onOversiktModalClose,
 }: StudentListProps) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [showPdfMenu, setShowPdfMenu] = useState(false)
   const [showMissingWarningsMenu, setShowMissingWarningsMenu] = useState(false)
+  const [showOversiktModal, setShowOversiktModal] = useState(false)
+
+  // Sync external open trigger
+  const prevOversiktModalOpen = useRef(false)
+  useEffect(() => {
+    if (oversiktModalOpen && !prevOversiktModalOpen.current) {
+      setShowOversiktModal(true)
+    }
+    prevOversiktModalOpen.current = oversiktModalOpen
+  }, [oversiktModalOpen])
   const deferredStudentSearch = useDeferredValue(studentSearch)
   const selectedClassSet = useMemo(() => new Set(selectedClasses), [selectedClasses])
   const classData = useMemo(
@@ -1140,7 +1154,203 @@ export default function StudentList({
     URL.revokeObjectURL(url)
   }
 
-  const generateOppfolgingsoversikt = async () => {
+  const generateExcelOversikt = async () => {
+    const ExcelJS = await loadExcelJs()
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('Excelliste')
+
+    // Trinnleder dropdown
+    const trinnlederMapping = presetRoleMappings['Trinnleder'] ?? {}
+    const trinnlederNames = Object.keys(trinnlederMapping).sort((a, b) => a.localeCompare(b, 'nb-NO'))
+    const trinnlederListStr = trinnlederNames.length > 0 ? `"${trinnlederNames.join(',')}"` : '"Ukjent"'
+
+    const headers = [
+      'Elevnavn',
+      'Klasse',
+      'Kontaktlærer',
+      'Fag',
+      'Faglærer',
+      'Fravær %',
+      'Varslet fravær?',
+      'Varsler fravær',
+      'Varslet grunnlag?',
+      'Varsler grunnlag',
+      'Karakter T1',
+      'Fare for IV',
+      'Fare for 1',
+      'Oppfølgingsansv.',
+      'Kommentar trinnleder',
+      'Bestått',
+    ]
+
+    const headerRow = sheet.addRow(headers)
+    headerRow.height = 28
+    headerRow.eachCell(cell => {
+      cell.font = { bold: true, size: 10, name: 'Calibri', color: { argb: 'FFFFFFFF' } }
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } }
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFD0D5DD' } },
+        bottom: { style: 'thin', color: { argb: 'FFD0D5DD' } },
+        left: { style: 'thin', color: { argb: 'FFD0D5DD' } },
+        right: { style: 'thin', color: { argb: 'FFD0D5DD' } },
+      }
+    })
+
+    sheet.getColumn(1).width = 30  // Elevnavn
+    sheet.getColumn(2).width = 10  // Klasse
+    sheet.getColumn(3).width = 26  // Kontaktlærer
+    sheet.getColumn(4).width = 28  // Fag
+    sheet.getColumn(5).width = 26  // Faglærer
+    sheet.getColumn(6).width = 12  // Fravær %
+    sheet.getColumn(7).width = 16  // Varslet fravær?
+    sheet.getColumn(8).width = 22  // Varsler fravær datoer
+    sheet.getColumn(9).width = 18  // Varslet grunnlag?
+    sheet.getColumn(10).width = 22 // Varsler grunnlag datoer
+    sheet.getColumn(11).width = 14 // Karakter T1
+    sheet.getColumn(12).width = 12 // Fare for IV
+    sheet.getColumn(13).width = 12 // Fare for 1
+    sheet.getColumn(14).width = 22 // Oppfølgingsansv.
+    sheet.getColumn(15).width = 38 // Kommentar trinnleder
+    sheet.getColumn(16).width = 12 // Bestått
+
+    let rowIndex = 2
+    atRiskStudents.forEach(student => {
+      const kontaktlaerer = getKontaktlaererForStudent(student)
+      student.subjects.forEach(sub => {
+        const teacher = resolveTeacher(sub.subject, sub.teacher ?? '').trim()
+        const fravaerVarsler = sub.warnings
+          .filter(w => w.warningType.toLowerCase().includes('frav'))
+          .map(w => w.sentDate)
+          .join(', ')
+        const grunnlagVarsler = sub.warnings
+          .filter(w => { const l = w.warningType.toLowerCase(); return l.includes('vurdering') || l.includes('grunnlag') })
+          .map(w => w.sentDate)
+          .join(', ')
+        const gradeKey = buildStudentSubjectKey(student.navn, student.className, sub.subjectGroup)
+        const grade = gradeLookup.gradeMap.get(gradeKey) ?? ''
+
+        const dataRow = sheet.addRow([
+          student.navn,
+          student.className,
+          kontaktlaerer,
+          sub.subject,
+          teacher,
+          sub.percentageAbsence,
+          fravaerVarsler ? 'Ja' : 'Nei',
+          fravaerVarsler,
+          grunnlagVarsler ? 'Ja' : 'Nei',
+          grunnlagVarsler,
+          grade,
+          '', // Fare for IV
+          '', // Fare for 1
+          '', // Oppfølgingsansv.
+          '', // Kommentar trinnleder
+          '', // Bestått
+        ])
+        dataRow.height = 18
+        dataRow.eachCell(cell => {
+          cell.font = { size: 10, name: 'Calibri' }
+          cell.alignment = { vertical: 'middle' }
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          }
+        })
+        // Format absence % cell
+        const absCell = sheet.getCell(rowIndex, 6)
+        absCell.numFmt = '0.0"%"'
+        // Color Ja/Nei cells
+        const fravaerJaNei = sheet.getCell(rowIndex, 7)
+        fravaerJaNei.font = { size: 10, name: 'Calibri', bold: true, color: { argb: fravaerVarsler ? 'FF166534' : 'FF991B1B' } }
+        const grunnlagJaNei = sheet.getCell(rowIndex, 9)
+        grunnlagJaNei.font = { size: 10, name: 'Calibri', bold: true, color: { argb: grunnlagVarsler ? 'FF166534' : 'FF991B1B' } }
+        if (sub.percentageAbsence >= 15) {
+          absCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } }
+          absCell.font = { size: 10, name: 'Calibri', color: { argb: 'FF9C0006' } }
+        } else if (sub.percentageAbsence >= 7.5) {
+          absCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } }
+          absCell.font = { size: 10, name: 'Calibri', color: { argb: 'FF7F6003' } }
+        }
+        // Dropdowns for Fare for IV, Fare for 1, Oppfølgingsansv.
+        sheet.getCell(rowIndex, 12).dataValidation = { type: 'list', allowBlank: true, formulae: ['"Ja,Nei"'] }
+        sheet.getCell(rowIndex, 13).dataValidation = { type: 'list', allowBlank: true, formulae: ['"Ja,Nei"'] }
+        sheet.getCell(rowIndex, 16).dataValidation = { type: 'list', allowBlank: true, formulae: ['"Ja,Nei"'] }
+        if (trinnlederNames.length > 0) {
+          sheet.getCell(rowIndex, 14).dataValidation = { type: 'list', allowBlank: true, formulae: [trinnlederListStr] }
+        }
+        // Alternate row shading
+        if (rowIndex % 2 === 0) {
+          dataRow.eachCell((cell, colNumber) => {
+            if (colNumber !== 6 || sub.percentageAbsence < 7.5) {
+              if (!cell.fill || (cell.fill as {type: string}).type === 'pattern' && (cell.fill as {fgColor?: {argb?: string}}).fgColor?.argb === 'FFFFFFFF') {
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
+              }
+            }
+          })
+        }
+        rowIndex++
+      })
+    })
+
+    sheet.views = [{ state: 'frozen', ySplit: 1 }]
+    sheet.autoFilter = { from: 'A1', to: `P${rowIndex - 1}` }
+
+    const lastRow = rowIndex - 1
+    const fullRange = `A2:P${lastRow}`
+    // Orange if Fare for IV or Fare for 1 is Ja
+    sheet.addConditionalFormatting({
+      ref: fullRange,
+      rules: [{
+        type: 'expression',
+        formulae: ['OR($L2="Ja",$M2="Ja")'],
+        priority: 2,
+        style: {
+          fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFCE4D6' } },
+          font: { color: { argb: 'FF833C0B' } },
+        },
+      }],
+    })
+    // Green if Bestått is Ja (overrides orange)
+    sheet.addConditionalFormatting({
+      ref: fullRange,
+      rules: [{
+        type: 'expression',
+        formulae: ['$P2="Ja"'],
+        priority: 1,
+        style: {
+          fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFC6EFCE' } },
+          font: { color: { argb: 'FF006100' } },
+        },
+      }],
+    })
+    // Red if Bestått is Nei (overrides orange)
+    sheet.addConditionalFormatting({
+      ref: fullRange,
+      rules: [{
+        type: 'expression',
+        formulae: ['$P2="Nei"'],
+        priority: 1,
+        style: {
+          fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFFC7CE' } },
+          font: { color: { argb: 'FF9C0006' } },
+        },
+      }],
+    })
+
+    const buffer = await workbook.xlsx.writeBuffer()
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `excelliste_${selectedClasses.join('-')}_${todayDdMmYyyy()}.xlsx`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const generateOppfolgingsoversikt = async (mode: 'mal' | 'populated') => {
     const ExcelJS = await loadExcelJs()
     const workbook = new ExcelJS.Workbook()
     const sheet = workbook.addWorksheet('Oppfølgingsoversikt')
@@ -1191,8 +1401,20 @@ export default function StudentList({
     sheet.getColumn(9).width = 20  // Oppfølgingsansv.
     sheet.getColumn(10).width = 36 // Kommentar
 
-    // Add 50 blank template rows with dropdowns and formatting
-    const templateRowCount = 50
+    // Build populated rows from filtered students when mode === 'populated'
+    const populatedRows: Array<[string, string, string, string, string, string, string, string, string, string]> = []
+    if (mode === 'populated') {
+      atRiskStudents.forEach(student => {
+        student.subjects.forEach(sub => {
+          const teacher = resolveTeacher(sub.subject, sub.teacher ?? '').trim()
+          const varselInfo = sub.warnings.length > 0 ? formatWarningSummary(sub.warnings) : ''
+          populatedRows.push([student.navn, student.className, sub.subject, teacher, '', '', '', varselInfo ? 'Ja' : '', '', ''])
+        })
+      })
+    }
+
+    const blankCount = Math.max(0, 300 - populatedRows.length)
+    const templateRowCount = populatedRows.length + blankCount
     const standpunktCol = 5  // E
     const fareIVCol = 6      // F
     const fare1Col = 7       // G
@@ -1201,7 +1423,10 @@ export default function StudentList({
 
     for (let i = 0; i < templateRowCount; i++) {
       const dataRowNum = i + 2
-      const excelRow = sheet.addRow(['', '', '', '', '', '', '', '', '', ''])
+      const rowData = i < populatedRows.length
+        ? populatedRows[i]
+        : ['', '', '', '', '', '', '', '', '', '']
+      const excelRow = sheet.addRow(rowData)
 
       excelRow.eachCell((cell) => {
         cell.font = { size: 10, name: 'Calibri' }
@@ -1789,20 +2014,34 @@ export default function StudentList({
             <FileText className="w-4 h-4" />
             Oppfølgingsark for utvalg
           </button>
-          <button
-            onClick={() => void generateOppfolgingsoversikt()}
-            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
-          >
-            <Table className="w-4 h-4" />
-            Generer oppfølgingsoversikt
-          </button>
+          {showOversiktModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setShowOversiktModal(false); onOversiktModalClose?.() }}>
+              <div className="bg-white rounded-xl shadow-xl p-6 w-80 flex flex-col gap-4" onClick={e => e.stopPropagation()}>
+                <h2 className="text-base font-semibold text-slate-900">Oppfølgingsoversikt</h2>
+                <p className="text-sm text-slate-600">Velg om du vil ha en tom mal eller en oversikt fylt med de filtrerte elevene og fagene.</p>
+                <button
+                  className="w-full px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
+                  onClick={() => { setShowOversiktModal(false); onOversiktModalClose?.(); void generateOppfolgingsoversikt('populated') }}
+                >
+                  Fyll med filtrerte elever og fag
+                </button>
+                <button
+                  className="w-full px-4 py-2 bg-white text-slate-700 text-sm font-medium rounded-lg border border-slate-300 hover:bg-slate-50 transition-colors"
+                  onClick={() => { setShowOversiktModal(false); onOversiktModalClose?.(); void generateOppfolgingsoversikt('mal') }}
+                >
+                  Tom mal (300 blanke rader)
+                </button>
+                <button className="text-xs text-slate-400 hover:text-slate-600 mt-1" onClick={() => { setShowOversiktModal(false); onOversiktModalClose?.() }}>Avbryt</button>
+              </div>
+            </div>
+          )}
           <div className="relative">
             <button
               onClick={() => setShowPdfMenu(prev => !prev)}
               className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors"
             >
               <Printer className="w-4 h-4" />
-              Eksporter PDF
+              Eksporter
             </button>
             {showPdfMenu && (
               <div className="absolute right-0 mt-2 w-52 rounded-lg border border-slate-200 bg-white shadow-lg z-20">
@@ -1813,7 +2052,7 @@ export default function StudentList({
                   }}
                   className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-t-lg"
                 >
-                  Samlet oversikt
+                  Samlet oversikt <span className="text-slate-400">(PDF)</span>
                 </button>
                 <button
                   onClick={() => {
@@ -1822,7 +2061,16 @@ export default function StudentList({
                   }}
                   className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-b-lg"
                 >
-                  Side per elev
+                  Side per elev <span className="text-slate-400">(PDF)</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setShowPdfMenu(false)
+                    void generateExcelOversikt()
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-b-lg border-t border-slate-100"
+                >
+                  Excelliste <span className="text-slate-400">(Excel)</span>
                 </button>
               </div>
             )}

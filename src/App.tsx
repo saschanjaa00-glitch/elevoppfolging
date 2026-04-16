@@ -75,6 +75,7 @@ function App() {
   const [missingWarningsOnly, setMissingWarningsOnly] = useState<boolean>(false)
   const [warnedOnVurdering, setWarnedOnVurdering] = useState<boolean>(false)
   const [vurderingFromDate, setVurderingFromDate] = useState<string>('')
+  const [oversiktModalOpen, setOversiktModalOpen] = useState<boolean>(false)
   const [lowGradeFilter, setLowGradeFilter] = useState<string[]>(['IV', '1', '2'])
   const [filterLogic, setFilterLogic] = useState<'og' | 'eller'>('eller')
   const [fullRapport, setFullRapport] = useState<boolean>(false)
@@ -767,12 +768,20 @@ function App() {
               >
                 Lærerinnsikt
               </button>
-              <button
-                onClick={clearImportedData}
-                className="ml-auto px-4 py-2 text-slate-600 hover:text-slate-900 font-medium transition-colors"
-              >
-                Last opp nye filer
-              </button>
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  onClick={() => setOversiktModalOpen(true)}
+                  className="px-4 py-2 text-sm font-medium text-emerald-700 hover:text-emerald-900 transition-colors"
+                >
+                  Generer oppfølgingsoversikt
+                </button>
+                <button
+                  onClick={clearImportedData}
+                  className="px-4 py-2 text-slate-600 hover:text-slate-900 font-medium transition-colors"
+                >
+                  Last opp nye filer
+                </button>
+              </div>
             </div>
 
             {activeTab === 'statistikk' && (
@@ -1110,6 +1119,8 @@ function App() {
                       fullRapportInclude2={isNameSearchActive ? false : fullRapportInclude2}
                       noFilter={isNameSearchActive ? true : noFilter}
                       presets={presets}
+                      oversiktModalOpen={oversiktModalOpen}
+                      onOversiktModalClose={() => setOversiktModalOpen(false)}
                     />
                   )}
 
