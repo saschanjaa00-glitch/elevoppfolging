@@ -222,6 +222,407 @@ export default function StatsView({ data, threshold }: Props) {
     }
   }
 
+  const generateStatsPptx = async () => {
+    const PptxGenJS = (await import('pptxgenjs')).default
+    const pptx = new PptxGenJS()
+    pptx.layout = 'LAYOUT_16x9'
+
+    const NAVY = '1E3A5F'
+    const BLUE = '2563EB'
+    const WHITE = 'FFFFFF'
+    const AMBER = 'F59E0B'
+    const RED = 'D93025'
+    const SLATE = '64748B'
+    const TEXT = '1E293B'
+
+    const addHeader = (slide: any, title: string) => {
+      slide.addShape('rect', { x: 0, y: 0, w: '100%', h: 0.75, fill: { color: NAVY } })
+      slide.addText(title, { x: 0.3, y: 0, w: 9.1, h: 0.75, fontSize: 20, bold: true, color: WHITE, valign: 'middle' })
+      slide.addText(todayDdMmYyyy(), { x: 8.7, y: 0, w: 1.2, h: 0.75, fontSize: 9, color: 'A0B4CC', valign: 'middle', align: 'right' })
+    }
+
+    // ── Compute supplementary totals ────────────────────────────────────
+    // Students with at least one subject > 10% absence
+    const studentsOver10 = new Set<string>()
+    data.absences.forEach(r => {
+      if (r.percentageAbsence > 10) studentsOver10.add(buildStudentClassKey(r.navn, r.class))
+    })
+    // Missing warnings where absence > 10%
+    const missingWarningsOver10Students = new Set<string>()
+    const missingWarningsOver10Subjects = new Set<string>()
+    const _checkedOver10 = new Set<string>()
+    const _warnMap10 = new Map<string, boolean>()
+    data.warnings.forEach(w => {
+      _warnMap10.set(buildStudentSubjectKey(w.navn, w.class, w.subjectGroup), true)
+    })
+    data.absences.forEach(r => {
+      const combo = buildStudentSubjectKey(r.navn, r.class, r.subjectGroup)
+      if (_checkedOver10.has(combo)) return
+      _checkedOver10.add(combo)
+      if (r.percentageAbsence > 10 && !_warnMap10.has(combo)) {
+        missingWarningsOver10Students.add(buildStudentClassKey(r.navn, r.class))
+        missingWarningsOver10Subjects.add(combo)
+      }
+    })
+    // Students who received a vurderingsgrunnlag warning
+    const gWarningStudents = new Set<string>()
+    data.warnings.forEach(w => {
+      const t = w.warningType.toLowerCase()
+      if (t.includes('vurdering') || t.includes('grunnlag')) {
+        gWarningStudents.add(buildStudentClassKey(w.navn, w.class))
+      }
+    })
+
+    // ── Slide 1: Title ──────────────────────────────────────────────────
+    const s1 = pptx.addSlide()
+    s1.background = { color: NAVY }
+    s1.addShape('rect', { x: 0, y: 4.5, w: '100%', h: 1.125, fill: { color: BLUE } })
+    s1.addText('Opplæringsstatistikk', { x: 0.6, y: 1.1, w: 8.8, h: 1.3, fontSize: 42, bold: true, color: WHITE })
+    s1.addText(`Skoleåret \u00b7 ${todayDdMmYyyy()}`, { x: 0.6, y: 2.45, w: 8.8, h: 0.6, fontSize: 18, color: 'AACCEE' })
+    s1.addText(`${stats.overall.studentCount} elever \u00b7 ${stats.perClass.length} klasser`, { x: 0.6, y: 3.1, w: 8.8, h: 0.5, fontSize: 14, color: '7AAABB' })
+    s1.addText('Generert av Oppfølging', { x: 0.6, y: 4.55, w: 8.8, h: 0.55, fontSize: 12, color: WHITE, valign: 'middle' })
+
+    // ── Slide 2: Totaloversikt ───────────────────────────────────────────
+    const s2 = pptx.addSlide()
+    s2.background = { color: 'F8FAFC' }
+    addHeader(s2 as any, 'Totaloversikt')
+    // 3×3 grid of cards (shrunk to fit 9 cards)
+    const totalCards = [
+      { label: 'Elever', value: String(stats.overall.studentCount), sub: null, warn: false },
+      { label: 'Gj.snitt fravær', value: `${fmt(stats.overall.avgAbsence, 1)}%`, sub: null, warn: false },
+      { label: 'Elever over 10% fravær', value: String(studentsOver10.size), sub: null, warn: studentsOver10.size > 0 },
+      { label: 'IV', value: String(stats.overall.ivCount), sub: `${stats.overall.ivStudentCount} elever`, warn: false },
+      { label: 'Karakter 1', value: String(stats.overall.grade1Count), sub: `${stats.overall.grade1StudentCount} elever`, warn: false },
+      { label: 'Varsler totalt', value: String(stats.overall.totalWarnings), sub: null, warn: false },
+      { label: 'Manglende varsler', value: String(stats.overall.missingWarnings), sub: `${stats.overall.missingWarningStudentCount} elever`, warn: true },
+      { label: 'Manglende varsler >10%', value: String(missingWarningsOver10Students.size), sub: `${missingWarningsOver10Subjects.size} fag uten varsel`, warn: missingWarningsOver10Students.size > 0 },
+      { label: 'Varslet vurderingsgrunnlag', value: String(gWarningStudents.size), sub: 'elever varslet', warn: false },
+    ]
+    totalCards.forEach((card, i) => {
+      const col = i % 3
+      const row = Math.floor(i / 3)
+      const x = 0.3 + col * 3.2
+      const y = 0.85 + row * 1.45
+      const h = 1.3
+      s2.addShape('rect', { x, y, w: 3.0, h, fill: { color: card.warn ? 'FFF7ED' : WHITE }, line: { color: card.warn ? 'FDB07E' : 'CBD5E1', width: 1 } })
+      s2.addText(card.label, { x, y: y + 0.08, w: 3.0, h: 0.32, fontSize: 8, color: SLATE, align: 'center' })
+      s2.addText(card.value, { x, y: y + 0.38, w: 3.0, h: 0.62, fontSize: 26, bold: true, color: card.warn ? 'C2410C' : TEXT, align: 'center' })
+      if (card.sub) s2.addText(card.sub, { x, y: y + 1.02, w: 3.0, h: 0.24, fontSize: 7.5, color: SLATE, align: 'center' })
+    })
+    levelStats.forEach((ls, i) => {
+      const x = 0.3 + i * 3.2
+      s2.addText(`Vg${ls.level}: ${ls.studentCount} elever \u00b7 ${fmt(ls.avgAbsence, 1)}% fravær`, { x, y: 5.2, w: 3.0, h: 0.28, fontSize: 8, color: SLATE, align: 'center' })
+    })
+
+    // ── Slides per trinn ────────────────────────────────────────────────
+    // Build grade distribution by class (T1 only) — used in per-trinn and karakterfordeling slides
+    const gradeDistByClass = new Map<string, Map<string, number>>()
+    data.grades.forEach(g => {
+      const h = g.halvår.toString().trim()
+      if (!(h === '1' || h.toLowerCase().includes('1'))) return
+      const resolvedClass = g.class?.trim()
+      if (!resolvedClass) return
+      const gradeVal = g.grade.trim().toUpperCase()
+      if (!['1','2','3','4','5','6','IV'].includes(gradeVal)) return
+      if (!gradeDistByClass.has(resolvedClass)) gradeDistByClass.set(resolvedClass, new Map())
+      const dist = gradeDistByClass.get(resolvedClass)!
+      dist.set(gradeVal, (dist.get(gradeVal) ?? 0) + 1)
+    })
+
+    for (const ls of levelStats) {
+      const classRows = stats.perClass.filter(c => c.className.startsWith(ls.level))
+      const labels = classRows.map(c => c.className)
+
+      const slide = pptx.addSlide()
+      slide.background = { color: 'F8FAFC' }
+      addHeader(slide as any, `Vg${ls.level} \u2013 ${ls.studentCount} elever i ${ls.classCount} klasser`)
+
+      // Left: key metrics
+      const leftMetrics = [
+        { label: 'Gj.snitt fravær', value: `${fmt(ls.avgAbsence, 1)}%` },
+        { label: 'IV', value: `${ls.ivCount} (${ls.ivStudentCount} elever)` },
+        { label: 'Karakter 1', value: `${ls.grade1Count} (${ls.grade1StudentCount} elever)` },
+        { label: 'Neg. karakterer', value: `${ls.negativeStudentsCount} (${fmt(ls.negativeStudentsPct, 1)}%)` },
+        { label: 'Varsler F', value: String(ls.fWarnings) },
+        { label: 'Varsler G', value: String(ls.gWarnings) },
+        { label: 'Manglende', value: String(ls.missingWarnings) },
+      ]
+      leftMetrics.forEach((m, i) => {
+        const y = 0.9 + i * 0.64
+        slide.addText(m.label + ':', { x: 0.2, y, w: 1.8, h: 0.55, fontSize: 9.5, color: SLATE, valign: 'middle' })
+        slide.addText(m.value, { x: 2.0, y, w: 1.6, h: 0.55, fontSize: 10.5, bold: true, color: TEXT, valign: 'middle' })
+      })
+
+      // Right top: absence bar chart
+      slide.addChart('bar', [{ name: 'Fravær %', labels, values: classRows.map(c => parseFloat(c.avgAbsence.toFixed(1))) }] as any, {
+        x: 3.9, y: 0.8, w: 5.8, h: 2.3,
+        barDir: 'col',
+        chartColors: [BLUE],
+        showValue: true,
+        dataLabelFontSize: 8,
+        catAxisLabelFontSize: 8,
+        valAxisMinVal: 0,
+        valAxisMaxVal: 30,
+        showTitle: true,
+        title: 'Gj.snitt fravær %',
+        titleFontSize: 10,
+      } as any)
+
+      // Right bottom: grades chart
+      slide.addChart('bar', [
+        { name: 'IV', labels, values: classRows.map(c => c.ivCount) },
+        { name: 'Karakter 1', labels, values: classRows.map(c => c.grade1Count) },
+        { name: 'Karakter 2', labels, values: classRows.map(c => c.grade2Count) },
+      ] as any, {
+        x: 3.9, y: 3.2, w: 5.8, h: 2.3,
+        barDir: 'col',
+        barGrouping: 'clustered',
+        chartColors: [RED, AMBER, '60A5FA'],
+        showValue: true,
+        dataLabelFontSize: 8,
+        catAxisLabelFontSize: 8,
+        showTitle: true,
+        title: 'IV / Karakter 1 / Karakter 2',
+        titleFontSize: 10,
+      } as any)
+
+      // ── Grade spread slide for this trinn ──────────────────────────────
+      const gradeKeys = ['IV', '1', '2', '3', '4', '5', '6']
+      const gradeColors = [RED, 'F97316', AMBER, 'FDE68A', '86EFAC', '22C55E', '166534']
+      // Aggregate grade counts across all classes in this trinn
+      const trinnGradeCounts = gradeKeys.map(gk =>
+        classRows.reduce((sum, c) => sum + (gradeDistByClass.get(c.className)?.get(gk) ?? 0), 0)
+      )
+      const totalGradesInTrinn = trinnGradeCounts.reduce((a, b) => a + b, 0)
+      if (totalGradesInTrinn > 0) {
+        const sg2 = pptx.addSlide()
+        sg2.background = { color: 'F8FAFC' }
+        addHeader(sg2 as any, `Vg${ls.level} \u2013 Karakterspredning snitt (T1)`)
+        // Left: bar chart one bar per grade
+        sg2.addChart('bar', gradeKeys.map((gk, gi) => ({
+          name: gk,
+          labels: [gk],
+          values: [trinnGradeCounts[gi]],
+          color: gradeColors[gi],
+        })) as any, {
+          x: 0.3, y: 0.85, w: 5.0, h: 4.5,
+          barDir: 'col',
+          barGrouping: 'clustered',
+          chartColors: gradeColors,
+          showValue: true,
+          dataLabelFontSize: 10,
+          catAxisLabelFontSize: 11,
+          showTitle: true,
+          title: 'Antall karakterer (alle klasser i trinnet)',
+          titleFontSize: 10,
+          showLegend: false,
+        } as any)
+        // Right: pie chart
+        sg2.addChart('pie', [{
+          name: 'Karakterfordeling',
+          labels: gradeKeys,
+          values: trinnGradeCounts,
+        }] as any, {
+          x: 5.5, y: 0.85, w: 4.2, h: 4.5,
+          chartColors: gradeColors,
+          showValue: false,
+          showPercent: true,
+          dataLabelFontSize: 9,
+          showTitle: true,
+          title: 'Fordeling (%)',
+          titleFontSize: 10,
+          showLegend: true,
+          legendFontSize: 9,
+          legendPos: 'b',
+        } as any)
+      }
+    }
+
+    // ── Slide: Varsler ──────────────────────────────────────────────────
+    const sv = pptx.addSlide()
+    sv.background = { color: 'F8FAFC' }
+    addHeader(sv as any, 'Varsler \u2013 oversikt')
+
+    const allLabels = stats.perClass.map(c => c.className)
+    sv.addChart('bar', [
+      { name: 'Fraværsvarsler (F)', labels: allLabels, values: stats.perClass.map(c => c.fWarnings) },
+      { name: 'Karaktervarsler (G)', labels: allLabels, values: stats.perClass.map(c => c.gWarnings) },
+    ] as any, {
+      x: 0.3, y: 0.85, w: 9.4, h: 2.9,
+      barDir: 'col',
+      barGrouping: 'stacked',
+      chartColors: [BLUE, AMBER],
+      showValue: true,
+      dataLabelFontSize: 7,
+      catAxisLabelFontSize: 8,
+      showTitle: true,
+      title: 'Varsler per klasse',
+      titleFontSize: 10,
+    } as any)
+
+    const missingLabels = stats.perClass.filter(c => c.missingWarnings > 0).map(c => c.className)
+    const missingValues = stats.perClass.filter(c => c.missingWarnings > 0).map(c => c.missingWarnings)
+    if (missingLabels.length > 0) {
+      sv.addChart('bar', [{ name: 'Manglende varsler', labels: missingLabels, values: missingValues }] as any, {
+        x: 0.3, y: 3.9, w: 9.4, h: 1.6,
+        barDir: 'col',
+        chartColors: [RED],
+        showValue: true,
+        dataLabelFontSize: 7,
+        catAxisLabelFontSize: 8,
+        showTitle: true,
+        title: 'Manglende varsler per klasse',
+        titleFontSize: 10,
+      } as any)
+    }
+
+    // ── Slides: Inntakspoeng delta per trinn ─────────────────────────────
+    for (const ls of levelStats) {
+      const classRows = stats.perClass.filter(c => c.className.startsWith(ls.level) && c.avgGrunnskolepoeng !== null && c.avgGrade !== null)
+      if (classRows.length === 0) continue
+      const labels = classRows.map(c => c.className)
+      const deltas = classRows.map(c => parseFloat((c.avgGrade! - c.avgGrunnskolepoeng!).toFixed(2)))
+      const si = pptx.addSlide()
+      si.background = { color: 'F8FAFC' }
+      addHeader(si as any, `Vg${ls.level} \u2013 Inntakspoeng: \u0394 VGS-snitt minus grunnskolepoeng`)
+      // pptxgenjs doesn't natively support per-bar colours, so we split into two series: positive and negative
+      const posValues = deltas.map(d => d >= 0 ? d : null)
+      const negValues = deltas.map(d => d < 0 ? d : null)
+      si.addChart('bar', [
+        { name: 'Positiv utvikling (\u2191)', labels, values: posValues },
+        { name: 'Negativ utvikling (\u2193)', labels, values: negValues },
+      ] as any, {
+        x: 0.3, y: 0.85, w: 9.4, h: 4.6,
+        barDir: 'col',
+        barGrouping: 'stacked',
+        chartColors: ['166534', 'C0392B'],
+        showValue: true,
+        dataLabelFontSize: 9,
+        dataLabelFormatCode: '0.00',
+        catAxisLabelFontSize: 9,
+        valAxisMinVal: Math.min(...deltas) < 0 ? Math.floor(Math.min(...deltas)) - 0.5 : -1,
+        valAxisMaxVal: Math.max(...deltas) > 0 ? Math.ceil(Math.max(...deltas)) + 0.5 : 1,
+        showTitle: true,
+        title: '\u0394 = Snitt VGS T1 \u2212 Inntakspoeng (grunnskole) \u2014 baseline 0',
+        titleFontSize: 10,
+        showLegend: true,
+        legendFontSize: 9,
+      } as any)
+    }
+
+    // ── Slides: Karakterfordeling per trinn ──────────────────────────────
+    for (const ls of levelStats) {
+      const classRows = stats.perClass.filter(c => c.className.startsWith(ls.level) && gradeDistByClass.has(c.className))
+      if (classRows.length === 0) continue
+      const labels = classRows.map(c => c.className)
+      const gradeKeys = ['IV', '1', '2', '3', '4', '5', '6']
+      const gradeColors = [RED, 'F97316', AMBER, 'FDE68A', '86EFAC', '22C55E', '166534']
+
+      // Find class with most low grades (IV + 1 + 2)
+      const lowGradeKeys = ['IV', '1', '2']
+      let worstClass = ''
+      let worstCount = -1
+      classRows.forEach(c => {
+        const dist = gradeDistByClass.get(c.className)
+        const count = lowGradeKeys.reduce((sum, gk) => sum + (dist?.get(gk) ?? 0), 0)
+        if (count > worstCount) { worstCount = count; worstClass = c.className }
+      })
+
+      const sg = pptx.addSlide()
+      sg.background = { color: 'F8FAFC' }
+      addHeader(sg as any, `Vg${ls.level} \u2013 Karakterfordeling per klasse (T1)`)
+      sg.addChart('bar', gradeKeys.map((gk, gi) => ({
+        name: gk,
+        labels,
+        values: labels.map(cls => gradeDistByClass.get(cls)?.get(gk) ?? 0),
+        color: gradeColors[gi],
+      })) as any, {
+        x: 0.3, y: 0.85, w: 9.4, h: 3.9,
+        barDir: 'col',
+        barGrouping: 'stacked',
+        chartColors: gradeColors,
+        showValue: true,
+        dataLabelFontSize: 7,
+        catAxisLabelFontSize: 9,
+        showTitle: true,
+        title: 'Antall karakterer per klasse (T1)',
+        titleFontSize: 10,
+        showLegend: true,
+        legendFontSize: 9,
+      } as any)
+
+      // Underline + annotation for class with most low grades (IV/1/2)
+      // Chart plot area: x=0.3, w=9.4, left margin ~12%, right margin ~3% in pptxgenjs stacked bar
+      if (worstClass && worstCount > 0) {
+        const idx = labels.indexOf(worstClass)
+        const n = labels.length
+        const plotLeft = 0.3 + 9.4 * 0.12
+        const plotWidth = 9.4 * 0.85
+        const barSlotW = plotWidth / n
+        const xCenter = plotLeft + (idx + 0.5) * barSlotW
+        // Line just below the chart
+        sg.addShape('line' as any, {
+          x: xCenter - barSlotW * 0.35, y: 4.82, w: barSlotW * 0.7, h: 0,
+          line: { color: RED, width: 2.5 },
+        })
+        sg.addText(`\u26a0 ${worstClass}: flest lave karakterer (IV/1/2: ${worstCount})`, {
+          x: 0.3, y: 4.95, w: 9.4, h: 0.28,
+          fontSize: 8,
+          color: RED,
+          bold: true,
+          align: 'center',
+        })
+      }
+    }
+
+    // ── Slide: Karakterspredning sammenlignet per trinn ──────────────────
+    {
+      const gradeKeys = ['IV', '1', '2', '3', '4', '5', '6']
+      // Trinn that actually have grade data
+      const trinnWithData = levelStats.filter(ls =>
+        stats.perClass.some(c => c.className.startsWith(ls.level) && gradeDistByClass.has(c.className))
+      )
+      if (trinnWithData.length > 0) {
+        // Compute percentage of each grade per trinn
+        const trinnTotals = trinnWithData.map(ls => {
+          const classRows = stats.perClass.filter(c => c.className.startsWith(ls.level))
+          return gradeKeys.reduce((sum, gk) =>
+            sum + classRows.reduce((s, c) => s + (gradeDistByClass.get(c.className)?.get(gk) ?? 0), 0), 0)
+        })
+        const sc = pptx.addSlide()
+        sc.background = { color: 'F8FAFC' }
+        addHeader(sc as any, 'Karakterspredning \u2013 sammenligning per trinn (T1, %)')
+        // One series per trinn, X-axis = grade, values = % of that grade in that trinn
+        sc.addChart('bar', trinnWithData.map((ls, ti) => ({
+          name: `Vg${ls.level}`,
+          labels: gradeKeys,
+          values: gradeKeys.map(gk => {
+            const classRows = stats.perClass.filter(c => c.className.startsWith(ls.level))
+            const count = classRows.reduce((s, c) => s + (gradeDistByClass.get(c.className)?.get(gk) ?? 0), 0)
+            return trinnTotals[ti] > 0 ? parseFloat(((count / trinnTotals[ti]) * 100).toFixed(1)) : 0
+          }),
+        })) as any, {
+          x: 0.3, y: 0.85, w: 9.4, h: 4.5,
+          barDir: 'col',
+          barGrouping: 'clustered',
+          showValue: true,
+          dataLabelFontSize: 8,
+          dataLabelFormatCode: '0.0"%"',
+          catAxisLabelFontSize: 12,
+          valAxisMaxVal: 50,
+          showTitle: true,
+          title: '% av karakterer per trinn \u2014 ett sett stolper per karakter, ett per trinn',
+          titleFontSize: 10,
+          showLegend: true,
+          legendFontSize: 10,
+          legendPos: 'b',
+        } as any)
+      }
+    }
+
+    await pptx.writeFile({ fileName: `statistikk_${todayDdMmYyyy()}.pptx` })
+  }
+
   const cycleTableSort = (key: SortKey) => {
     setTableSort(current => {
       if (!current || current.key !== key) return { key, direction: 'asc' }
@@ -677,7 +1078,14 @@ export default function StatsView({ data, threshold }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-end mb-2">
+      <div className="flex justify-end gap-2 mb-2">
+        <button
+          type="button"
+          onClick={() => void generateStatsPptx()}
+          className="px-3 py-2 text-sm font-medium bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors"
+        >
+          📊 Eksporter som PowerPoint
+        </button>
         <button
           type="button"
           onClick={exportStatsPNG}
@@ -906,7 +1314,7 @@ export default function StatsView({ data, threshold }: Props) {
                   onClick={() => cycleTableSort('avgGrunnskolepoeng')}
                   sort={currentSort('avgGrunnskolepoeng')}
                 >
-                  GSK.P
+                  Inntakspoeng
                 </Th>
                 <Th right onClick={() => cycleTableSort('avgGrade')} sort={currentSort('avgGrade')}>Snitt vgs</Th>
                 <Th right onClick={() => cycleTableSort('avgGradeDelta')} sort={currentSort('avgGradeDelta')}>Delta</Th>
