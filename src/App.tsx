@@ -69,6 +69,8 @@ function App() {
   const [kontaktlaererSearch, setKontaktlaererSearch] = useState<string>('')
   const [faglaererSearch, setFaglaererSearch] = useState<string>('')
   const [missingWarningsOnly, setMissingWarningsOnly] = useState<boolean>(false)
+  const [warnedOnVurdering, setWarnedOnVurdering] = useState<boolean>(false)
+  const [vurderingFromDate, setVurderingFromDate] = useState<string>('')
   const [lowGradeFilter, setLowGradeFilter] = useState<string[]>(['IV', '1', '2'])
   const [filterLogic, setFilterLogic] = useState<'og' | 'eller'>('eller')
   const [fullRapport, setFullRapport] = useState<boolean>(false)
@@ -95,6 +97,8 @@ function App() {
     setKontaktlaererSearch('')
     setFaglaererSearch('')
     setMissingWarningsOnly(false)
+    setWarnedOnVurdering(false)
+    setVurderingFromDate('')
     setPreOverrideFilters(null)
     setIdleRemainingMs(IDLE_TIMEOUT_MS)
     idleDeadlineRef.current = null
@@ -1000,7 +1004,7 @@ function App() {
                       </div>
                   </div>
 
-                    <div className="border-t border-slate-100 pt-3">
+                    <div className="border-t border-slate-100 pt-3 flex flex-wrap items-center gap-3">
                       <button
                         onClick={() => {
                           setMissingWarningsOnly(prev => {
@@ -1038,6 +1042,46 @@ function App() {
                           )}
                         </span>
                       </button>
+                      <button
+                        onClick={() => {
+                          setWarnedOnVurdering(prev => {
+                            const next = !prev
+                            if (next) {
+                              setPreOverrideFilters({ studentSearch, lowGradeFilter, fullRapport, fullRapportInclude2 })
+                              setStudentSearch('')
+                              setLowGradeFilter([])
+                              setFullRapport(false)
+                              setFullRapportInclude2(false)
+                            } else if (preOverrideFilters) {
+                              setStudentSearch(preOverrideFilters.studentSearch)
+                              setLowGradeFilter(preOverrideFilters.lowGradeFilter)
+                              setFullRapport(preOverrideFilters.fullRapport)
+                              setFullRapportInclude2(preOverrideFilters.fullRapportInclude2)
+                              setPreOverrideFilters(null)
+                            }
+                            return next
+                          })
+                        }}
+                        disabled={filtersDisabled}
+                        className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                          warnedOnVurdering
+                            ? 'bg-purple-200 text-purple-900 border-purple-300 hover:bg-purple-300'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                        } ${filtersDisabled ? 'opacity-40 pointer-events-none' : ''}`}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          Varslet på vurderingsgrunnlag
+                        </span>
+                      </button>
+                      {warnedOnVurdering && (
+                        <input
+                          type="text"
+                          placeholder="dd.mm.yyyy"
+                          value={vurderingFromDate}
+                          onChange={e => setVurderingFromDate(e.target.value)}
+                          className="px-3 py-2 text-sm border border-slate-300 rounded-lg w-36 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                        />
+                      )}
                     </div>
 
                   </div>
@@ -1051,6 +1095,8 @@ function App() {
                       kontaktlaererSearch={kontaktlaererSearch}
                       faglaererSearch={faglaererSearch}
                       missingWarningsOnly={isNameSearchActive ? false : missingWarningsOnly}
+                      warnedOnVurdering={isNameSearchActive ? false : warnedOnVurdering}
+                      vurderingFromDate={vurderingFromDate}
                       lowGradeFilter={isNameSearchActive ? [] : lowGradeFilter}
                       filterLogic={filterLogic}
                       fullRapport={isNameSearchActive ? false : fullRapport}

@@ -17,7 +17,7 @@ import {
   normalizeSubjectGroupKey,
   resolveClassFromSubjectLookup,
 } from '../studentInfoUtils'
-import { compareDateStrings, formatDateDdMmYyyy, todayDdMmYyyy, warningDateColorClass } from '../dateUtils'
+import { compareDateStrings, formatDateDdMmYyyy, parseFlexibleDate, todayDdMmYyyy, warningDateColorClass } from '../dateUtils'
 import { sanitizeFilenamePart } from '../securityUtils'
 
 interface StudentListProps {
@@ -28,6 +28,8 @@ interface StudentListProps {
   kontaktlaererSearch: string
   faglaererSearch: string
   missingWarningsOnly: boolean
+  warnedOnVurdering: boolean
+  vurderingFromDate: string
   lowGradeFilter: string[]
   filterLogic?: 'og' | 'eller'
   fullRapport: boolean
@@ -76,6 +78,8 @@ export default function StudentList({
   kontaktlaererSearch,
   faglaererSearch,
   missingWarningsOnly,
+  warnedOnVurdering,
+  vurderingFromDate,
   lowGradeFilter,
   filterLogic = 'eller',
   fullRapport,
@@ -159,16 +163,16 @@ export default function StudentList({
     }
     const labelOrder = (l: string) =>
       l === 'Fravær' ? 0 : l === 'Grunnlag' ? 1 : 2
-    const grouped = new Map<string, string[]>()
+    const grouped = new Map<string, { display: string; iso: string }[]>()
     warnings.forEach(w => {
       const label = getLabel(w.warningType)
       if (!grouped.has(label)) grouped.set(label, [])
-      if (w.sentDate) grouped.get(label)!.push(formatDateDdMmYyyy(w.sentDate))
+      if (w.sentDate) grouped.get(label)!.push({ display: formatDateDdMmYyyy(w.sentDate), iso: w.sentDate })
     })
-    grouped.forEach((dates, label) =>
+    grouped.forEach((entries, label) =>
       grouped.set(
         label,
-        [...dates].sort((a, b) => compareDateStrings(a, b))
+        [...entries].sort((a, b) => compareDateStrings(a.iso, b.iso))
       )
     )
     return Array.from(grouped.entries()).sort(
@@ -181,9 +185,9 @@ export default function StudentList({
     if (grouped.length === 0) return 'Ingen varsler sendt'
 
     return grouped
-      .map(([label, dates]) => {
+      .map(([label, entries]) => {
         const shortLabel = label === 'Fravær' ? 'F' : label === 'Grunnlag' ? 'G' : label
-        return `${shortLabel}: ${dates.join(', ')}`
+        return `${shortLabel}: ${entries.map(e => e.display).join(', ')}`
       })
       .join('   |   ')
   }
@@ -450,6 +454,15 @@ export default function StudentList({
           : { ...student, subjects: teacherFilteredSubjects }
 
       if (!isMissingOverride) {
+        if (warnedOnVurdering) {
+          const isVurdering = (wt: string) => { const l = wt.toLowerCase(); return l.includes('vurdering') || l.includes('grunnlag') }
+          const subjects = teacherFilteredSubjects.filter(sub =>
+            sub.warnings.some(w => isVurdering(w.warningType))
+          )
+          if (subjects.length === 0) return
+          filtered.push({ ...studentWithTeacherFilteredSubjects, subjects })
+          return
+        }
         filtered.push(studentWithTeacherFilteredSubjects)
         return
       }
@@ -470,6 +483,7 @@ export default function StudentList({
     studentSummaries,
     deferredStudentSearch,
     missingWarningsOnly,
+    warnedOnVurdering,
     threshold,
     kontaktlaererByStudentKey,
     kontaktlaererSearch,
@@ -714,14 +728,14 @@ export default function StudentList({
 
         // Warning lines
         const grouped = groupWarnings(subjectEntry.warnings)
-        grouped.forEach(([label, dates]) => {
+        grouped.forEach(([label, entries]) => {
           doc.setFontSize(7.5)
           doc.setFont('helvetica', 'bold')
           doc.setTextColor(71, 85, 105)
           doc.text(`${label}:`, marginX + 10, subY)
           doc.setFont('helvetica', 'normal')
           doc.setTextColor(100, 116, 139)
-          doc.text(` ${dates.join(', ')}`, marginX + 10 + doc.getTextWidth(`${label}:`), subY)
+          doc.text(` ${entries.map(e => e.display).join(', ')}`, marginX + 10 + doc.getTextWidth(`${label}:`), subY)
           subY += 4.5
         })
 
@@ -1919,16 +1933,24 @@ export default function StudentList({
                             {subjectEntry.warnings.length > 0 && (
                               <div className="text-xs text-slate-600 pl-2 space-y-0.5">
                                 {groupWarnings(subjectEntry.warnings).map(
-                                  ([label, dates]) => (
+                                  ([label, entries]) => {
+                                    const isGrunnlag = label === 'Grunnlag'
+                                    const fromDate = vurderingFromDate ? parseFlexibleDate(vurderingFromDate) : null
+                                    return (
                                     <div key={label}>
                                       <span className="font-semibold">
                                         {label}:
                                       </span>{' '}
-                                      {dates.map((d, i) => (
-                                        <span key={i} className={dateColor(d)}>{d}{i < dates.length - 1 ? ', ' : ''}</span>
-                                      ))}
+                                      {entries.map((e, i) => {
+                                        const isoDate = parseFlexibleDate(e.iso)
+                                        const highlight = isGrunnlag && fromDate && isoDate && isoDate >= fromDate
+                                        return (
+                                          <span key={i} className={`${dateColor(e.display)}${highlight ? ' underline font-semibold' : ''}`}>{e.display}{i < entries.length - 1 ? ', ' : ''}</span>
+                                        )
+                                      })}
                                     </div>
-                                  )
+                                    )
+                                  }
                                 )}
                               </div>
                             )}
