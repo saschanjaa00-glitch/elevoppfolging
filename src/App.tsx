@@ -12,7 +12,11 @@ import {
   normalizeSubjectGroupKey,
   resolveClassFromSubjectLookup,
 } from './studentInfoUtils'
-import { compareDateStrings, formatDateDdMmYyyy, todayDdMmYyyy } from './dateUtils'
+import { compareDateStrings, formatDateDdMmYyyy, parseFlexibleDate, todayDdMmYyyy } from './dateUtils'
+import DatePicker, { registerLocale } from 'react-datepicker'
+import { nb } from 'date-fns/locale/nb'
+import 'react-datepicker/dist/react-datepicker.css'
+registerLocale('nb', nb)
 import FileUpload from './components/FileUpload'
 import ClassSelector from './components/ClassSelector'
 import StudentList from './components/StudentList'
@@ -1004,26 +1008,26 @@ function App() {
                       </div>
                   </div>
 
-                    <div className="border-t border-slate-100 pt-3 flex flex-wrap items-center gap-3">
+                    <div className="border-t border-slate-100 pt-3 flex flex-wrap items-center gap-3 justify-between">
+                      <div className="flex flex-wrap items-center gap-3">
                       <button
                         onClick={() => {
-                          setMissingWarningsOnly(prev => {
-                            const next = !prev
-                            if (next) {
-                              setPreOverrideFilters({ studentSearch, lowGradeFilter, fullRapport, fullRapportInclude2 })
-                              setStudentSearch('')
-                              setLowGradeFilter([])
-                              setFullRapport(false)
-                              setFullRapportInclude2(false)
-                            } else if (preOverrideFilters) {
-                              setStudentSearch(preOverrideFilters.studentSearch)
-                              setLowGradeFilter(preOverrideFilters.lowGradeFilter)
-                              setFullRapport(preOverrideFilters.fullRapport)
-                              setFullRapportInclude2(preOverrideFilters.fullRapportInclude2)
-                              setPreOverrideFilters(null)
-                            }
-                            return next
-                          })
+                          const next = !missingWarningsOnly
+                          if (next) {
+                            setWarnedOnVurdering(false)
+                            setPreOverrideFilters({ studentSearch, lowGradeFilter, fullRapport, fullRapportInclude2 })
+                            setStudentSearch('')
+                            setLowGradeFilter([])
+                            setFullRapport(false)
+                            setFullRapportInclude2(false)
+                          } else if (preOverrideFilters) {
+                            setStudentSearch(preOverrideFilters.studentSearch)
+                            setLowGradeFilter(preOverrideFilters.lowGradeFilter)
+                            setFullRapport(preOverrideFilters.fullRapport)
+                            setFullRapportInclude2(preOverrideFilters.fullRapportInclude2)
+                            setPreOverrideFilters(null)
+                          }
+                          setMissingWarningsOnly(next)
                         }}
                         disabled={filtersDisabled}
                         className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
@@ -1044,28 +1048,27 @@ function App() {
                       </button>
                       <button
                         onClick={() => {
-                          setWarnedOnVurdering(prev => {
-                            const next = !prev
-                            if (next) {
-                              setPreOverrideFilters({ studentSearch, lowGradeFilter, fullRapport, fullRapportInclude2 })
-                              setStudentSearch('')
-                              setLowGradeFilter([])
-                              setFullRapport(false)
-                              setFullRapportInclude2(false)
-                            } else if (preOverrideFilters) {
-                              setStudentSearch(preOverrideFilters.studentSearch)
-                              setLowGradeFilter(preOverrideFilters.lowGradeFilter)
-                              setFullRapport(preOverrideFilters.fullRapport)
-                              setFullRapportInclude2(preOverrideFilters.fullRapportInclude2)
-                              setPreOverrideFilters(null)
-                            }
-                            return next
-                          })
+                          const next = !warnedOnVurdering
+                          if (next) {
+                            setMissingWarningsOnly(false)
+                            setPreOverrideFilters({ studentSearch, lowGradeFilter, fullRapport, fullRapportInclude2 })
+                            setStudentSearch('')
+                            setLowGradeFilter([])
+                            setFullRapport(false)
+                            setFullRapportInclude2(false)
+                          } else if (preOverrideFilters) {
+                            setStudentSearch(preOverrideFilters.studentSearch)
+                            setLowGradeFilter(preOverrideFilters.lowGradeFilter)
+                            setFullRapport(preOverrideFilters.fullRapport)
+                            setFullRapportInclude2(preOverrideFilters.fullRapportInclude2)
+                            setPreOverrideFilters(null)
+                          }
+                          setWarnedOnVurdering(next)
                         }}
                         disabled={filtersDisabled}
                         className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
                           warnedOnVurdering
-                            ? 'bg-purple-200 text-purple-900 border-purple-300 hover:bg-purple-300'
+                            ? 'bg-orange-300 text-orange-900 border-orange-300 hover:bg-orange-400'
                             : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
                         } ${filtersDisabled ? 'opacity-40 pointer-events-none' : ''}`}
                       >
@@ -1073,15 +1076,19 @@ function App() {
                           Varslet på vurderingsgrunnlag
                         </span>
                       </button>
-                      {warnedOnVurdering && (
-                        <input
-                          type="text"
-                          placeholder="dd.mm.yyyy"
-                          value={vurderingFromDate}
-                          onChange={e => setVurderingFromDate(e.target.value)}
-                          className="px-3 py-2 text-sm border border-slate-300 rounded-lg w-36 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-slate-600">Varsel sendt etter:</span>
+                        <DatePicker
+                          selected={vurderingFromDate ? parseFlexibleDate(vurderingFromDate) : null}
+                          onChange={(date: Date | null) => setVurderingFromDate(date ? date.toISOString().split('T')[0] : '')}
+                          dateFormat="dd.MM.yyyy"
+                          placeholderText="dd.mm.åååå"
+                          locale="nb"
+                          isClearable
+                          className="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400"
                         />
-                      )}
+                      </div>
                     </div>
 
                   </div>

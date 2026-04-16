@@ -456,12 +456,33 @@ export default function StudentList({
       if (!isMissingOverride) {
         if (warnedOnVurdering) {
           const isVurdering = (wt: string) => { const l = wt.toLowerCase(); return l.includes('vurdering') || l.includes('grunnlag') }
-          const subjects = teacherFilteredSubjects.filter(sub =>
-            sub.warnings.some(w => isVurdering(w.warningType))
-          )
+          const fromDate = vurderingFromDate ? parseFlexibleDate(vurderingFromDate) : null
+          const subjects = teacherFilteredSubjects.filter(sub => {
+            const vurderingWarnings = sub.warnings.filter(w => isVurdering(w.warningType))
+            if (vurderingWarnings.length === 0) return false
+            if (!fromDate) return true
+            return vurderingWarnings.some(w => {
+              const d = parseFlexibleDate(w.sentDate)
+              return d && d >= fromDate
+            })
+          })
           if (subjects.length === 0) return
           filtered.push({ ...studentWithTeacherFilteredSubjects, subjects })
           return
+        }
+        if (vurderingFromDate && !warnedOnVurdering) {
+          const fromDate = parseFlexibleDate(vurderingFromDate)
+          if (fromDate) {
+            const subjects = teacherFilteredSubjects.filter(sub =>
+              sub.warnings.some(w => {
+                const d = parseFlexibleDate(w.sentDate)
+                return d && d >= fromDate
+              })
+            )
+            if (subjects.length === 0) return
+            filtered.push({ ...studentWithTeacherFilteredSubjects, subjects })
+            return
+          }
         }
         filtered.push(studentWithTeacherFilteredSubjects)
         return
@@ -484,6 +505,7 @@ export default function StudentList({
     deferredStudentSearch,
     missingWarningsOnly,
     warnedOnVurdering,
+    vurderingFromDate,
     threshold,
     kontaktlaererByStudentKey,
     kontaktlaererSearch,
@@ -1934,7 +1956,6 @@ export default function StudentList({
                               <div className="text-xs text-slate-600 pl-2 space-y-0.5">
                                 {groupWarnings(subjectEntry.warnings).map(
                                   ([label, entries]) => {
-                                    const isGrunnlag = label === 'Grunnlag'
                                     const fromDate = vurderingFromDate ? parseFlexibleDate(vurderingFromDate) : null
                                     return (
                                     <div key={label}>
@@ -1943,7 +1964,7 @@ export default function StudentList({
                                       </span>{' '}
                                       {entries.map((e, i) => {
                                         const isoDate = parseFlexibleDate(e.iso)
-                                        const highlight = isGrunnlag && fromDate && isoDate && isoDate >= fromDate
+                                        const highlight = fromDate && isoDate && isoDate >= fromDate
                                         return (
                                           <span key={i} className={`${dateColor(e.display)}${highlight ? ' underline font-semibold' : ''}`}>{e.display}{i < entries.length - 1 ? ', ' : ''}</span>
                                         )
