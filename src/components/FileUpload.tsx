@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import * as XLSX from 'xlsx'
-import { Upload } from 'lucide-react'
+import { Upload, X, AlertTriangle } from 'lucide-react'
 import type { DataStore, AbsenceRecord, WarningRecord, StudentInfoRecord, PresetRecord } from '../types'
 import { anonymizeData } from '../anonymizeNames'
 import { normalizeCellText } from '../securityUtils'
@@ -19,6 +19,7 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [anonymize, setAnonymize] = useState(false)
+  const [missingColumns, setMissingColumns] = useState<{ fileName: string; fileType: string; missing: string[] }[]>([])
 
   const normalizeHeader = (header: string): string =>
     header
@@ -139,6 +140,14 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
     return isAdultAtImport(getRawRowValueByTokens(row, tokenSets))
   }
 
+  const downloadWarningTemplate = () => {
+    const headers = ['Type varsel', 'Elevnavn', 'Fødselsdato', 'Klasse', 'Fagkode', 'Faggruppe', 'Fraværsprosent', 'Kontaktansvarlig lærer', 'Avsenders navn', 'Sendt dato']
+    const ws = XLSX.utils.aoa_to_sheet([headers])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Varsler')
+    XLSX.writeFile(wb, 'varsler_mal.xlsx')
+  }
+
   const getWarningFileCreatedDate = (workbook: XLSX.WorkBook, file: File): string | undefined => {
     const workbookAny = workbook as unknown as {
       Props?: { CreatedDate?: unknown; createdate?: unknown }
@@ -162,6 +171,68 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
     }
 
     return undefined
+  }
+
+  const hasTokenMatch = (headers: string[], tokenSets: string[][]): boolean =>
+    tokenSets.some(tokens => headers.some(h => tokens.every(t => normalizeHeader(h).includes(normalizeHeader(t)))))
+
+  const hasAliasMatch = (headers: string[], aliases: string[]): boolean =>
+    aliases.some(a => headers.some(h => normalizeHeader(h) === normalizeHeader(a)))
+
+  const getMissingAbsenceColumns = (sheet: Record<string, any>[]): string[] => {
+    if (sheet.length === 0) return []
+    const headers = Object.keys(sheet[0])
+    const missing: string[] = []
+    if (!hasAliasMatch(headers, ['navn', 'name', 'student'])) missing.push('Navn')
+    if (!hasAliasMatch(headers, ['klasse', 'class', 'gruppe'])) missing.push('Klasse')
+    if (!hasAliasMatch(headers, ['fagnavn', 'fag', 'subject'])) missing.push('Fagnavn')
+    if (!hasTokenMatch(headers, [['h1', 'h2', 'udok', 'frav']])) missing.push('H1+H2 % udok. fravær')
+    if (!hasTokenMatch(headers, [['h1', 'h2', 'timer', 'udok', 'frav']])) missing.push('H1+H2 timer udok. fravær')
+    if (!hasAliasMatch(headers, ['lærer', 'larer', 'teacher', 'leder'])) missing.push('Lærer')
+    if (!hasAliasMatch(headers, ['kontaktlærer', 'kontaktansvarlig lærer', 'kontaktlaerer'])) missing.push('Kontaktlærer')
+    if (!hasAliasMatch(headers, ['avbrudd', 'discontinued'])) missing.push('Avbrudd')
+    return missing
+  }
+
+  const getMissingWarningColumns = (sheet: Record<string, any>[]): string[] => {
+    if (sheet.length === 0) return []
+    const headers = Object.keys(sheet[0])
+    const missing: string[] = []
+    if (!hasAliasMatch(headers, ['elevnavn', 'navn', 'name', 'student'])) missing.push('Elevnavn')
+    if (!hasAliasMatch(headers, ['klasse', 'klassegruppe', 'class'])) missing.push('Klasse')
+    if (!hasAliasMatch(headers, ['faggruppe'])) missing.push('Faggruppe')
+    if (!hasAliasMatch(headers, ['type varsel', 'varseltype', 'type', 'varselbrev type', 'hva'])) missing.push('Type varsel')
+    if (!hasTokenMatch(headers, [['sendt dato'], ['sendt'], ['sent']])) missing.push('Sendt / Sendt dato')
+    if (!hasTokenMatch(headers, [['fdselsdato'], ['fodselsdato'], ['birthdate']])) missing.push('Fødselsdato')
+    return missing
+  }
+
+  const getMissingGradeColumns = (sheet: Record<string, any>[]): string[] => {
+    if (sheet.length === 0) return []
+    const headers = Object.keys(sheet[0])
+    const missing: string[] = []
+    if (!hasAliasMatch(headers, ['elev', 'navn', 'student'])) missing.push('Elev')
+    if (!hasAliasMatch(headers, ['klasse', 'klassegruppe', 'class'])) missing.push('Klassegruppe')
+    if (!hasAliasMatch(headers, ['gruppe', 'faggruppe', 'group'])) missing.push('Gruppe')
+    if (!hasAliasMatch(headers, ['fagkode'])) missing.push('Fagkode')
+    if (!hasAliasMatch(headers, ['grade', 'karakter'])) missing.push('Grade')
+    if (!hasAliasMatch(headers, ['subject teacher', 'faglærer', 'faglaerer', 'lærer', 'larer', 'teacher'])) missing.push('Subject Teacher')
+    if (!hasAliasMatch(headers, ['halvår', 'halvar', 'termin', 'term'])) missing.push('Halvår')
+    return missing
+  }
+
+  const getMissingStudentInfoColumns = (sheet: Record<string, any>[]): string[] => {
+    if (sheet.length === 0) return []
+    const headers = Object.keys(sheet[0])
+    const missing: string[] = []
+    if (!hasAliasMatch(headers, ['fornavn', 'first name', 'firstname'])) missing.push('Fornavn')
+    if (!hasAliasMatch(headers, ['etternavn', 'last name', 'lastname'])) missing.push('Etternavn')
+    if (!hasTokenMatch(headers, [['fødselsdato'], ['fodselsdato'], ['birthdate'], ['dob']])) missing.push('Fødselsdato')
+    if (!hasAliasMatch(headers, ['programområde', 'programomrade', 'program area'])) missing.push('Programområde')
+    if (!hasAliasMatch(headers, ['fritak i sidemål', 'fritak i sidemal', 'sidemål', 'sidemal'])) missing.push('Fritak i sidemål')
+    if (!hasAliasMatch(headers, ['inntakspoeng', 'intake points'])) missing.push('Inntakspoeng')
+    if (!hasAliasMatch(headers, ['klasse', 'klassegruppe', 'class'])) missing.push('Klasse')
+    return missing
   }
 
   const looksLikeAbsenceWorkbook = (sheet: Record<string, any>[]): boolean => {
@@ -212,16 +283,15 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
   const looksLikeWarningWorkbook = (sheet: Record<string, any>[]): boolean => {
     if (sheet.length === 0) return false
     const first = sheet[0]
-    const hasNavn = Object.keys(first).some(h => normalizeHeader(h).includes('navn'))
-    const hasFaggruppe = Object.keys(first).some(h => {
-      const n = normalizeHeader(h)
-      return n.includes('faggruppe') || n.includes('fagkode') || n.includes('fag')
-    })
-    const hasVarselType = Object.keys(first).some(h => {
-      const n = normalizeHeader(h)
-      return n.includes('varsel') || n.includes('warning')
-    })
-    return hasNavn && hasFaggruppe && hasVarselType
+    const headers = Object.keys(first)
+    const normalized = headers.map(h => normalizeHeader(h))
+    const hasFaggruppe = normalized.some(h => h.includes('faggruppe') || h.includes('fagkode') || h.includes('fag'))
+    const hasSendt = normalized.some(h => h.includes('sendt') || h.includes('sent'))
+    const hasKlasse = normalized.some(h => h.includes('klasse'))
+    const hasVarselType = normalized.some(h => h.includes('varsel') || h.includes('warning') || h === 'hva')
+    // Strict match: has explicit varsel-type column
+    // Loose match: has faggruppe + sendt + klasse (distinctive combo for warning exports)
+    return hasFaggruppe && (hasVarselType || (hasSendt && hasKlasse))
   }
 
   const looksLikeStudentInfoWorkbook = (sheet: Record<string, any>[]): boolean => {
@@ -267,8 +337,8 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
         navn: getRowValue(row, ['elevnavn', 'navn', 'name', 'student']),
         class: getRowValue(row, ['klasse', 'klassegruppe', 'class']),
         subjectGroup: getRowValue(row, ['faggruppe']),
-        warningType: getRowValue(row, ['type varsel', 'varseltype', 'type', 'varselbrev type']),
-        sentDate: getDateField(row, [['sendt'], ['sent']]),
+        warningType: getRowValue(row, ['type varsel', 'varseltype', 'type', 'varselbrev type', 'hva']),
+        sentDate: getDateField(row, [['sendt dato'], ['sendt'], ['sent']]),  
         isAdult: getAdultStatus(row, [['fdselsdato'], ['fodselsdato'], ['birthdate']]),
       }))
       .filter(r => r.navn && r.class)
@@ -333,6 +403,7 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
 
     setLoading(true)
     setError(null)
+    setMissingColumns([])
 
     try {
       const data: DataStore = {
@@ -344,6 +415,7 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
       }
 
       // Process all files and detect by content
+      const missingWarnings: { fileName: string; fileType: string; missing: string[] }[] = []
       for (const file of selectedFiles) {
         try {
           const buffer = await file.arrayBuffer()
@@ -353,21 +425,47 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
           ) as Record<string, any>[]
 
           if (looksLikeAbsenceWorkbook(sheetRaw)) {
+            const missing = getMissingAbsenceColumns(sheetRaw)
+            if (missing.length > 0) missingWarnings.push({ fileName: file.name, fileType: 'Fraværsfil', missing })
             const parsed = parseAbsenceSheet(sheetRaw)
             data.absences = parsed
           } else if (looksLikeWarningWorkbook(sheetRaw)) {
+            const missing = getMissingWarningColumns(sheetRaw)
+            if (missing.length > 0) missingWarnings.push({ fileName: file.name, fileType: 'Varselfil', missing })
             const parsed = parseWarningsSheet(sheetRaw)
             data.warnings = parsed
             data.warningFileCreatedDate = getWarningFileCreatedDate(wb, file) ?? data.warningFileCreatedDate
           } else if (looksLikeGradeWorkbook(sheetRaw)) {
+            const missing = getMissingGradeColumns(sheetRaw)
+            if (missing.length > 0) missingWarnings.push({ fileName: file.name, fileType: 'Karakterfil', missing })
             const parsed = parseGradeSheet(sheetRaw)
             data.grades = parsed
           } else if (looksLikeStudentInfoWorkbook(sheetRaw)) {
+            const missing = getMissingStudentInfoColumns(sheetRaw)
+            if (missing.length > 0) missingWarnings.push({ fileName: file.name, fileType: 'Elevfil', missing })
             const parsed = parseStudentInfoSheet(sheetRaw)
             data.studentInfo = parsed
           } else if (looksLikePresetWorkbook(sheetRaw)) {
             const parsed = parsePresetSheet(sheetRaw)
             if (onPresetImport && parsed.length > 0) onPresetImport(parsed)
+          } else {
+            // File wasn't recognized — try each type's full column check to find the closest match
+            const absenceMissing = getMissingAbsenceColumns(sheetRaw)
+            const warningMissing = getMissingWarningColumns(sheetRaw)
+            const gradeMissing = getMissingGradeColumns(sheetRaw)
+            const studentMissing = getMissingStudentInfoColumns(sheetRaw)
+            const candidates = [
+              { fileType: 'Fraværsfil', missing: absenceMissing },
+              { fileType: 'Varselfil', missing: warningMissing },
+              { fileType: 'Karakterfil', missing: gradeMissing },
+              { fileType: 'Elevfil', missing: studentMissing },
+            ]
+            const best = candidates.reduce((a, b) => a.missing.length <= b.missing.length ? a : b)
+            if (best.missing.length > 0 && best.missing.length < 5) {
+              missingWarnings.push({ fileName: file.name, fileType: best.fileType, missing: best.missing })
+            } else {
+              missingWarnings.push({ fileName: file.name, fileType: 'Ukjent fil', missing: ['Filen ble ikke gjenkjent som noen kjent filtype'] })
+            }
           }
         } catch (err) {
           console.error('Error processing file:', err)
@@ -375,6 +473,8 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
           continue
         }
       }
+
+      if (missingWarnings.length > 0) setMissingColumns(missingWarnings)
 
       if (data.absences.length === 0) {
         setError('Fant ingen gyldige fraværsdata')
@@ -391,7 +491,52 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
 
   return (
     <div className="card p-12">
-      <div className="max-w-2xl mx-auto">
+      {missingColumns.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full mx-4 overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-amber-100 rounded-lg flex items-center justify-center">
+                  <AlertTriangle className="w-5 h-5 text-amber-600" />
+                </div>
+                <h3 className="font-semibold text-slate-900 text-lg">Manglende kolonner</h3>
+              </div>
+              <button
+                onClick={() => setMissingColumns([])}
+                className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-6 py-4 space-y-4 max-h-96 overflow-y-auto">
+              {missingColumns.map((w, i) => (
+                <div key={i}>
+                  <p className="text-sm font-medium text-slate-700 mb-1">
+                    <span className="text-slate-500">{w.fileType}:</span> {w.fileName}
+                  </p>
+                  <ul className="space-y-1">
+                    {w.missing.map(col => (
+                      <li key={col} className="flex items-center gap-2 text-sm text-slate-600">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                        {col}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-200">
+              <button
+                onClick={() => setMissingColumns([])}
+                className="w-full btn-primary py-2 text-sm"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <div className="max-w-4xl mx-auto">
         <div className="flex justify-center mb-6">
           <div className="w-16 h-16 bg-sky-100 rounded-lg flex items-center justify-center">
             <Upload className="w-8 h-8 text-sky-600" />
@@ -452,35 +597,42 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
           <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-lg">
             <p className="text-red-700 font-medium">{error}</p>
             <p className="text-sm text-red-600 mt-2">
-              Kontroller at filene inneholder: Navn, Klasse, Fagnavn, H1+H2 % udok. fravær, H1+H2 timer udok. fravær, Lærer (fraværsfil), Navn, Faggruppe, Varseltype, Sendt, Fødselsdato (varselfil), Elev, Gruppe, Karakter (karakterfil) og Fornavn, Etternavn, Programområde, Fritak i sidemål, Inntakspoeng (elevfil)
+              Kontroller at filene inneholder riktige kolonner: Fraværsfil: Navn, Klasse, Fagnavn, Faggruppe/Fagkode, H1+H2 % udok. fravær, H1+H2 timer udok. fravær, Lærer. Varselfil: Elevnavn/Navn, Klasse, Faggruppe, Type varsel, Sendt, Fødselsdato. Karakterfil: Elev, Klasse, Gruppe, Fagkode, Karakter, Faglærer, Halvår. Elevfil: Fornavn, Etternavn, Fødselsdato, Programområde, Fritak i sidemål, Inntakspoeng.
             </p>
           </div>
         )}
 
-        <div className="mt-8 grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+        <div className="mt-8">
+          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">Filer</h3>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
           <div className="bg-slate-50 rounded-lg p-4">
             <h4 className="font-semibold text-slate-900 mb-2">
-              Fraværsfil
-              <span className="block text-xs font-normal text-slate-500">(fra rapport)</span>
+              Fravær
+              <span className="block text-xs font-normal text-slate-500">(fra Fraværsrapport)</span>
             </h4>
             <ul className="text-slate-600 space-y-1 text-xs">
               <li>• Navn</li>
               <li>• Klasse</li>
               <li>• Fagnavn</li>
+              <li>• Faggruppe</li>
               <li>• H1+H2 % udok. fravær</li>
               <li>• H1+H2 timer udok. fravær</li>
+              <li>• Lærer</li>
+              <li>• Kontaktlærer</li>
+              <li>• Avbrudd</li>
             </ul>
           </div>
           <div className="bg-slate-50 rounded-lg p-4">
             <h4 className="font-semibold text-slate-900 mb-2">
-              Varselfil
-              <span className="block text-xs font-normal text-slate-500">(manuelt fra varseloversikt)</span>
+              Varsler
+              <span className="block text-xs font-normal text-slate-500">(manuelt fra varseloversikt*)</span>
             </h4>
             <ul className="text-slate-600 space-y-1 text-xs">
-              <li>• Navn</li>
+              <li>• Elevnavn</li>
+              <li>• Klasse</li>
               <li>• Faggruppe</li>
-              <li>• Varseltype</li>
-              <li>• Sendt</li>
+              <li>• Type varsel</li>
+              <li>• Sendt dato</li>
               <li>• Fødselsdato</li>
             </ul>
           </div>
@@ -491,9 +643,11 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
             </h4>
             <ul className="text-slate-600 space-y-1 text-xs">
               <li>• Elev</li>
+              <li>• Klassegruppe</li>
               <li>• Gruppe</li>
-              <li>• Karakter</li>
-              <li>• Faglærer</li>
+              <li>• Fagkode</li>
+              <li>• Grade</li>
+              <li>• Subject Teacher</li>
               <li>• Halvår</li>
             </ul>
           </div>
@@ -505,9 +659,11 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
             <ul className="text-slate-600 space-y-1 text-xs">
               <li>• Fornavn</li>
               <li>• Etternavn</li>
+              <li>• Fødselsdato</li>
               <li>• Programområde</li>
               <li>• Fritak i sidemål</li>
               <li>• Inntakspoeng</li>
+              <li>• Klasse</li>
             </ul>
           </div>
           <div className="bg-slate-50 rounded-lg p-4">
@@ -521,7 +677,21 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
               <li>• Klasser</li>
             </ul>
           </div>
+          </div>
         </div>
+        <p className="mt-4 text-xs text-slate-500">
+          * Finn i VIS under <span className="font-medium">Kommunikasjon &rarr; Varselbrev</span>. La siden laste helt inn før du trykker på nedtrekksmeny for <span className="font-medium">Antall per side</span> og velger <span className="font-medium">Alle</span>. Trykk tannhjulet og vis alle kolonner unntatt &laquo;Nedlasting&raquo;. Kopier radene uten headere og lim inn i Excel.{' '}
+          <button
+            type="button"
+            onClick={downloadWarningTemplate}
+            className="text-sky-600 hover:underline font-medium"
+          >
+            Mal kan lastes ned her
+          </button>.
+        </p>
+        <p className="mt-2 text-xs text-slate-500">
+          I VIS må rekkefølgen være: <span className="font-medium">Type varsel, Elevnavn, Fødselsdato, Klasse, Fagkode, Faggruppe, Fraværsprosent, Kontaktansvarlig lærer, Avsenders navn, Sendt dato</span>.
+        </p>
       </div>
     </div>
   )
