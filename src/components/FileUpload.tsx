@@ -20,6 +20,7 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
   const [error, setError] = useState<string | null>(null)
   const [anonymize, setAnonymize] = useState(false)
   const [missingColumns, setMissingColumns] = useState<{ fileName: string; fileType: string; missing: string[] }[]>([])
+  const [detectedTypes, setDetectedTypes] = useState<Set<string>>(new Set())
 
   const normalizeHeader = (header: string): string =>
     header
@@ -190,7 +191,7 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
     if (!hasTokenMatch(headers, [['h1', 'h2', 'timer', 'udok', 'frav']])) missing.push('H1+H2 timer udok. fravær')
     if (!hasAliasMatch(headers, ['lærer', 'larer', 'teacher', 'leder'])) missing.push('Lærer')
     if (!hasAliasMatch(headers, ['kontaktlærer', 'kontaktansvarlig lærer', 'kontaktlaerer'])) missing.push('Kontaktlærer')
-    if (!hasAliasMatch(headers, ['avbrudd', 'discontinued'])) missing.push('Avbrudd')
+    if (!hasTokenMatch(headers, [['avbrudd'], ['discontinued']])) missing.push('Avbrudd i skoleåret')
     return missing
   }
 
@@ -325,7 +326,7 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
           hoursAbsence: hours,
           teacher: getRowValue(row, ['lærer', 'larer', 'teacher', 'leder']),
           kontaktlaerer: getRowValue(row, ['kontaktlærer', 'kontaktansvarlig lærer', 'kontaktlaerer']) || undefined,
-          avbrudd: getRowValue(row, ['avbrudd', 'discontinued']).toLowerCase() === 'ja',
+          avbrudd: getRowValueByTokens(row, [['avbrudd'], ['discontinued']]).toLowerCase() === 'ja',
         }
       })
       .filter(r => r.navn && r.class && r.subject)
@@ -404,6 +405,7 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
     setLoading(true)
     setError(null)
     setMissingColumns([])
+    setDetectedTypes(new Set())
 
     try {
       const data: DataStore = {
@@ -416,6 +418,7 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
 
       // Process all files and detect by content
       const missingWarnings: { fileName: string; fileType: string; missing: string[] }[] = []
+      const detected = new Set<string>()
       for (const file of selectedFiles) {
         try {
           const buffer = await file.arrayBuffer()
@@ -429,25 +432,30 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
             if (missing.length > 0) missingWarnings.push({ fileName: file.name, fileType: 'Fraværsfil', missing })
             const parsed = parseAbsenceSheet(sheetRaw)
             data.absences = parsed
+            detected.add('absence')
           } else if (looksLikeWarningWorkbook(sheetRaw)) {
             const missing = getMissingWarningColumns(sheetRaw)
             if (missing.length > 0) missingWarnings.push({ fileName: file.name, fileType: 'Varselfil', missing })
             const parsed = parseWarningsSheet(sheetRaw)
             data.warnings = parsed
             data.warningFileCreatedDate = getWarningFileCreatedDate(wb, file) ?? data.warningFileCreatedDate
+            detected.add('warnings')
           } else if (looksLikeGradeWorkbook(sheetRaw)) {
             const missing = getMissingGradeColumns(sheetRaw)
             if (missing.length > 0) missingWarnings.push({ fileName: file.name, fileType: 'Karakterfil', missing })
             const parsed = parseGradeSheet(sheetRaw)
             data.grades = parsed
+            detected.add('grades')
           } else if (looksLikeStudentInfoWorkbook(sheetRaw)) {
             const missing = getMissingStudentInfoColumns(sheetRaw)
             if (missing.length > 0) missingWarnings.push({ fileName: file.name, fileType: 'Elevfil', missing })
             const parsed = parseStudentInfoSheet(sheetRaw)
             data.studentInfo = parsed
+            detected.add('studentInfo')
           } else if (looksLikePresetWorkbook(sheetRaw)) {
             const parsed = parsePresetSheet(sheetRaw)
             if (onPresetImport && parsed.length > 0) onPresetImport(parsed)
+            detected.add('preset')
           } else {
             // File wasn't recognized — try each type's full column check to find the closest match
             const absenceMissing = getMissingAbsenceColumns(sheetRaw)
@@ -481,7 +489,10 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
         return
       }
 
-      onDataImport(anonymize ? anonymizeData(data) : data)
+      setDetectedTypes(detected)
+      const finalData = anonymize ? anonymizeData(data) : data
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      onDataImport(finalData)
     } catch (err) {
       setError('Feil ved behandling av filer: ' + (err instanceof Error ? err.message : String(err)))
     } finally {
@@ -605,12 +616,12 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
         <div className="mt-8">
           <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">Filer</h3>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-          <div className="bg-slate-50 rounded-lg p-4">
-            <h4 className="font-semibold text-slate-900 mb-2">
+          <div className={`rounded-lg p-4 transition-colors duration-500 ${detectedTypes.has('absence') ? 'bg-green-50' : 'bg-slate-50'}`}>
+            <h4 className={`font-semibold mb-2 transition-colors duration-500 ${detectedTypes.has('absence') ? 'text-green-800' : 'text-slate-900'}`}>
               Fravær
-              <span className="block text-xs font-normal text-slate-500">(fra Fraværsrapport)</span>
+              <span className={`block text-xs font-normal transition-colors duration-500 ${detectedTypes.has('absence') ? 'text-green-600' : 'text-slate-500'}`}>(fra Fraværsrapport)</span>
             </h4>
-            <ul className="text-slate-600 space-y-1 text-xs">
+            <ul className={`space-y-1 text-xs transition-colors duration-500 ${detectedTypes.has('absence') ? 'text-green-700' : 'text-slate-600'}`}>
               <li>• Navn</li>
               <li>• Klasse</li>
               <li>• Fagnavn</li>
@@ -619,15 +630,15 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
               <li>• H1+H2 timer udok. fravær</li>
               <li>• Lærer</li>
               <li>• Kontaktlærer</li>
-              <li>• Avbrudd</li>
+              <li>• Avbrudd i skoleåret</li>
             </ul>
           </div>
-          <div className="bg-slate-50 rounded-lg p-4">
-            <h4 className="font-semibold text-slate-900 mb-2">
+          <div className={`rounded-lg p-4 transition-colors duration-500 ${detectedTypes.has('warnings') ? 'bg-green-50' : 'bg-slate-50'}`}>
+            <h4 className={`font-semibold mb-2 transition-colors duration-500 ${detectedTypes.has('warnings') ? 'text-green-800' : 'text-slate-900'}`}>
               Varsler
-              <span className="block text-xs font-normal text-slate-500">(manuelt fra varseloversikt*)</span>
+              <span className={`block text-xs font-normal transition-colors duration-500 ${detectedTypes.has('warnings') ? 'text-green-600' : 'text-slate-500'}`}>(manuelt fra varseloversikt*)</span>
             </h4>
-            <ul className="text-slate-600 space-y-1 text-xs">
+            <ul className={`space-y-1 text-xs transition-colors duration-500 ${detectedTypes.has('warnings') ? 'text-green-700' : 'text-slate-600'}`}>
               <li>• Elevnavn</li>
               <li>• Klasse</li>
               <li>• Faggruppe</li>
@@ -636,12 +647,12 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
               <li>• Fødselsdato</li>
             </ul>
           </div>
-          <div className="bg-slate-50 rounded-lg p-4">
-            <h4 className="font-semibold text-slate-900 mb-2">
+          <div className={`rounded-lg p-4 transition-colors duration-500 ${detectedTypes.has('grades') ? 'bg-green-50' : 'bg-slate-50'}`}>
+            <h4 className={`font-semibold mb-2 transition-colors duration-500 ${detectedTypes.has('grades') ? 'text-green-800' : 'text-slate-900'}`}>
               Karakterfil
-              <span className="block text-xs font-normal text-slate-500">(fra rapport)</span>
+              <span className={`block text-xs font-normal transition-colors duration-500 ${detectedTypes.has('grades') ? 'text-green-600' : 'text-slate-500'}`}>(fra rapport)</span>
             </h4>
-            <ul className="text-slate-600 space-y-1 text-xs">
+            <ul className={`space-y-1 text-xs transition-colors duration-500 ${detectedTypes.has('grades') ? 'text-green-700' : 'text-slate-600'}`}>
               <li>• Elev</li>
               <li>• Klassegruppe</li>
               <li>• Gruppe</li>
@@ -651,12 +662,12 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
               <li>• Halvår</li>
             </ul>
           </div>
-          <div className="bg-slate-50 rounded-lg p-4">
-            <h4 className="font-semibold text-slate-900 mb-2">
+          <div className={`rounded-lg p-4 transition-colors duration-500 ${detectedTypes.has('studentInfo') ? 'bg-green-50' : 'bg-slate-50'}`}>
+            <h4 className={`font-semibold mb-2 transition-colors duration-500 ${detectedTypes.has('studentInfo') ? 'text-green-800' : 'text-slate-900'}`}>
               Elevfil
-              <span className="block text-xs font-normal text-slate-500">(eksporter elevliste)</span>
+              <span className={`block text-xs font-normal transition-colors duration-500 ${detectedTypes.has('studentInfo') ? 'text-green-600' : 'text-slate-500'}`}>(eksporter elevliste)</span>
             </h4>
-            <ul className="text-slate-600 space-y-1 text-xs">
+            <ul className={`space-y-1 text-xs transition-colors duration-500 ${detectedTypes.has('studentInfo') ? 'text-green-700' : 'text-slate-600'}`}>
               <li>• Fornavn</li>
               <li>• Etternavn</li>
               <li>• Fødselsdato</li>
@@ -666,12 +677,12 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
               <li>• Klasse</li>
             </ul>
           </div>
-          <div className="bg-slate-50 rounded-lg p-4">
-            <h4 className="font-semibold text-slate-900 mb-2">
+          <div className={`rounded-lg p-4 transition-colors duration-500 ${detectedTypes.has('preset') ? 'bg-green-50' : 'bg-slate-50'}`}>
+            <h4 className={`font-semibold mb-2 transition-colors duration-500 ${detectedTypes.has('preset') ? 'text-green-800' : 'text-slate-900'}`}>
               Preset-fil
-              <span className="block text-xs font-normal text-slate-500">(valgfri)</span>
+              <span className={`block text-xs font-normal transition-colors duration-500 ${detectedTypes.has('preset') ? 'text-green-600' : 'text-slate-500'}`}>(valgfri)</span>
             </h4>
-            <ul className="text-slate-600 space-y-1 text-xs">
+            <ul className={`space-y-1 text-xs transition-colors duration-500 ${detectedTypes.has('preset') ? 'text-green-700' : 'text-slate-600'}`}>
               <li>• Navn</li>
               <li>• Rolle</li>
               <li>• Klasser</li>
