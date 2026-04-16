@@ -384,6 +384,9 @@ export default function StatsView({ data, threshold }: Props) {
         showTitle: true,
         title: 'IV / Karakter 1 / Karakter 2',
         titleFontSize: 10,
+        showLegend: true,
+        legendFontSize: 8,
+        legendPos: 'b',
       } as any)
 
       // ── Grade spread slide for this trinn ──────────────────────────────
