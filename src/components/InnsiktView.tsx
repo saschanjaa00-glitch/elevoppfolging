@@ -48,6 +48,7 @@ type SortKey =
   | 'grade4'
   | 'grade5'
   | 'grade6'
+  | 'avgGrade'
 type SortDirection = 'asc' | 'desc'
 
 export default function InnsiktView({ data, threshold }: Props) {
@@ -299,6 +300,17 @@ export default function InnsiktView({ data, threshold }: Props) {
     grade6: '6',
   }
 
+  const avgGradeNum = (gradesCounts: Record<string, number>): number | null => {
+    const numericGrades = ['1', '2', '3', '4', '5', '6'] as const
+    let sum = 0, count = 0
+    numericGrades.forEach(g => {
+      const n = gradesCounts[g] ?? 0
+      sum += Number(g) * n
+      count += n
+    })
+    return count > 0 ? sum / count : null
+  }
+
   const filteredAndSorted = useMemo(() => {
     let filtered = teacherStats.filter(t =>
       t.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -310,6 +322,7 @@ export default function InnsiktView({ data, threshold }: Props) {
       if (key === 'missingWarnings') return row.missingWarnings
       if (key === 'warningsF') return row.varselsByType['F'] ?? 0
       if (key === 'warningsG') return row.varselsByType['G'] ?? 0
+      if (key === 'avgGrade') return avgGradeNum(row.gradesCounts) ?? -1
       const gradeKey = sortGradeByKey[key]
       if (gradeKey) {
         if (row.gradeCount === 0) return 0
@@ -333,6 +346,30 @@ export default function InnsiktView({ data, threshold }: Props) {
 
     return filtered
   }, [teacherStats, searchTerm, sortKey, sortDirection])
+
+  const sortedSubjectsForTeacher = (subjects: SubjectStats[]): SubjectStats[] => {
+    const numVal = (s: SubjectStats): number => {
+      const total = Object.values(s.gradesCounts).reduce((a, b) => a + b, 0)
+      if (sortKey === 'grades') return total
+      if (sortKey === 'totalVarsels') return s.totalVarsels
+      if (sortKey === 'missingWarnings') return s.missingWarnings
+      if (sortKey === 'warningsF') return s.varselsByType['F'] ?? 0
+      if (sortKey === 'warningsG') return s.varselsByType['G'] ?? 0
+      if (sortKey === 'avgGrade') return avgGradeNum(s.gradesCounts) ?? -1
+      const gradeKey = sortGradeByKey[sortKey]
+      if (gradeKey) return total === 0 ? 0 : ((s.gradesCounts[gradeKey] ?? 0) / total) * 100
+      return 0
+    }
+    return [...subjects].sort((a, b) => {
+      if (sortKey === 'name') {
+        const cmp = a.subject.localeCompare(b.subject, 'nb-NO')
+        return sortDirection === 'asc' ? cmp : -cmp
+      }
+      const diff = numVal(a) - numVal(b)
+      if (diff !== 0) return sortDirection === 'asc' ? diff : -diff
+      return a.subject.localeCompare(b.subject, 'nb-NO')
+    })
+  }
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -656,6 +693,18 @@ export default function InnsiktView({ data, threshold }: Props) {
                   </th>
                 ))}
                 <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                  <button
+                    type="button"
+                    onClick={() => toggleSort('avgGrade')}
+                    className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
+                  >
+                    <span>Snitt</span>
+                    <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                      {getSortIndicator('avgGrade')}
+                    </span>
+                  </button>
+                </th>
+                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   PDF
                 </th>
               </tr>
@@ -705,6 +754,9 @@ export default function InnsiktView({ data, threshold }: Props) {
                         </div>
                       </td>
                     ))}
+                    <td className="py-2 px-3 text-center font-semibold text-slate-800">
+                      {avgGradeNum(teacher.gradesCounts)?.toFixed(2).replace('.', ',') ?? '—'}
+                    </td>
                     <td className="py-2 px-3 text-center">
                       <button
                         type="button"
@@ -721,7 +773,7 @@ export default function InnsiktView({ data, threshold }: Props) {
                   {expandedTeacher === teacher.name && (
                     <>
                       {teacher.subjectStats.length > 0 ? (
-                        teacher.subjectStats.map(subject => {
+                        sortedSubjectsForTeacher(teacher.subjectStats).map(subject => {
                           const subjectGradeTotal = Object.values(subject.gradesCounts).reduce((sum, count) => sum + count, 0)
 
                           return (
@@ -749,6 +801,9 @@ export default function InnsiktView({ data, threshold }: Props) {
                                 </div>
                               </td>
                             ))}
+                            <td className="py-2 px-3 text-center font-semibold text-slate-800">
+                              {avgGradeNum(subject.gradesCounts)?.toFixed(2).replace('.', ',') ?? '—'}
+                            </td>
                             <td className="py-2 px-3 text-center text-slate-400">-</td>
                           </tr>
                         )})

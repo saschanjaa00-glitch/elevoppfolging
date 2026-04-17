@@ -117,17 +117,22 @@ export default function StudentList({
   )
   const warningLookup = useMemo(() => {
     const warningMap = new Map<string, Array<{ warningType: string; sentDate: string }>>()
+    // Fallback map keyed by normalizedName::normalizedSubjectGroup (no class) for class-mismatch tolerance
+    const warningMapNoClass = new Map<string, Array<{ warningType: string; sentDate: string }>>()
     const studentAdultMap = new Map<string, boolean>()
     data.warnings.forEach(warning => {
       const key = buildStudentSubjectKey(warning.navn, warning.class, warning.subjectGroup)
       if (!warningMap.has(key)) warningMap.set(key, [])
       warningMap.get(key)!.push({ warningType: warning.warningType, sentDate: warning.sentDate })
+      const noClassKey = `${normalizeMatch(warning.navn)}::${normalizeSubjectGroupKey(warning.subjectGroup)}`
+      if (!warningMapNoClass.has(noClassKey)) warningMapNoClass.set(noClassKey, [])
+      warningMapNoClass.get(noClassKey)!.push({ warningType: warning.warningType, sentDate: warning.sentDate })
       const studentKey = buildStudentClassKey(warning.navn, warning.class)
       if (!studentAdultMap.has(studentKey) || warning.isAdult) {
         studentAdultMap.set(studentKey, warning.isAdult)
       }
     })
-    return { warningMap, studentAdultMap }
+    return { warningMap, warningMapNoClass, studentAdultMap }
   }, [data.warnings])
 
   const gradeLookup = useMemo(() => {
@@ -227,7 +232,7 @@ export default function StudentList({
   }
 
   const studentSummaries = useMemo(() => {
-    const { warningMap, studentAdultMap } = warningLookup
+    const { warningMap, warningMapNoClass, studentAdultMap } = warningLookup
     const { gradeMap, subjectTeacherMap } = gradeLookup
     const classDataByStudent = new Map<string, typeof classData>()
 
@@ -261,7 +266,8 @@ export default function StudentList({
       const studentNorm = normalizeMatch(record.navn)
       const key = `${record.class}::${record.navn}`
       const warningKey = buildStudentSubjectKey(record.navn, record.class, record.subjectGroup)
-      const warnings = warningMap.get(warningKey) ?? []
+      const noClassWarningKey = `${normalizeMatch(record.navn)}::${normalizeSubjectGroupKey(record.subjectGroup)}`
+      const warnings = warningMap.get(warningKey) ?? warningMapNoClass.get(noClassWarningKey) ?? []
       const hasSubjectWarning = warnings.length > 0
       const grade = gradeMap.get(warningKey)
       const subjectTeacher = subjectTeacherMap.get(warningKey) ?? record.teacher

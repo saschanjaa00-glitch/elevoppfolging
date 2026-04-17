@@ -165,10 +165,12 @@ function gradeDelta(avgGrade: number | null, avgGrunnskolepoeng: number | null):
   return avgGrade - avgGrunnskolepoeng
 }
 
-export default function StatsView({ data, threshold }: Props) {
+export default function StatsView({ data, threshold: propThreshold }: Props) {
   const [selectedMetric, setSelectedMetric] = useState<MetricKey | null>(null)
   const [tableSort, setTableSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null)
   const [vgFilter, setVgFilter] = useState<string | null>(null)
+  const [localThreshold, setLocalThreshold] = useState<number>(propThreshold)
+  const threshold = localThreshold
   const summaryRef = useRef<HTMLDivElement>(null)
   const tableRef = useRef<HTMLDivElement>(null)
 
@@ -242,10 +244,14 @@ export default function StatsView({ data, threshold }: Props) {
     }
 
     // ── Compute supplementary totals ────────────────────────────────────
-    // Students with at least one subject > 10% absence
+    // Students and subjects with > 10% absence
     const studentsOver10 = new Set<string>()
+    const subjectsOver10 = new Set<string>()
     data.absences.forEach(r => {
-      if (r.percentageAbsence > 10) studentsOver10.add(buildStudentClassKey(r.navn, r.class))
+      if (r.percentageAbsence > 10) {
+        studentsOver10.add(buildStudentClassKey(r.navn, r.class))
+        subjectsOver10.add(buildStudentSubjectKey(r.navn, r.class, r.subjectGroup))
+      }
     })
     // Missing warnings where absence > 10%
     const missingWarningsOver10Students = new Set<string>()
@@ -262,14 +268,6 @@ export default function StatsView({ data, threshold }: Props) {
       if (r.percentageAbsence > 10 && !_warnMap10.has(combo)) {
         missingWarningsOver10Students.add(buildStudentClassKey(r.navn, r.class))
         missingWarningsOver10Subjects.add(combo)
-      }
-    })
-    // Students who received a vurderingsgrunnlag warning
-    const gWarningStudents = new Set<string>()
-    data.warnings.forEach(w => {
-      const t = w.warningType.toLowerCase()
-      if (t.includes('vurdering') || t.includes('grunnlag')) {
-        gWarningStudents.add(buildStudentClassKey(w.navn, w.class))
       }
     })
 
@@ -290,13 +288,12 @@ export default function StatsView({ data, threshold }: Props) {
     const totalCards = [
       { label: 'Elever', value: String(stats.overall.studentCount), sub: null, warn: false },
       { label: 'Gj.snitt fravær', value: `${fmt(stats.overall.avgAbsence, 1)}%`, sub: null, warn: false },
-      { label: 'Elever over 10% fravær', value: String(studentsOver10.size), sub: null, warn: studentsOver10.size > 0 },
+      { label: 'Elever over 10% fravær', value: String(studentsOver10.size), sub: `${subjectsOver10.size} fag over 10%`, warn: studentsOver10.size > 0 },
       { label: 'IV', value: String(stats.overall.ivCount), sub: `${stats.overall.ivStudentCount} elever`, warn: false },
       { label: 'Karakter 1', value: String(stats.overall.grade1Count), sub: `${stats.overall.grade1StudentCount} elever`, warn: false },
       { label: 'Varsler totalt', value: String(stats.overall.totalWarnings), sub: null, warn: false },
-      { label: 'Manglende varsler', value: String(stats.overall.missingWarnings), sub: `${stats.overall.missingWarningStudentCount} elever`, warn: true },
-      { label: 'Manglende varsler >10%', value: String(missingWarningsOver10Students.size), sub: `${missingWarningsOver10Subjects.size} fag uten varsel`, warn: missingWarningsOver10Students.size > 0 },
-      { label: 'Varslet vurderingsgrunnlag', value: String(gWarningStudents.size), sub: 'elever varslet', warn: false },
+      { label: `Manglende varsler (>${threshold}%)`, value: String(stats.overall.missingWarnings), sub: `${stats.overall.missingWarningStudentCount} elever`, warn: true },
+      { label: `Manglende varsler >10%`, value: String(missingWarningsOver10Students.size), sub: `${missingWarningsOver10Subjects.size} fag uten varsel`, warn: missingWarningsOver10Students.size > 0 },
     ]
     totalCards.forEach((card, i) => {
       const col = i % 3
@@ -928,7 +925,7 @@ export default function StatsView({ data, threshold }: Props) {
     warningsTotal: 'Varsler totalt',
     warningsF: 'Fraværsvarsler (F)',
     warningsG: 'Karaktervarsler (G)',
-    missingWarnings: 'Manglende varsler (>8%)',
+    missingWarnings: `Manglende varsler (>${threshold}%)`,  // eslint-disable-line react-hooks/exhaustive-deps
   }
 
   const metricValueText = (metric: MetricKey, row: LevelStats): string => {
@@ -1081,7 +1078,21 @@ export default function StatsView({ data, threshold }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-end gap-2 mb-2">
+      <div className="flex flex-wrap justify-between items-center gap-3 mb-2">
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-slate-700 whitespace-nowrap">Fraværsgrense:</label>
+          <input
+            type="number"
+            min={0}
+            max={30}
+            step={0.5}
+            value={threshold}
+            onChange={e => setLocalThreshold(Number(e.target.value))}
+            className="w-20 rounded border border-slate-300 px-2 py-1 text-sm text-center font-bold text-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-400"
+          />
+          <span className="text-sm text-slate-600">%</span>
+        </div>
+        <div className="flex gap-2">
         <button
           type="button"
           onClick={() => void generateStatsPptx()}
@@ -1096,6 +1107,7 @@ export default function StatsView({ data, threshold }: Props) {
         >
           📥 Eksporter som PNG
         </button>
+        </div>
       </div>
       {/* Section 1: Overall summary cards */}
       <div ref={summaryRef} className="bg-white rounded-lg shadow-sm border border-slate-100 p-6">
@@ -1181,7 +1193,7 @@ export default function StatsView({ data, threshold }: Props) {
             onClick={() => toggleMetric('warningsG')}
           />
           <StatCard
-            label="Manglende varsler (>8%)"
+            label={`Manglende varsler (>${threshold}%)`}
             value={String(filteredStats.missingWarnings)}
             highlight
             active={selectedMetric === 'missingWarnings'}

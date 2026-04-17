@@ -57,6 +57,7 @@ type SortKey =
   | 'grade4'
   | 'grade5'
   | 'grade6'
+  | 'avgGrade'
 type SortDirection = 'asc' | 'desc'
 
 const allGrades = ['IV', '1', '2', '3', '4', '5', '6'] as const
@@ -76,6 +77,17 @@ const sortGradeByKey: Partial<Record<SortKey, (typeof allGrades)[number]>> = {
 
 const totalGrades = (gradesCounts: Record<string, number>): number =>
   allGrades.reduce((sum, grade) => sum + (gradesCounts[grade] ?? 0), 0)
+
+const avgGradeNum = (gradesCounts: Record<string, number>): number | null => {
+  const numericGrades = ['1', '2', '3', '4', '5', '6'] as const
+  let sum = 0, count = 0
+  numericGrades.forEach(g => {
+    const n = gradesCounts[g] ?? 0
+    sum += Number(g) * n
+    count += n
+  })
+  return count > 0 ? sum / count : null
+}
 
 const gradePercentLabel = (count: number, total: number): string =>
   `${total > 0 ? ((count / total) * 100).toFixed(0) : '0'}%`
@@ -316,6 +328,7 @@ export default function FaginnsiktView({ data }: Props) {
       if (key === 'missingWarnings') return row.missingWarnings
       if (key === 'warningsF') return row.varselsByType['F'] ?? 0
       if (key === 'warningsG') return row.varselsByType['G'] ?? 0
+      if (key === 'avgGrade') return avgGradeNum(row.gradesCounts) ?? -1
       const gradeKey = sortGradeByKey[key]
       if (gradeKey) {
         const total = totalGrades(row.gradesCounts)
@@ -529,6 +542,32 @@ export default function FaginnsiktView({ data }: Props) {
     doc.save(`faginnsikt-${safeName}.pdf`)
   }
 
+  const sortedTeachersForRow = (teachers: TeacherInSubject[]): TeacherInSubject[] => {
+    const numVal = (t: TeacherInSubject): number => {
+      if (sortKey === 'students') return t.studentCount
+      if (sortKey === 'totalVarsels') return t.totalVarsels
+      if (sortKey === 'missingWarnings') return t.missingWarnings
+      if (sortKey === 'warningsF') return t.varselsByType['F'] ?? 0
+      if (sortKey === 'warningsG') return t.varselsByType['G'] ?? 0
+      if (sortKey === 'avgGrade') return avgGradeNum(t.gradesCounts) ?? -1
+      const gradeKey = sortGradeByKey[sortKey]
+      if (gradeKey) {
+        const total = totalGrades(t.gradesCounts)
+        return total === 0 ? 0 : ((t.gradesCounts[gradeKey] ?? 0) / total) * 100
+      }
+      return 0
+    }
+    return [...teachers].sort((a, b) => {
+      if (sortKey === 'name') {
+        const cmp = a.name.localeCompare(b.name, 'nb-NO')
+        return sortDirection === 'asc' ? cmp : -cmp
+      }
+      const diff = numVal(a) - numVal(b)
+      if (diff !== 0) return sortDirection === 'asc' ? diff : -diff
+      return a.name.localeCompare(b.name, 'nb-NO')
+    })
+  }
+
   const SortTh = ({ label, sk, className = '' }: { label: string; sk: SortKey; className?: string }) => (
     <th className={`sticky top-0 z-10 bg-white py-3 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap ${className}`}>
       <button
@@ -579,6 +618,7 @@ export default function FaginnsiktView({ data }: Props) {
                 {allGrades.map(grade => (
                   <SortTh key={grade} label={grade} sk={gradeSortKey[grade]} className="text-center" />
                 ))}
+                <SortTh label="Snitt" sk="avgGrade" className="text-center" />
                 <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   PDF
                 </th>
@@ -628,6 +668,9 @@ export default function FaginnsiktView({ data }: Props) {
                         </div>
                       </td>
                     ))}
+                    <td className="py-2 px-3 text-center font-semibold text-slate-800">
+                      {avgGradeNum(row.gradesCounts)?.toFixed(2).replace('.', ',') ?? '—'}
+                    </td>
                     <td className="py-2 px-3 text-center">
                       <button
                         type="button"
@@ -645,7 +688,7 @@ export default function FaginnsiktView({ data }: Props) {
                   {expandedSubject === row.subjectKey && (
                     <>
                       {row.teachers.length > 0 ? (
-                        row.teachers.map(teacher => {
+                        sortedTeachersForRow(row.teachers).map(teacher => {
                           const teacherGradeTotal = totalGrades(teacher.gradesCounts)
 
                           return (
@@ -673,6 +716,9 @@ export default function FaginnsiktView({ data }: Props) {
                                 </div>
                               </td>
                             ))}
+                            <td className="py-2 px-3 text-center font-semibold text-slate-800">
+                              {avgGradeNum(teacher.gradesCounts)?.toFixed(2).replace('.', ',') ?? '—'}
+                            </td>
                             <td className="py-2 px-3 text-center text-slate-400">-</td>
                           </tr>
                         )})
