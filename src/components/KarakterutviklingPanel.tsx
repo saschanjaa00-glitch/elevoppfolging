@@ -26,9 +26,13 @@ interface GraphSeries {
   name: string
   values: Record<string, { avg: number; count: number }>
   color: string
+  isMainLine?: boolean
+  dashed?: boolean
+  connectTo?: string
 }
 
 const TEACHER_SERIES_COLORS = ['#f97316', '#16a34a', '#a855f7', '#e11d48', '#14b8a6', '#f59e0b', '#7c3aed', '#65a30d']
+const LINKED_SUBJECT_COLORS = ['#dc2626', '#9333ea', '#0891b2', '#b45309', '#be185d', '#15803d']
 
 const normalizeHeader = (header: string): string =>
   header
@@ -99,6 +103,20 @@ const formatSchoolYearLabel = (year: string): string => {
   return year
 }
 
+const formatCompactSchoolYearLabel = (year: string): string => {
+  const digits = year.replace(/[^0-9]/g, '')
+  if (digits.length >= 8) {
+    return `${digits.slice(2, 4)}-${digits.slice(6, 8)}`
+  }
+  if (digits.length === 6) {
+    return `${digits.slice(2, 4)}-${digits.slice(4, 6)}`
+  }
+  if (digits.length === 4) {
+    return `${digits.slice(0, 2)}-${digits.slice(2, 4)}`
+  }
+  return formatSchoolYearLabel(year)
+}
+
 const normalizeHalvaar = (value: string | undefined): 'H1' | 'H2' | null => {
   const normalized = normalizeHeader(value ?? '')
   if (!normalized) return null
@@ -129,6 +147,7 @@ function TrendGraph({
   height = 180,
   svgRef,
   labelMap,
+  xAxisLabelFilter,
 }: {
   labels: string[]
   series: GraphSeries[]
@@ -136,9 +155,26 @@ function TrendGraph({
   height?: number
   svgRef?: RefObject<SVGSVGElement | null>
   labelMap?: Record<string, string>
+  xAxisLabelFilter?: (label: string) => boolean
 }) {
-  const padX = 34
+  const padX = 42
   const padY = 24
+
+  // Compute y-axis range from actual data
+  const allAvgs = series.flatMap(s => Object.values(s.values).map(v => v.avg))
+  const dataMin = allAvgs.length > 0 ? Math.min(...allAvgs) : 1
+  const dataMax = allAvgs.length > 0 ? Math.max(...allAvgs) : 6
+  const yMin = Math.max(1, Math.floor((dataMin - 1.5) * 2) / 2)
+  const yMax = Math.min(6, Math.ceil(dataMax + 0.5))
+  const yRange = yMax - yMin || 1
+
+  // Generate grid tick values at 0.5 intervals within range
+  const yTicks: number[] = []
+  for (let v = yMin; v <= yMax + 0.001; v += 0.5) {
+    yTicks.push(Math.round(v * 10) / 10)
+  }
+
+  const toY = (avg: number) => padY + ((yMax - avg) / yRange) * (height - padY * 2)
 
   const seriesPoints = series.map(s => ({
     ...s,
@@ -147,7 +183,7 @@ function TrendGraph({
         const avg = s.values[label]?.avg
         if (avg === undefined) return null
         const x = padX + (idx * (width - padX * 2)) / Math.max(1, labels.length - 1)
-        const y = padY + ((6 - avg) * (height - padY * 2)) / 5
+        const y = toY(avg)
         return { x, y, label, avg }
       })
       .filter((p): p is { x: number; y: number; label: string; avg: number } => Boolean(p)),
@@ -157,40 +193,119 @@ function TrendGraph({
     return <div className="text-sm text-slate-500">Ingen grafdata for denne raden.</div>
   }
 
+  // Per-label highest and lowest avg across non-main-line series (teacher overlays only)
+  const teacherSeriesPoints = seriesPoints.filter(s => !s.isMainLine)
+  const perLabelExtremes = new Map<string, { maxAvg: number; minAvg: number }>()
+  teacherSeriesPoints.forEach(s => {
+    s.points.forEach(p => {
+      const cur = perLabelExtremes.get(p.label)
+      if (!cur) {
+        perLabelExtremes.set(p.label, { maxAvg: p.avg, minAvg: p.avg })
+      } else {
+        perLabelExtremes.set(p.label, {
+          maxAvg: Math.max(cur.maxAvg, p.avg),
+          minAvg: Math.min(cur.minAvg, p.avg),
+        })
+      }
+    })
+  })
+
   return (
     <div className="w-full overflow-x-auto">
       <svg ref={svgRef} width={width} height={height} className="bg-slate-50 rounded border border-slate-200">
         <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} stroke="#94a3b8" strokeWidth="1" />
         <line x1={padX} y1={padY} x2={padX} y2={height - padY} stroke="#94a3b8" strokeWidth="1" />
-        {['1', '2', '3', '4', '5', '6'].map(level => {
-          const y = padY + ((6 - Number(level)) * (height - padY * 2)) / 5
-          return <line key={level} x1={padX} y1={y} x2={width - padX} y2={y} stroke="#e2e8f0" strokeWidth="1" />
+        {yTicks.map(tick => {
+          const y = toY(tick)
+          const isWhole = Number.isInteger(tick)
+          return (
+            <g key={tick}>
+              <line x1={padX} y1={y} x2={width - padX} y2={y} stroke={isWhole ? '#cbd5e1' : '#e2e8f0'} strokeWidth="1" />
+              <text x={padX - 5} y={y + 4} textAnchor="end" fontSize="10" fill="#64748b">
+                {tick % 1 === 0 ? tick.toFixed(0) : tick.toFixed(1)}
+              </text>
+            </g>
+          )
+        })}
+        {seriesPoints.map((s) => {
+          if (!s.connectTo || s.points.length === 0) return null
+          const target = seriesPoints.find(t => t.name === s.connectTo)
+          if (!target || target.points.length === 0) return null
+          const labelIdx = (label: string) => labels.indexOf(label)
+          const sLast = s.points[s.points.length - 1]
+          const sFirst = s.points[0]
+          const tLast = target.points[target.points.length - 1]
+          const tFirst = target.points[0]
+          // s ends before t starts
+          if (labelIdx(sLast.label) < labelIdx(tFirst.label)) {
+            return <line key={`bridge::${s.name}`} x1={sLast.x} y1={sLast.y} x2={tFirst.x} y2={tFirst.y} stroke="#64748b" strokeWidth="1.5" strokeDasharray="3 3" />
+          }
+          // t ends before s starts
+          if (labelIdx(tLast.label) < labelIdx(sFirst.label)) {
+            return <line key={`bridge::${s.name}`} x1={tLast.x} y1={tLast.y} x2={sFirst.x} y2={sFirst.y} stroke="#64748b" strokeWidth="1.5" strokeDasharray="3 3" />
+          }
+          return null
         })}
         {seriesPoints.map((s, seriesIdx) => (
           <g key={s.name}>
             <polyline
               fill="none"
               stroke={s.color}
-              strokeWidth={seriesIdx === 0 ? '2.75' : '1.5'}
+              strokeWidth={s.isMainLine ? '2.75' : '1.5'}
+              strokeDasharray={s.isMainLine && seriesIdx > 0 ? '6 3' : s.dashed ? '4 2' : undefined}
               points={s.points.map(p => `${p.x},${p.y}`).join(' ')}
             />
-            {s.points.map(p => (
-              <g key={`${s.name}::${p.label}`}>
-                <circle cx={p.x} cy={p.y} r={seriesIdx === 0 ? '4' : '2.5'} fill={s.color} />
-                {seriesIdx === 0 && (
-                  <>
-                    <text x={p.x} y={height - 8} textAnchor="middle" fontSize="11" fill="#334155">
-                      {labelMap?.[p.label] ?? p.label}
-                    </text>
-                    <text x={p.x} y={p.y - 8} textAnchor="middle" fontSize="11" fill="#0f172a">
+            {s.points.map(p => {
+              const extremes = !s.isMainLine ? perLabelExtremes.get(p.label) : undefined
+              const isHighest = extremes !== undefined && p.avg === extremes.maxAvg
+              const isLowest = extremes !== undefined && p.avg === extremes.minAvg
+              const showLabel = s.isMainLine || isHighest || isLowest
+              const labelY = s.isMainLine
+                ? p.y - 8
+                : isLowest
+                  ? p.y + 16
+                  : p.y - 8
+              return (
+                <g key={`${s.name}::${p.label}`}>
+                  <circle cx={p.x} cy={p.y} r={s.isMainLine ? '4' : '2.5'} fill={s.color} />
+                  {showLabel && (
+                    <text
+                      x={p.x}
+                      y={labelY}
+                      textAnchor="middle"
+                      fontSize={s.isMainLine ? '11' : '10'}
+                      fill={s.isMainLine ? s.color : s.color}
+                      fontWeight={s.isMainLine ? 'bold' : 'normal'}
+                    >
                       {p.avg.toFixed(2).replace('.', ',')}
                     </text>
-                  </>
-                )}
-              </g>
-            ))}
+                  )}
+                </g>
+              )
+            })}
           </g>
         ))}
+        {labels.map((label, idx) => {
+          const x = padX + (idx * (width - padX * 2)) / Math.max(1, labels.length - 1)
+          const showLabel = !xAxisLabelFilter || xAxisLabelFilter(label)
+          const showDivider = !!xAxisLabelFilter && xAxisLabelFilter(label)
+          const [yearPart, termPart] = label.split(' ')
+          const displayLabel = xAxisLabelFilter
+            ? `${formatCompactSchoolYearLabel(yearPart ?? label)}${termPart ? ` ${termPart}` : ''}`
+            : (labelMap?.[label] ?? label)
+          return (
+            <g key={`xlabel::${label}`}>
+              {showDivider && (
+                <line x1={x} y1={padY} x2={x} y2={height - padY} stroke="#e2e8f0" strokeWidth="1" />
+              )}
+              {showLabel && (
+                <text x={x} y={height - 8} textAnchor="middle" fontSize="11" fill="#334155">
+                  {displayLabel}
+                </text>
+              )}
+            </g>
+          )
+        })}
       </svg>
       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-600">
         {series.map(s => (
@@ -213,11 +328,13 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [selectedTeacherKeysBySubject, setSelectedTeacherKeysBySubject] = useState<Record<string, string[]>>({})
   const [anonymizeTeachers, setAnonymizeTeachers] = useState(false)
+  const [linkedSubjectsByKey, setLinkedSubjectsByKey] = useState<Record<string, string[]>>({})
   const [expandedGraph, setExpandedGraph] = useState<null | {
     title: string
     labels: string[]
     series: GraphSeries[]
     fileBase: string
+    xAxisLabelFilter?: (label: string) => boolean
   }>(null)
   const modalSvgRef = useRef<SVGSVGElement | null>(null)
 
@@ -348,6 +465,11 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
       return [label, `${yearLabel} ${term ?? ''}`.trim()]
     })),
     [termTimelineLabels]
+  )
+
+  const termH2DisplayMap = useMemo(
+    () => Object.fromEntries(schoolYears.map(year => [`${year} H2`, formatCompactSchoolYearLabel(year)])),
+    [schoolYears]
   )
 
   const normalizedFilter = useMemo(
@@ -495,24 +617,43 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
       })
 
       const title = expandedGraph.title
-      const subtitle = `Eksportert fra Karakterutvikling`
-      const headerHeight = 72
+      const headerHeight = 60
+      const legendItemHeight = 28
+      const legendRows = Math.ceil(expandedGraph.series.length / 4)
+      const legendHeight = legendRows * legendItemHeight + 16
       const canvas = document.createElement('canvas')
       canvas.width = image.width
-      canvas.height = image.height + headerHeight
+      canvas.height = image.height + headerHeight + legendHeight
       const ctx = canvas.getContext('2d')
       if (!ctx) throw new Error('Kunne ikke opprette tegneflate for eksport.')
       ctx.fillStyle = '#ffffff'
       ctx.fillRect(0, 0, canvas.width, canvas.height)
 
+      // Title
       ctx.fillStyle = '#0f172a'
-      ctx.font = 'bold 24px Segoe UI, Arial, sans-serif'
-      ctx.fillText(title, 20, 32)
-      ctx.fillStyle = '#475569'
-      ctx.font = '16px Segoe UI, Arial, sans-serif'
-      ctx.fillText(subtitle, 20, 56)
+      ctx.font = 'bold 22px Segoe UI, Arial, sans-serif'
+      ctx.fillText(title, 20, 36)
 
+      // Graph
       ctx.drawImage(image, 0, headerHeight)
+
+      // Legend below graph
+      const legendTop = headerHeight + image.height + 12
+      const dotR = 7
+      const itemSpacing = Math.floor(canvas.width / Math.min(4, expandedGraph.series.length))
+      expandedGraph.series.forEach((s, i) => {
+        const col = i % 4
+        const row = Math.floor(i / 4)
+        const lx = 20 + col * itemSpacing
+        const ly = legendTop + row * legendItemHeight
+        ctx.beginPath()
+        ctx.arc(lx + dotR, ly + dotR, dotR, 0, Math.PI * 2)
+        ctx.fillStyle = s.color
+        ctx.fill()
+        ctx.fillStyle = '#334155'
+        ctx.font = '14px Segoe UI, Arial, sans-serif'
+        ctx.fillText(s.name, lx + dotR * 2 + 6, ly + dotR + 5)
+      })
 
       const pngBlob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
       if (!pngBlob) throw new Error('Kunne ikke lage PNG-fil.')
@@ -527,6 +668,49 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
     } finally {
       URL.revokeObjectURL(svgUrl)
     }
+  }
+
+  const downloadExpandedGraphAsSvg = () => {
+    if (!expandedGraph || !modalSvgRef.current) return
+    const svgEl = modalSvgRef.current
+    const graphW = svgEl.width.baseVal.value || 1000
+    const graphH = svgEl.height.baseVal.value || 420
+    const headerHeight = 52
+    const legendItemH = 26
+    const cols = Math.min(4, expandedGraph.series.length)
+    const legendRows = Math.ceil(expandedGraph.series.length / cols)
+    const legendHeight = legendRows * legendItemH + 16
+    const totalH = headerHeight + graphH + legendHeight
+
+    const serializer = new XMLSerializer()
+    const innerSvg = serializer.serializeToString(svgEl)
+    // Strip the outer <svg …> wrapper so we can embed the content via <g>
+    const innerContent = innerSvg.replace(/<svg[^>]*>/, '').replace(/<\/svg>$/, '')
+
+    const colW = graphW / Math.max(1, cols)
+    const legendItems = expandedGraph.series.map((s, i) => {
+      const col = i % cols
+      const row = Math.floor(i / cols)
+      const lx = 16 + col * colW
+      const ly = headerHeight + graphH + 16 + row * legendItemH
+      return `<circle cx="${lx + 8}" cy="${ly + 8}" r="7" fill="${s.color}"/>` +
+        `<text x="${lx + 22}" y="${ly + 13}" font-family="Segoe UI,Arial,sans-serif" font-size="13" fill="#334155">${s.name}</text>`
+    }).join('\n    ')
+
+    const compositeSvg = `<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${graphW}" height="${totalH}">
+  <rect width="${graphW}" height="${totalH}" fill="#ffffff"/>
+  <text x="16" y="34" font-family="Segoe UI,Arial,sans-serif" font-size="20" font-weight="bold" fill="#0f172a">${expandedGraph.title}</text>
+  <g transform="translate(0,${headerHeight})">${innerContent}</g>
+  ${legendItems}
+</svg>`
+
+    const blob = new Blob([compositeSvg], { type: 'image/svg+xml;charset=utf-8' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `${expandedGraph.fileBase}.svg`
+    link.click()
+    URL.revokeObjectURL(link.href)
   }
 
   const handleFileImport = async (files: FileList | null) => {
@@ -618,6 +802,7 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
               setFilterText('')
               setExpandedKey(null)
               setSelectedTeacherKeysBySubject({})
+              setLinkedSubjectsByKey({})
             }}
             className="px-3 py-2 rounded-lg text-sm font-medium border bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
           >
@@ -706,22 +891,59 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                 const subjectTeacherRows = viewMode === 'subject' ? (teacherRowsBySubject.get(row.label) ?? []) : []
                 const selectedTeacherKeys = selectedTeacherKeysBySubject[row.label] ?? []
                 const selectedTeacherRows = subjectTeacherRows.filter(teacherRow => selectedTeacherKeys.includes(teacherRow.key))
+                const linkedKeys = linkedSubjectsByKey[row.key] ?? []
+                const linkedRows = filteredRows.filter(r => r.key !== row.key && linkedKeys.includes(r.key))
                 const h2Series: GraphSeries[] = [
-                  { name: 'Fag totalt', values: row.yearlyH2, color: '#0284c7' },
-                  ...selectedTeacherRows.map((teacherRow, idx) => ({
-                    name: maskTeacher(teacherRow.label, subjectTeacherRows.indexOf(teacherRow)),
-                    values: teacherRow.yearlyH2,
-                    color: TEACHER_SERIES_COLORS[idx % TEACHER_SERIES_COLORS.length],
+                  { name: row.label, values: row.yearlyH2, color: '#0284c7', isMainLine: true },
+                  ...linkedRows.map((linkedRow, li) => ({
+                    name: linkedRow.label,
+                    values: linkedRow.yearlyH2,
+                    color: LINKED_SUBJECT_COLORS[li % LINKED_SUBJECT_COLORS.length],
+                    isMainLine: true as const,
+                    connectTo: row.label,
                   })),
+                  ...selectedTeacherRows.flatMap((teacherRow) => {
+                    const stableIdx = subjectTeacherRows.indexOf(teacherRow)
+                    const color = TEACHER_SERIES_COLORS[stableIdx % TEACHER_SERIES_COLORS.length]
+                    const teacherName = maskTeacher(teacherRow.label, stableIdx)
+                    const linkedTeacher: GraphSeries[] = linkedRows.flatMap((linkedRow) => {
+                      const match = (teacherRowsBySubject.get(linkedRow.label) ?? []).find(tr => tr.label === teacherRow.label)
+                      if (!match) return []
+                      return [{ name: `${teacherName} (${linkedRow.label})`, values: match.yearlyH2, color, dashed: true, connectTo: teacherName }]
+                    })
+                    return [
+                      { name: teacherName, values: teacherRow.yearlyH2, color },
+                      ...linkedTeacher,
+                    ]
+                  }),
                 ]
                 const termSeries: GraphSeries[] = [
-                  { name: 'Fag totalt', values: row.termSeries, color: '#0284c7' },
-                  ...selectedTeacherRows.map((teacherRow, idx) => ({
-                    name: maskTeacher(teacherRow.label, subjectTeacherRows.indexOf(teacherRow)),
-                    values: teacherRow.termSeries,
-                    color: TEACHER_SERIES_COLORS[idx % TEACHER_SERIES_COLORS.length],
+                  { name: row.label, values: row.termSeries, color: '#0284c7', isMainLine: true },
+                  ...linkedRows.map((linkedRow, li) => ({
+                    name: linkedRow.label,
+                    values: linkedRow.termSeries,
+                    color: LINKED_SUBJECT_COLORS[li % LINKED_SUBJECT_COLORS.length],
+                    isMainLine: true as const,
+                    connectTo: row.label,
                   })),
+                  ...selectedTeacherRows.flatMap((teacherRow) => {
+                    const stableIdx = subjectTeacherRows.indexOf(teacherRow)
+                    const color = TEACHER_SERIES_COLORS[stableIdx % TEACHER_SERIES_COLORS.length]
+                    const teacherName = maskTeacher(teacherRow.label, stableIdx)
+                    const linkedTeacher: GraphSeries[] = linkedRows.flatMap((linkedRow) => {
+                      const match = (teacherRowsBySubject.get(linkedRow.label) ?? []).find(tr => tr.label === teacherRow.label)
+                      if (!match) return []
+                      return [{ name: `${teacherName} (${linkedRow.label})`, values: match.termSeries, color, dashed: true, connectTo: teacherName }]
+                    })
+                    return [
+                      { name: teacherName, values: teacherRow.termSeries, color },
+                      ...linkedTeacher,
+                    ]
+                  }),
                 ]
+
+                const h2Labels = schoolYears.filter(y => h2Series.some(s => y in s.values))
+                const termLabels = termTimelineLabels.filter(y => termSeries.some(s => y in s.values))
 
                 return (
                   <>
@@ -786,7 +1008,7 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                                   type="button"
                                   onClick={() => setExpandedGraph({
                                     title: `${displayRowLabel} - Halvår 2`,
-                                    labels: schoolYears,
+                                    labels: h2Labels,
                                     series: h2Series,
                                     fileBase: `karakterutvikling-${normalizeHeader(row.label)}-h2`,
                                   })}
@@ -796,7 +1018,7 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                                   Utvid
                                 </button>
                               </div>
-                              <TrendGraph labels={schoolYears} series={h2Series} labelMap={schoolYearDisplayMap} />
+                              <TrendGraph labels={h2Labels} series={h2Series} labelMap={schoolYearDisplayMap} />
                             </div>
                             <div className="rounded-lg border border-slate-200 bg-white p-3">
                               <div className="flex items-center justify-between mb-2">
@@ -805,9 +1027,10 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                                   type="button"
                                   onClick={() => setExpandedGraph({
                                     title: `${displayRowLabel} - Halvår 1 og 2`,
-                                    labels: termTimelineLabels,
+                                    labels: termLabels,
                                     series: termSeries,
                                     fileBase: `karakterutvikling-${normalizeHeader(row.label)}-h1-h2`,
+                                    xAxisLabelFilter: (l: string) => l.endsWith(' H2'),
                                   })}
                                   className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-300 text-xs text-slate-700 hover:bg-slate-50"
                                 >
@@ -815,10 +1038,46 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                                   Utvid
                                 </button>
                               </div>
-                              <TrendGraph labels={termTimelineLabels} series={termSeries} labelMap={termTimelineDisplayMap} />
+                              <TrendGraph labels={termLabels} series={termSeries} labelMap={termH2DisplayMap} xAxisLabelFilter={l => l.endsWith(' H2')} />
                             </div>
                           </div>
 
+                          {viewMode === 'subject' && filteredRows.length > 1 && (
+                            <div className="rounded-lg border border-slate-200 bg-white">
+                              <div className="px-3 py-2 border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                Koble til andre fag (overlay i grafene)
+                              </div>
+                              <div className="divide-y divide-slate-200">
+                                {filteredRows.filter(r => r.key !== row.key).map((otherRow, li) => {
+                                  const isLinked = (linkedSubjectsByKey[row.key] ?? []).includes(otherRow.key)
+                                  const color = LINKED_SUBJECT_COLORS[li % LINKED_SUBJECT_COLORS.length]
+                                  return (
+                                    <div key={otherRow.key} className="px-3 py-2">
+                                      <label className="inline-flex items-center gap-2 text-sm text-slate-800 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={isLinked}
+                                          onChange={e => {
+                                            const checked = e.currentTarget.checked
+                                            setLinkedSubjectsByKey(prev => {
+                                              const current = prev[row.key] ?? []
+                                              const next = checked
+                                                ? Array.from(new Set([...current, otherRow.key]))
+                                                : current.filter(k => k !== otherRow.key)
+                                              return { ...prev, [row.key]: next }
+                                            })
+                                          }}
+                                          className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                                        />
+                                        <span className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                                        {otherRow.label}
+                                      </label>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          )}
                           {viewMode === 'subject' && (
                             <div className="rounded-lg border border-slate-200 bg-white">
                               <div className="px-3 py-2 border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -877,6 +1136,13 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  onClick={downloadExpandedGraphAsSvg}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium border bg-sky-50 text-sky-800 border-sky-300 hover:bg-sky-100"
+                >
+                  Last ned SVG
+                </button>
+                <button
+                  type="button"
                   onClick={downloadExpandedGraphAsPng}
                   className="px-3 py-1.5 rounded-lg text-sm font-medium border bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
                 >
@@ -899,9 +1165,11 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                 width={1000}
                 height={420}
                 svgRef={modalSvgRef}
+                xAxisLabelFilter={expandedGraph.xAxisLabelFilter}
                 labelMap={Object.fromEntries(expandedGraph.labels.map(label => {
-                  if (termTimelineDisplayMap[label]) return [label, termTimelineDisplayMap[label]]
+                  if (expandedGraph.xAxisLabelFilter && termH2DisplayMap[label]) return [label, termH2DisplayMap[label]]
                   if (schoolYearDisplayMap[label]) return [label, schoolYearDisplayMap[label]]
+                  if (termTimelineDisplayMap[label]) return [label, termTimelineDisplayMap[label]]
                   return [label, label]
                 }))}
               />
