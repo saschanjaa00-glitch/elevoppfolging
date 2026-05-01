@@ -369,6 +369,7 @@ function App() {
 
     const subjectTeacherMap = new Map<string, string>()
     const gradeMap = new Map<string, string>()
+    const gradeMapT2 = new Map<string, string>()
     data.grades
       .filter(g => normalizeMatch(g.navn) === normalizeMatch(navn))
       .forEach(g => {
@@ -379,9 +380,10 @@ function App() {
           subjectTeacherMap.set(subjectKey, g.subjectTeacher)
         }
         const halvar = g.halvår.toString().trim().toLowerCase()
-        if ((halvar === '1' || halvar.includes('1')) && !gradeMap.has(subjectKey)) {
-          gradeMap.set(subjectKey, g.grade)
-        }
+        const isT1 = halvar === '1' || halvar.includes('1')
+        const isT2 = !isT1 && (halvar === '2' || halvar.includes('2'))
+        if (isT1 && !gradeMap.has(subjectKey)) gradeMap.set(subjectKey, g.grade)
+        if (isT2 && !gradeMapT2.has(subjectKey)) gradeMapT2.set(subjectKey, g.grade)
       })
 
     const warningMap = new Map<string, Array<{ warningType: string; sentDate: string }>>()
@@ -399,6 +401,7 @@ function App() {
       teacher: string
       percentageAbsence: number
       grade?: string
+      gradeT2?: string
       warningCount: number
       warnings: Array<{ warningType: string; sentDate: string }>
       showSidemalExemption: boolean
@@ -416,6 +419,7 @@ function App() {
           teacher: subjectTeacherMap.get(subjectGroupKey) ?? record.teacher,
           percentageAbsence: record.percentageAbsence,
           grade: gradeMap.get(subjectGroupKey),
+          gradeT2: gradeMapT2.get(subjectGroupKey),
           warningCount: warnings.length,
           warnings,
           showSidemalExemption: matchedStudentInfo?.sidemalExemption ?? false,
@@ -485,7 +489,8 @@ function App() {
         const sidemalText = subject.showSidemalExemption && isNorskSubject(subject.subject)
           ? '   |   Fritak sidemål'
           : ''
-        const infoText = `Fravær: ${subject.percentageAbsence.toFixed(1)}%   |   Karakter: ${subject.grade ?? '-'}   |   Varsler: ${subject.warningCount}${sidemalText}`
+        const gradeText = `T1: ${subject.grade ?? '-'}${subject.gradeT2 ? `   |   T2: ${subject.gradeT2}` : ''}`
+        const infoText = `Fravær: ${subject.percentageAbsence.toFixed(1)}%   |   Karakter: ${gradeText}   |   Varsler: ${subject.warningCount}${sidemalText}`
         const warningText = `Varselbrev sendt: ${formatWarningSummary(subject.warnings)}`
         children.push(
           new Table({

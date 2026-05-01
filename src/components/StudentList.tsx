@@ -137,18 +137,22 @@ export default function StudentList({
 
   const gradeLookup = useMemo(() => {
     const gradeMap = new Map<string, string>()
+    const gradeMapT2 = new Map<string, string>()
     const subjectTeacherMap = new Map<string, string>()
     data.grades.forEach(g => {
-      const halvar = g.halvår.toString().trim()
-      if (halvar === '1' || halvar.toLowerCase().includes('1')) {
+      const halvar = g.halvår.toString().trim().toLowerCase()
+      const isT1 = halvar === '1' || halvar.includes('1')
+      const isT2 = !isT1 && (halvar === '2' || halvar.includes('2'))
+      if (isT1 || isT2) {
         const resolvedClass = g.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, g.navn, g.subjectGroup)
         if (!resolvedClass) return
         const key = buildStudentSubjectKey(g.navn, resolvedClass, g.subjectGroup)
-        if (!gradeMap.has(key)) gradeMap.set(key, g.grade)
+        if (isT1 && !gradeMap.has(key)) gradeMap.set(key, g.grade)
+        if (isT2 && !gradeMapT2.has(key)) gradeMapT2.set(key, g.grade)
         if (g.subjectTeacher && !subjectTeacherMap.has(key)) subjectTeacherMap.set(key, g.subjectTeacher)
       }
     })
-    return { gradeMap, subjectTeacherMap }
+    return { gradeMap, gradeMapT2, subjectTeacherMap }
   }, [data.grades, absenceSubjectClassLookup])
 
   const presetRoleMappings = useMemo(() => {
@@ -233,7 +237,7 @@ export default function StudentList({
 
   const studentSummaries = useMemo(() => {
     const { warningMap, warningMapNoClass, studentAdultMap } = warningLookup
-    const { gradeMap, subjectTeacherMap } = gradeLookup
+    const { gradeMap, gradeMapT2, subjectTeacherMap } = gradeLookup
     const classDataByStudent = new Map<string, typeof classData>()
 
     const effectiveLowGrades = fullRapport
@@ -270,6 +274,7 @@ export default function StudentList({
       const warnings = warningMap.get(warningKey) ?? warningMapNoClass.get(noClassWarningKey) ?? []
       const hasSubjectWarning = warnings.length > 0
       const grade = gradeMap.get(warningKey)
+      const gradeT2 = gradeMapT2.get(warningKey)
       const subjectTeacher = subjectTeacherMap.get(warningKey) ?? record.teacher
       const includeSubject = shouldIncludeSubject(record.percentageAbsence, grade)
 
@@ -296,7 +301,7 @@ export default function StudentList({
           maxPercentage: record.percentageAbsence,
           totalHours: record.hoursAbsence,
           subjects: includeSubject
-            ? [{ subject: record.subject, subjectGroup: record.subjectGroup, teacher: subjectTeacher, percentageAbsence: record.percentageAbsence, warnings, grade }]
+            ? [{ subject: record.subject, subjectGroup: record.subjectGroup, teacher: subjectTeacher, percentageAbsence: record.percentageAbsence, warnings, grade, gradeT2 }]
             : [],
           avbrudd: record.avbrudd,
           hasWarnings: includeSubject ? hasSubjectWarning : false,
@@ -314,7 +319,7 @@ export default function StudentList({
 
         if (includeSubject) {
           if (!subjectKeys?.has(subjectDedupKey)) {
-            summary.subjects.push({ subject: record.subject, subjectGroup: record.subjectGroup, teacher: subjectTeacher, percentageAbsence: record.percentageAbsence, warnings, grade })
+            summary.subjects.push({ subject: record.subject, subjectGroup: record.subjectGroup, teacher: subjectTeacher, percentageAbsence: record.percentageAbsence, warnings, grade, gradeT2 })
             subjectKeys?.add(subjectDedupKey)
           }
           if (hasSubjectWarning) summary.hasWarnings = true
@@ -400,6 +405,7 @@ export default function StudentList({
           percentageAbsence: sourceAbsencePercentage,
           warnings: sourceFravaerWarnings.length > 0 ? sourceFravaerWarnings : warnings,
           grade,
+          gradeT2: gradeMapT2.get(gradeKey),
           inheritsFromSubject: sourceSubjectName,
         })
 
@@ -745,10 +751,14 @@ export default function StudentList({
           subjectRowX += chip(pctLabel, pctX, subY, [241, 245, 249], [100, 116, 139])
         }
 
-        // Grade chip — orange, only for IV/1/2
-        if (subjectEntry.grade && ['iv', '1', '2'].includes(subjectEntry.grade.toLowerCase())) {
-          const gradeLabel = `Karakter T1: ${subjectEntry.grade}`
-          subjectRowX += chip(gradeLabel, subjectRowX, subY, [253, 186, 116], [154, 52, 18], true, 7.5)
+        // Grade chips — orange for IV/1/2, slate for other grades
+        if (subjectEntry.grade) {
+          const isLow = ['iv', '1', '2'].includes(subjectEntry.grade.toLowerCase())
+          subjectRowX += chip(`Karakter T1: ${subjectEntry.grade}`, subjectRowX, subY, isLow ? [253, 186, 116] : [241, 245, 249], isLow ? [154, 52, 18] : [100, 116, 139], true, 7.5)
+        }
+        if (subjectEntry.gradeT2) {
+          const isLow = ['iv', '1', '2'].includes(subjectEntry.gradeT2.toLowerCase())
+          subjectRowX += chip(`Karakter T2: ${subjectEntry.gradeT2}`, subjectRowX, subY, isLow ? [253, 186, 116] : [241, 245, 249], isLow ? [154, 52, 18] : [100, 116, 139], true, 7.5)
         }
 
         // Fritak sidemål chip per subject
@@ -839,7 +849,8 @@ export default function StudentList({
         const sidemalText = subjectEntry.showSidemalExemption && isNorskSubject(subjectEntry.subject)
           ? '   |   Fritak sidemål'
           : ''
-        const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}${sidemalText}`
+        const gradeText = `T1: ${subjectEntry.grade ?? '-'}${subjectEntry.gradeT2 ? `   |   T2: ${subjectEntry.gradeT2}` : ''}`
+        const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${gradeText}   |   Varsler: ${subjectEntry.warningCount}${sidemalText}`
         const warningText = `Varselbrev sendt: ${formatWarningSummary(subjectEntry.warnings)}`
 
         children.push(
@@ -1686,7 +1697,8 @@ export default function StudentList({
       const sidemalText = subjectEntry.showSidemalExemption && isNorskSubject(subjectEntry.subject)
         ? '   |   Fritak sidemål'
         : ''
-      const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}${sidemalText}`
+      const gradeText = `T1: ${subjectEntry.grade ?? '-'}${subjectEntry.gradeT2 ? `   |   T2: ${subjectEntry.gradeT2}` : ''}`
+      const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${gradeText}   |   Varsler: ${subjectEntry.warningCount}${sidemalText}`
       const warningLines = doc.splitTextToSize(
         `Varselbrev sendt: ${formatWarningSummary(subjectEntry.warnings)}`,
         usableW - 6
@@ -1787,16 +1799,18 @@ export default function StudentList({
       })
 
     const studentGradeMap = new Map<string, string>()
+    const studentGradeMapT2 = new Map<string, string>()
     data.grades
       .filter(g => normalizeMatch(g.navn) === normalizeMatch(student.navn))
       .forEach(g => {
         const resolvedClass = g.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, g.navn, g.subjectGroup)
         if (resolvedClass !== student.className) return
         const halvar = g.halvår.toString().trim().toLowerCase()
-        if (halvar === '1' || halvar.includes('1')) {
-          const key = normalizeSubjectGroupKey(g.subjectGroup)
-          if (!studentGradeMap.has(key)) studentGradeMap.set(key, g.grade)
-        }
+        const isT1 = halvar === '1' || halvar.includes('1')
+        const isT2 = !isT1 && (halvar === '2' || halvar.includes('2'))
+        const key = normalizeSubjectGroupKey(g.subjectGroup)
+        if (isT1 && !studentGradeMap.has(key)) studentGradeMap.set(key, g.grade)
+        if (isT2 && !studentGradeMapT2.has(key)) studentGradeMapT2.set(key, g.grade)
       })
 
     const allSubjectsMap = new Map<string, {
@@ -1805,6 +1819,7 @@ export default function StudentList({
       teacher: string
       percentageAbsence: number
       grade?: string
+      gradeT2?: string
       warningCount: number
       warnings: Array<{ warningType: string; sentDate: string }>
       showSidemalExemption: boolean
@@ -1815,6 +1830,7 @@ export default function StudentList({
       const warnings = studentWarningMap.get(normalizeSubjectGroupKey(r.subjectGroup)) ?? []
       const warningCount = warnings.length
       const grade = studentGradeMap.get(normalizeSubjectGroupKey(r.subjectGroup))
+      const gradeT2 = studentGradeMapT2.get(normalizeSubjectGroupKey(r.subjectGroup))
 
       const sgKey = normalizeSubjectGroupKey(r.subjectGroup)
       const subjectTeacher = subjectTeacherMap.get(sgKey) ?? r.teacher
@@ -1826,6 +1842,7 @@ export default function StudentList({
           teacher: subjectTeacher,
           percentageAbsence: r.percentageAbsence,
           grade,
+          gradeT2,
           warningCount,
           warnings,
           showSidemalExemption: matchedStudentInfo?.sidemalExemption ?? false,
@@ -1875,7 +1892,8 @@ export default function StudentList({
       const sidemalText = subjectEntry.showSidemalExemption && isNorskSubject(subjectEntry.subject)
         ? '   |   Fritak sidemål'
         : ''
-      const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${subjectEntry.grade ?? '-'}   |   Varsler: ${subjectEntry.warningCount}${sidemalText}`
+      const gradeText = `T1: ${subjectEntry.grade ?? '-'}${subjectEntry.gradeT2 ? `   |   T2: ${subjectEntry.gradeT2}` : ''}`
+      const infoText = `Fravær: ${subjectEntry.percentageAbsence.toFixed(1)}%   |   Karakter: ${gradeText}   |   Varsler: ${subjectEntry.warningCount}${sidemalText}`
       const warningText = `Varselbrev sendt: ${formatWarningSummary(subjectEntry.warnings)}`
 
       sections.push(
@@ -2190,9 +2208,14 @@ export default function StudentList({
                               >
                                 {subjectEntry.percentageAbsence.toFixed(1)}%
                               </span>
-                              {subjectEntry.grade && ['1', '2', 'iv'].includes(subjectEntry.grade.toLowerCase()) && (
-                                <span className="w-fit px-2 py-0.5 rounded text-xs font-bold bg-orange-200 text-orange-900">
+                              {subjectEntry.grade && (
+                                <span className={`w-fit px-2 py-0.5 rounded text-xs font-bold ${['1', '2', 'iv'].includes(subjectEntry.grade.toLowerCase()) ? 'bg-orange-200 text-orange-900' : 'bg-slate-100 text-slate-600'}`}>
                                   Karakter T1: {subjectEntry.grade}
+                                </span>
+                              )}
+                              {subjectEntry.gradeT2 && (
+                                <span className={`w-fit px-2 py-0.5 rounded text-xs font-bold ${['1', '2', 'iv'].includes(subjectEntry.gradeT2.toLowerCase()) ? 'bg-orange-200 text-orange-900' : 'bg-slate-100 text-slate-600'}`}>
+                                  Karakter T2: {subjectEntry.gradeT2}
                                 </span>
                               )}
                               {student.sidemalExemption && isNorskSubject(subjectEntry.subject) && (

@@ -1,5 +1,5 @@
 import { useMemo, useState, Fragment } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight } from 'lucide-react'
 import type { DataStore } from '../types'
 import {
   buildStudentClassKey,
@@ -30,6 +30,8 @@ interface TeacherInSubject {
   missingWarnings: number
   varselsByType: Record<string, number>
   gradesCounts: Record<string, number>
+  gradesCountsT1: Record<string, number>
+  gradesCountsT2: Record<string, number>
 }
 
 interface SubjectRow {
@@ -40,8 +42,12 @@ interface SubjectRow {
   missingWarnings: number
   varselsByType: Record<string, number>
   gradesCounts: Record<string, number>
+  gradesCountsT1: Record<string, number>
+  gradesCountsT2: Record<string, number>
   teachers: TeacherInSubject[]
 }
+
+type TermMode = 't1' | 't2' | 'compare'
 
 type SortKey =
   | 'name'
@@ -58,6 +64,7 @@ type SortKey =
   | 'grade5'
   | 'grade6'
   | 'avgGrade'
+  | 'avgDelta'
 type SortDirection = 'asc' | 'desc'
 
 const allGrades = ['IV', '1', '2', '3', '4', '5', '6'] as const
@@ -94,6 +101,7 @@ const gradePercentLabel = (count: number, total: number): string =>
 
 export default function FaginnsiktView({ data }: Props) {
   const [searchTerm, setSearchTerm] = useState('')
+  const [termMode, setTermMode] = useState<TermMode>('t1')
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [expandedSubject, setExpandedSubject] = useState<string | null>(null)
@@ -110,6 +118,11 @@ export default function FaginnsiktView({ data }: Props) {
         const resolvedClass = grade.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, grade.navn, grade.subjectGroup)
         if (!resolvedClass) return null
 
+        const halvaar = grade.halvår.toString().trim().toLowerCase()
+        const isT1 = halvaar === '1' || halvaar.includes('1')
+        const isT2 = halvaar === '2' || halvaar.includes('2')
+        if (!isT1 && !isT2) return null
+
         const teacher = grade.subjectTeacher?.trim() ?? ''
         const subjectDisplay = grade.subjectGroup?.trim() ?? ''
         const subjectNorm = subjectMergeKey(subjectDisplay)
@@ -120,6 +133,8 @@ export default function FaginnsiktView({ data }: Props) {
           subjectCode: subjectDisplayCode(subjectDisplay),
           studentKey: buildStudentClassKey(grade.navn, resolvedClass),
           gradeValue: grade.grade.toUpperCase().trim(),
+          isT1,
+          isT2,
         }
       })
       .filter((grade): grade is {
@@ -129,8 +144,30 @@ export default function FaginnsiktView({ data }: Props) {
         subjectCode: string
         studentKey: string
         gradeValue: string
+        isT1: boolean
+        isT2: boolean
       } => Boolean(grade?.teacher && grade.subjectDisplay))
   }, [data.grades, absenceSubjectClassLookup])
+
+  const countsForMode = (
+    t1: Record<string, number>,
+    t2: Record<string, number>
+  ): Record<string, number> => {
+    if (termMode === 't1') return t1
+    if (termMode === 't2') return t2
+    const merged: Record<string, number> = {}
+    allGrades.forEach(g => {
+      merged[g] = (t1[g] ?? 0) + (t2[g] ?? 0)
+    })
+    return merged
+  }
+
+  const avgDelta = (t1: Record<string, number>, t2: Record<string, number>): number | null => {
+    const a1 = avgGradeNum(t1)
+    const a2 = avgGradeNum(t2)
+    if (a1 === null || a2 === null) return null
+    return a2 - a1
+  }
 
   const normalizedWarnings = useMemo(() => {
     return data.warnings
@@ -199,6 +236,8 @@ export default function FaginnsiktView({ data }: Props) {
       const subjectCode = grade.subjectCode
       const studentKey = grade.studentKey
       const gradeValue = grade.gradeValue
+      const isT1 = grade.isT1
+      const isT2 = grade.isT2
 
       // Ensure subject row
       if (!subjectMap.has(subjectNorm)) {
@@ -210,6 +249,8 @@ export default function FaginnsiktView({ data }: Props) {
           missingWarnings: 0,
           varselsByType: {},
           gradesCounts: {},
+          gradesCountsT1: {},
+          gradesCountsT2: {},
           teachers: [],
         })
       }
@@ -223,6 +264,8 @@ export default function FaginnsiktView({ data }: Props) {
           missingWarnings: 0,
           varselsByType: {},
           gradesCounts: {},
+          gradesCountsT1: {},
+          gradesCountsT2: {},
         })
       }
       // Ensure student sets
@@ -242,9 +285,11 @@ export default function FaginnsiktView({ data }: Props) {
 
       // Accumulate grade counts
       const row = subjectMap.get(subjectNorm)!
-      row.gradesCounts[gradeValue] = (row.gradesCounts[gradeValue] ?? 0) + 1
+      if (isT1) row.gradesCountsT1[gradeValue] = (row.gradesCountsT1[gradeValue] ?? 0) + 1
+      if (isT2) row.gradesCountsT2[gradeValue] = (row.gradesCountsT2[gradeValue] ?? 0) + 1
       const teacherStats = teacherDataBySubject.get(subjectNorm)!.get(teacher)!
-      teacherStats.gradesCounts[gradeValue] = (teacherStats.gradesCounts[gradeValue] ?? 0) + 1
+      if (isT1) teacherStats.gradesCountsT1[gradeValue] = (teacherStats.gradesCountsT1[gradeValue] ?? 0) + 1
+      if (isT2) teacherStats.gradesCountsT2[gradeValue] = (teacherStats.gradesCountsT2[gradeValue] ?? 0) + 1
     })
 
     // Set student counts
@@ -310,12 +355,15 @@ export default function FaginnsiktView({ data }: Props) {
     subjectMap.forEach((row, subjectNorm) => {
       const teacherMap = teacherDataBySubject.get(subjectNorm)
       row.teachers = teacherMap
-        ? Array.from(teacherMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'nb-NO'))
+        ? Array.from(teacherMap.values())
+          .map(t => ({ ...t, gradesCounts: countsForMode(t.gradesCountsT1, t.gradesCountsT2) }))
+          .sort((a, b) => a.name.localeCompare(b.name, 'nb-NO'))
         : []
+      row.gradesCounts = countsForMode(row.gradesCountsT1, row.gradesCountsT2)
     })
 
     return Array.from(subjectMap.values())
-  }, [normalizedGrades, normalizedWarnings, normalizedAbsences, subjectNameByNorm])
+  }, [normalizedGrades, normalizedWarnings, normalizedAbsences, subjectNameByNorm, termMode])
 
   const filteredAndSorted = useMemo(() => {
     const filtered = subjectRows.filter(r =>
@@ -329,6 +377,7 @@ export default function FaginnsiktView({ data }: Props) {
       if (key === 'warningsF') return row.varselsByType['F'] ?? 0
       if (key === 'warningsG') return row.varselsByType['G'] ?? 0
       if (key === 'avgGrade') return avgGradeNum(row.gradesCounts) ?? -1
+      if (key === 'avgDelta') return avgDelta(row.gradesCountsT1, row.gradesCountsT2) ?? -999
       const gradeKey = sortGradeByKey[key]
       if (gradeKey) {
         const total = totalGrades(row.gradesCounts)
@@ -550,6 +599,7 @@ export default function FaginnsiktView({ data }: Props) {
       if (sortKey === 'warningsF') return t.varselsByType['F'] ?? 0
       if (sortKey === 'warningsG') return t.varselsByType['G'] ?? 0
       if (sortKey === 'avgGrade') return avgGradeNum(t.gradesCounts) ?? -1
+      if (sortKey === 'avgDelta') return avgDelta(t.gradesCountsT1, t.gradesCountsT2) ?? -999
       const gradeKey = sortGradeByKey[sortKey]
       if (gradeKey) {
         const total = totalGrades(t.gradesCounts)
@@ -581,12 +631,51 @@ export default function FaginnsiktView({ data }: Props) {
     </th>
   )
 
+  const showWarningColumns = termMode !== 'compare'
+  const showDeltaColumn = termMode === 'compare'
+  const totalColumnCount = 1 + 1 + (showWarningColumns ? 4 : 0) + allGrades.length + 1 + (showDeltaColumn ? 1 : 0) + 1
+
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6">
         <h2 className="text-base font-semibold text-slate-900 mb-4">Fag</h2>
 
         <div className="mb-4">
+          <div className="mb-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setTermMode('t1')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+                termMode === 't1'
+                  ? 'bg-sky-100 text-sky-800 border-sky-300'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+              }`}
+            >
+              Halvår 1
+            </button>
+            <button
+              type="button"
+              onClick={() => setTermMode('t2')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+                termMode === 't2'
+                  ? 'bg-sky-100 text-sky-800 border-sky-300'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+              }`}
+            >
+              Halvår 2
+            </button>
+            <button
+              type="button"
+              onClick={() => setTermMode('compare')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+                termMode === 'compare'
+                  ? 'bg-sky-100 text-sky-800 border-sky-300'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+              }`}
+            >
+              Sammenlign
+            </button>
+          </div>
           <input
             type="text"
             placeholder="Søk etter fag..."
@@ -597,10 +686,10 @@ export default function FaginnsiktView({ data }: Props) {
         </div>
 
         <div className="overflow-x-auto overflow-y-auto max-h-[70vh]">
-          <table className="w-full text-sm border-separate border-spacing-0">
+          <table className={`${termMode === 'compare' ? 'w-max [&_th]:!px-2 [&_th]:!py-2 [&_td]:!px-2 [&_td]:!py-1' : 'w-full'} table-auto text-sm border-separate border-spacing-0`}>
             <thead>
               <tr className="border-b-2 border-slate-200">
-                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap w-[160px] min-w-[160px] max-w-[160px]">
                   <button
                     type="button"
                     onClick={() => toggleSort('name')}
@@ -611,14 +700,19 @@ export default function FaginnsiktView({ data }: Props) {
                   </button>
                 </th>
                 <SortTh label="Elever" sk="students" className="text-center" />
-                <SortTh label="Varsler totalt" sk="totalVarsels" className="text-center" />
-                <SortTh label="Manglende" sk="missingWarnings" className="text-center" />
-                <SortTh label="F" sk="warningsF" className="text-center" />
-                <SortTh label="G" sk="warningsG" className="text-center" />
+                {showWarningColumns && (
+                  <>
+                    <SortTh label="Varsler totalt" sk="totalVarsels" className="text-center" />
+                    <SortTh label="Manglende" sk="missingWarnings" className="text-center" />
+                    <SortTh label="F" sk="warningsF" className="text-center" />
+                    <SortTh label="G" sk="warningsG" className="text-center" />
+                  </>
+                )}
                 {allGrades.map(grade => (
                   <SortTh key={grade} label={grade} sk={gradeSortKey[grade]} className="text-center" />
                 ))}
                 <SortTh label="Snitt" sk="avgGrade" className="text-center" />
+                {showDeltaColumn && <SortTh label="Endring" sk="avgDelta" className="text-center" />}
                 <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   PDF
                 </th>
@@ -627,6 +721,11 @@ export default function FaginnsiktView({ data }: Props) {
             <tbody>
               {filteredAndSorted.map(row => {
                 const rowGradeTotal = totalGrades(row.gradesCounts)
+                const rowGradeTotalT1 = totalGrades(row.gradesCountsT1)
+                const rowGradeTotalT2 = totalGrades(row.gradesCountsT2)
+                const rowAvgT1 = avgGradeNum(row.gradesCountsT1)
+                const rowAvgT2 = avgGradeNum(row.gradesCountsT2)
+                const rowDelta = avgDelta(row.gradesCountsT1, row.gradesCountsT2)
 
                 return (
                 <Fragment key={row.subjectKey}>
@@ -636,7 +735,7 @@ export default function FaginnsiktView({ data }: Props) {
                       expandedSubject && expandedSubject !== row.subjectKey ? 'opacity-35' : 'opacity-100'
                     }`}
                   >
-                    <td className="py-2 px-3 font-medium text-slate-900">
+                    <td className="py-2 px-3 font-medium text-slate-900 w-[160px] min-w-[160px] max-w-[160px]">
                       <div className="flex items-center gap-2">
                         {expandedSubject === row.subjectKey ? (
                           <ChevronDown className="w-4 h-4 flex-shrink-0" />
@@ -647,10 +746,14 @@ export default function FaginnsiktView({ data }: Props) {
                       </div>
                     </td>
                     <td className="py-2 px-3 text-center text-slate-700">{row.studentCount}</td>
-                    <td className="py-2 px-3 text-center text-slate-700 font-medium">{row.totalVarsels}</td>
-                    <td className="py-2 px-3 text-center text-amber-700 font-medium">{row.missingWarnings > 0 ? row.missingWarnings : '—'}</td>
-                    <td className="py-2 px-3 text-center text-slate-700">{row.varselsByType['F'] ?? 0}</td>
-                    <td className="py-2 px-3 text-center text-slate-700">{row.varselsByType['G'] ?? 0}</td>
+                    {showWarningColumns && (
+                      <>
+                        <td className="py-2 px-3 text-center text-slate-700 font-medium">{row.totalVarsels}</td>
+                        <td className="py-2 px-3 text-center text-amber-700 font-medium">{row.missingWarnings > 0 ? row.missingWarnings : '—'}</td>
+                        <td className="py-2 px-3 text-center text-slate-700">{row.varselsByType['F'] ?? 0}</td>
+                        <td className="py-2 px-3 text-center text-slate-700">{row.varselsByType['G'] ?? 0}</td>
+                      </>
+                    )}
                     {allGrades.map(grade => (
                       <td
                         key={grade}
@@ -663,14 +766,53 @@ export default function FaginnsiktView({ data }: Props) {
                         }`}
                       >
                         <div className="leading-tight">
-                          <div>{gradePercentLabel(row.gradesCounts[grade] ?? 0, rowGradeTotal)}</div>
-                          <div className="text-[10px] text-slate-500">{row.gradesCounts[grade] ?? 0}</div>
+                          {termMode === 'compare' ? (
+                            <div className="leading-tight">
+                              <div className="inline-flex items-center gap-1 whitespace-nowrap text-xs">
+                                <span>{gradePercentLabel(row.gradesCountsT1[grade] ?? 0, rowGradeTotalT1)} / {gradePercentLabel(row.gradesCountsT2[grade] ?? 0, rowGradeTotalT2)}</span>
+                                {(() => {
+                                  const pctT1 = rowGradeTotalT1 > 0 ? ((row.gradesCountsT1[grade] ?? 0) / rowGradeTotalT1) * 100 : 0
+                                  const pctT2 = rowGradeTotalT2 > 0 ? ((row.gradesCountsT2[grade] ?? 0) / rowGradeTotalT2) * 100 : 0
+                                  if (pctT2 > pctT1) return <ArrowUp className="w-[14px] h-[14px] text-emerald-600" />
+                                  if (pctT2 < pctT1) return <ArrowDown className="w-[14px] h-[14px] text-red-600" />
+                                  return null
+                                })()}
+                              </div>
+                              <div className="text-[10px] text-slate-500">({row.gradesCountsT1[grade] ?? 0}/{row.gradesCountsT2[grade] ?? 0})</div>
+                            </div>
+                          ) : (
+                            <>
+                              <div>{gradePercentLabel(row.gradesCounts[grade] ?? 0, rowGradeTotal)}</div>
+                              <div className="text-[10px] text-slate-500">{row.gradesCounts[grade] ?? 0}</div>
+                            </>
+                          )}
                         </div>
                       </td>
                     ))}
-                    <td className="py-2 px-3 text-center font-semibold text-slate-800">
-                      {avgGradeNum(row.gradesCounts)?.toFixed(2).replace('.', ',') ?? '—'}
+                    <td className={`${termMode === 'compare' ? 'text-xs' : ''} py-2 px-3 text-center font-semibold text-slate-800 ${
+                      termMode === 'compare' && rowDelta !== null
+                        ? rowDelta > 0
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : rowDelta < 0
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-slate-100 text-slate-700'
+                        : ''
+                    }`}>
+                      {termMode === 'compare' ? (
+                        <div className="inline-flex items-center gap-1 whitespace-nowrap">
+                          <span>{rowAvgT1?.toFixed(2).replace('.', ',') ?? '—'} / {rowAvgT2?.toFixed(2).replace('.', ',') ?? '—'}</span>
+                        </div>
+                      ) : (
+                        <>{avgGradeNum(row.gradesCounts)?.toFixed(2).replace('.', ',') ?? '—'}</>
+                      )}
                     </td>
+                    {showDeltaColumn && (
+                      <td className={`${termMode === 'compare' ? 'text-xs' : ''} py-2 px-3 text-center font-semibold text-slate-700 whitespace-nowrap`}>
+                        {rowDelta === null
+                          ? '—'
+                          : `${rowDelta > 0 ? '+' : ''}${rowDelta.toFixed(2).replace('.', ',')}`}
+                      </td>
+                    )}
                     <td className="py-2 px-3 text-center">
                       <button
                         type="button"
@@ -690,15 +832,24 @@ export default function FaginnsiktView({ data }: Props) {
                       {row.teachers.length > 0 ? (
                         sortedTeachersForRow(row.teachers).map(teacher => {
                           const teacherGradeTotal = totalGrades(teacher.gradesCounts)
+                          const teacherGradeTotalT1 = totalGrades(teacher.gradesCountsT1)
+                          const teacherGradeTotalT2 = totalGrades(teacher.gradesCountsT2)
+                          const teacherAvgT1 = avgGradeNum(teacher.gradesCountsT1)
+                          const teacherAvgT2 = avgGradeNum(teacher.gradesCountsT2)
+                          const teacherDelta = avgDelta(teacher.gradesCountsT1, teacher.gradesCountsT2)
 
                           return (
                           <tr key={`${row.subjectKey}-${teacher.name}`} className="bg-slate-50 border-b border-slate-200">
-                            <td className="py-2 px-3 text-left text-slate-700 pl-10">- {teacher.name}</td>
+                            <td className="py-2 px-3 text-left text-slate-700 pl-10 w-[160px] min-w-[160px] max-w-[160px]">- {teacher.name}</td>
                             <td className="py-2 px-3 text-center text-slate-700">{teacher.studentCount}</td>
-                            <td className="py-2 px-3 text-center text-slate-700 font-medium">{teacher.totalVarsels}</td>
-                            <td className="py-2 px-3 text-center text-amber-700 font-medium">{teacher.missingWarnings > 0 ? teacher.missingWarnings : '—'}</td>
-                            <td className="py-2 px-3 text-center text-slate-700">{teacher.varselsByType['F'] ?? 0}</td>
-                            <td className="py-2 px-3 text-center text-slate-700">{teacher.varselsByType['G'] ?? 0}</td>
+                            {showWarningColumns && (
+                              <>
+                                <td className="py-2 px-3 text-center text-slate-700 font-medium">{teacher.totalVarsels}</td>
+                                <td className="py-2 px-3 text-center text-amber-700 font-medium">{teacher.missingWarnings > 0 ? teacher.missingWarnings : '—'}</td>
+                                <td className="py-2 px-3 text-center text-slate-700">{teacher.varselsByType['F'] ?? 0}</td>
+                                <td className="py-2 px-3 text-center text-slate-700">{teacher.varselsByType['G'] ?? 0}</td>
+                              </>
+                            )}
                             {allGrades.map(grade => (
                               <td
                                 key={grade}
@@ -711,20 +862,59 @@ export default function FaginnsiktView({ data }: Props) {
                                 }`}
                               >
                                 <div className="leading-tight">
-                                  <div>{gradePercentLabel(teacher.gradesCounts[grade] ?? 0, teacherGradeTotal)}</div>
-                                  <div className="text-[10px] text-slate-500">{teacher.gradesCounts[grade] ?? 0}</div>
+                                  {termMode === 'compare' ? (
+                                    <div className="leading-tight">
+                                      <div className="inline-flex items-center gap-1 whitespace-nowrap text-xs">
+                                        <span>{gradePercentLabel(teacher.gradesCountsT1[grade] ?? 0, teacherGradeTotalT1)} / {gradePercentLabel(teacher.gradesCountsT2[grade] ?? 0, teacherGradeTotalT2)}</span>
+                                        {(() => {
+                                          const pctT1 = teacherGradeTotalT1 > 0 ? ((teacher.gradesCountsT1[grade] ?? 0) / teacherGradeTotalT1) * 100 : 0
+                                          const pctT2 = teacherGradeTotalT2 > 0 ? ((teacher.gradesCountsT2[grade] ?? 0) / teacherGradeTotalT2) * 100 : 0
+                                          if (pctT2 > pctT1) return <ArrowUp className="w-[14px] h-[14px] text-emerald-600" />
+                                          if (pctT2 < pctT1) return <ArrowDown className="w-[14px] h-[14px] text-red-600" />
+                                          return null
+                                        })()}
+                                      </div>
+                                      <div className="text-[10px] text-slate-500">({teacher.gradesCountsT1[grade] ?? 0}/{teacher.gradesCountsT2[grade] ?? 0})</div>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <div>{gradePercentLabel(teacher.gradesCounts[grade] ?? 0, teacherGradeTotal)}</div>
+                                      <div className="text-[10px] text-slate-500">{teacher.gradesCounts[grade] ?? 0}</div>
+                                    </>
+                                  )}
                                 </div>
                               </td>
                             ))}
-                            <td className="py-2 px-3 text-center font-semibold text-slate-800">
-                              {avgGradeNum(teacher.gradesCounts)?.toFixed(2).replace('.', ',') ?? '—'}
+                            <td className={`${termMode === 'compare' ? 'text-xs' : ''} py-2 px-3 text-center font-semibold text-slate-800 ${
+                              termMode === 'compare' && teacherDelta !== null
+                                ? teacherDelta > 0
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : teacherDelta < 0
+                                    ? 'bg-red-100 text-red-800'
+                                    : 'bg-slate-100 text-slate-700'
+                                : ''
+                            }`}>
+                              {termMode === 'compare' ? (
+                                <div className="inline-flex items-center gap-1 whitespace-nowrap">
+                                  <span>{teacherAvgT1?.toFixed(2).replace('.', ',') ?? '—'} / {teacherAvgT2?.toFixed(2).replace('.', ',') ?? '—'}</span>
+                                </div>
+                              ) : (
+                                <>{avgGradeNum(teacher.gradesCounts)?.toFixed(2).replace('.', ',') ?? '—'}</>
+                              )}
                             </td>
+                            {showDeltaColumn && (
+                              <td className={`${termMode === 'compare' ? 'text-xs' : ''} py-2 px-3 text-center font-semibold text-slate-700 whitespace-nowrap`}>
+                                {teacherDelta === null
+                                  ? '—'
+                                  : `${teacherDelta > 0 ? '+' : ''}${teacherDelta.toFixed(2).replace('.', ',')}`}
+                              </td>
+                            )}
                             <td className="py-2 px-3 text-center text-slate-400">-</td>
                           </tr>
                         )})
                       ) : (
                         <tr className="bg-slate-50 border-b border-slate-200">
-                          <td colSpan={14} className="py-3 px-3 text-center text-slate-500 text-sm">
+                          <td colSpan={totalColumnCount} className="py-3 px-3 text-center text-slate-500 text-sm">
                             Ingen lærere med vurderingsdata for dette faget.
                           </td>
                         </tr>
@@ -737,7 +927,7 @@ export default function FaginnsiktView({ data }: Props) {
             {filteredAndSorted.length === 0 && (
               <tbody>
                 <tr>
-                  <td colSpan={14} className="py-6 px-3 text-center text-slate-500">
+                  <td colSpan={totalColumnCount} className="py-6 px-3 text-center text-slate-500">
                     Ingen fag funnet
                   </td>
                 </tr>

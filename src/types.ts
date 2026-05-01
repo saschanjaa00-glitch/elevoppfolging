@@ -49,6 +49,7 @@ export interface StudentAbsenceSummary {
     percentageAbsence: number
     warnings: Array<{ warningType: string; sentDate: string }>
     grade?: string
+    gradeT2?: string
     inheritsFromSubject?: string
   }>
   avbrudd: boolean

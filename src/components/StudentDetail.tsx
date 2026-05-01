@@ -79,6 +79,7 @@ export default function StudentDetail({
 
   const gradeLookup = useMemo(() => {
     const gradeMap = new Map<string, string>()
+    const gradeMapT2 = new Map<string, string>()
     const subjectTeacherMap = new Map<string, string>()
 
     data.grades.forEach(g => {
@@ -89,13 +90,14 @@ export default function StudentDetail({
       if (g.subjectTeacher && !subjectTeacherMap.has(key)) {
         subjectTeacherMap.set(key, g.subjectTeacher)
       }
-      const halvar = g.halvår.toString().trim()
-      if ((halvar === '1' || halvar.toLowerCase().includes('1')) && !gradeMap.has(key)) {
-        gradeMap.set(key, g.grade)
-      }
+      const halvar = g.halvår.toString().trim().toLowerCase()
+      const isT1 = halvar === '1' || halvar.includes('1')
+      const isT2 = !isT1 && (halvar === '2' || halvar.includes('2'))
+      if (isT1 && !gradeMap.has(key)) gradeMap.set(key, g.grade)
+      if (isT2 && !gradeMapT2.has(key)) gradeMapT2.set(key, g.grade)
     })
 
-    return { gradeMap, subjectTeacherMap }
+    return { gradeMap, gradeMapT2, subjectTeacherMap }
   }, [data.grades, normalizedSelectedStudent, absenceSubjectClassLookup, selectedClass])
 
   const studentInfo = useMemo(
@@ -122,6 +124,7 @@ export default function StudentDetail({
 
         const subjectWarnings = warningsBySubjectGroup.get(normalizeSubjectGroupKey(topRecord.subjectGroup)) ?? []
         const grade = gradeLookup.gradeMap.get(normalizeSubjectGroupKey(topRecord.subjectGroup))
+        const gradeT2 = gradeLookup.gradeMapT2.get(normalizeSubjectGroupKey(topRecord.subjectGroup))
         const teacher = resolveTeacher(subject, gradeLookup.subjectTeacherMap.get(normalizeSubjectGroupKey(topRecord.subjectGroup)) ?? topRecord.teacher)
 
         return {
@@ -130,6 +133,7 @@ export default function StudentDetail({
           topRecord,
           warnings: subjectWarnings,
           grade,
+          gradeT2,
           teacher,
           noAbsenceData: false,
           showSidemalExemption: studentInfo?.sidemalExemption ?? false,
@@ -158,7 +162,7 @@ export default function StudentDetail({
     const norskSupplement = requiredNorskCodes
       .filter(code => {
         const key = normalizeSubjectGroupKey(code)
-        return gradeLookup.gradeMap.has(key) && !existingSubjectGroupKeys.has(key)
+        return (gradeLookup.gradeMap.has(key) || gradeLookup.gradeMapT2.has(key)) && !existingSubjectGroupKeys.has(key)
       })
       .map(code => {
         const subjectGroupKey = normalizeSubjectGroupKey(code)
@@ -188,6 +192,7 @@ export default function StudentDetail({
           },
           warnings,
           grade: gradeLookup.gradeMap.get(subjectGroupKey),
+          gradeT2: gradeLookup.gradeMapT2.get(subjectGroupKey),
           teacher,
           noAbsenceData: !hasAbsenceData,
           showSidemalExemption: studentInfo?.sidemalExemption ?? false,
@@ -222,10 +227,11 @@ export default function StudentDetail({
 
   return (
     <div className="bg-white divide-y divide-slate-100 py-1">
-      {subjectSummaries.map(({ subject, topRecord: record, warnings, grade, teacher, noAbsenceData, showSidemalExemption }) => {
+      {subjectSummaries.map(({ subject, topRecord: record, warnings, grade, gradeT2, teacher, noAbsenceData, showSidemalExemption }) => {
         const isAtRisk = !noAbsenceData && record.percentageAbsence > threshold
         const isHighRisk = !noAbsenceData && record.percentageAbsence > 10
         const isLowGrade = grade && ['1', '2', 'iv'].includes(grade.toLowerCase())
+        const isLowGradeT2 = gradeT2 && ['1', '2', 'iv'].includes(gradeT2.toLowerCase())
 
         return (
           <div key={subject} className="flex items-start justify-between px-4 py-3 gap-4 transition-colors hover:bg-slate-100">
@@ -264,6 +270,11 @@ export default function StudentDetail({
               {grade && (
                 <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${isLowGrade ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-600'}`}>
                   T1: {grade}
+                </span>
+              )}
+              {gradeT2 && (
+                <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${isLowGradeT2 ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-600'}`}>
+                  T2: {gradeT2}
                 </span>
               )}
             </div>
