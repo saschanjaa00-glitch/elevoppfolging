@@ -277,6 +277,7 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
         grade: getRowValue(row, ['grade', 'karakter']),
         subjectTeacher: getRowValue(row, ['subject teacher', 'faglærer', 'faglaerer', 'lærer', 'larer', 'teacher']),
         halvår: getRowValue(row, ['halvår', 'halvar', 'termin', 'term']),
+        skoleår: getRowValue(row, ['skoleår', 'skolear', 'school year', 'schoolyear']),
       }))
       .filter(r => r.navn && r.subjectGroup && r.grade)
   }
@@ -445,6 +446,11 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
             if (missing.length > 0) missingWarnings.push({ fileName: file.name, fileType: 'Karakterfil', missing })
             const parsed = parseGradeSheet(sheetRaw)
             data.grades = parsed
+            // Derive skoleår from most common non-empty value in parsed grades
+            const skYearCounts = new Map<string, number>()
+            parsed.forEach(r => { if (r.skoleår) skYearCounts.set(r.skoleår, (skYearCounts.get(r.skoleår) ?? 0) + 1) })
+            const topSkoleår = Array.from(skYearCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0]
+            if (topSkoleår) data.skoleår = topSkoleår.replace(/[^0-9A-Za-z]/g, '')
             detected.add('grades')
           } else if (looksLikeStudentInfoWorkbook(sheetRaw)) {
             const missing = getMissingStudentInfoColumns(sheetRaw)

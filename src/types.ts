@@ -69,6 +69,7 @@ export interface GradeRecord {
   grade: string
   subjectTeacher?: string
   halvår: string
+  skoleår?: string
 }
 
 export interface DataStore {
@@ -77,4 +78,5 @@ export interface DataStore {
   grades: GradeRecord[]
   studentInfo: StudentInfoRecord[]
   warningFileCreatedDate?: string
+  skoleår?: string
 }

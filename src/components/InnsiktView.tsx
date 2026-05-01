@@ -639,10 +639,81 @@ export default function InnsiktView({ data, threshold }: Props) {
   const showDeltaColumn = termMode === 'compare'
   const totalColumnCount = 1 + 1 + (showWarningColumns ? 4 : 0) + allGrades.length + 1 + (showDeltaColumn ? 1 : 0) + 1
 
+  const exportToExcel = () => {
+    void import('xlsx').then(XLSX => {
+      const skoleårLabel = data.skoleår ?? 'Ukjent'
+      const headers = ['Lærer', 'Fag', 'Elever', 'Karakterer', 'Snitt', 'IV', 'IV%', '1', '1%', '2', '2%', '3', '3%', '4', '4%', '5', '5%', '6', '6%', 'Varsler', 'Manglende', 'F', 'G']
+
+      const buildRows = (termCounts: (t: TeacherStats | SubjectStats) => Record<string, number>) => {
+        const rows: (string | number)[][] = [headers]
+        filteredAndSorted.forEach(teacher => {
+          const gc = termCounts(teacher)
+          const total = Object.values(gc).reduce((a, b) => a + b, 0)
+          const avg = avgGradeNum(gc)
+          rows.push([
+            teacher.name, '', teacher.studentCount, total,
+            avg !== null ? parseFloat(avg.toFixed(2)) : '',
+            gc['IV'] ?? 0, total > 0 ? parseFloat(((gc['IV'] ?? 0) / total * 100).toFixed(1)) : 0,
+            gc['1'] ?? 0, total > 0 ? parseFloat(((gc['1'] ?? 0) / total * 100).toFixed(1)) : 0,
+            gc['2'] ?? 0, total > 0 ? parseFloat(((gc['2'] ?? 0) / total * 100).toFixed(1)) : 0,
+            gc['3'] ?? 0, total > 0 ? parseFloat(((gc['3'] ?? 0) / total * 100).toFixed(1)) : 0,
+            gc['4'] ?? 0, total > 0 ? parseFloat(((gc['4'] ?? 0) / total * 100).toFixed(1)) : 0,
+            gc['5'] ?? 0, total > 0 ? parseFloat(((gc['5'] ?? 0) / total * 100).toFixed(1)) : 0,
+            gc['6'] ?? 0, total > 0 ? parseFloat(((gc['6'] ?? 0) / total * 100).toFixed(1)) : 0,
+            teacher.totalVarsels, teacher.missingWarnings,
+            teacher.varselsByType['F'] ?? 0, teacher.varselsByType['G'] ?? 0,
+          ])
+          teacher.subjectStats.forEach(s => {
+            const sgc = termCounts(s)
+            const stotal = Object.values(sgc).reduce((a, b) => a + b, 0)
+            const savg = avgGradeNum(sgc)
+            rows.push([
+              '', s.subject, s.studentCount, stotal,
+              savg !== null ? parseFloat(savg.toFixed(2)) : '',
+              sgc['IV'] ?? 0, stotal > 0 ? parseFloat(((sgc['IV'] ?? 0) / stotal * 100).toFixed(1)) : 0,
+              sgc['1'] ?? 0, stotal > 0 ? parseFloat(((sgc['1'] ?? 0) / stotal * 100).toFixed(1)) : 0,
+              sgc['2'] ?? 0, stotal > 0 ? parseFloat(((sgc['2'] ?? 0) / stotal * 100).toFixed(1)) : 0,
+              sgc['3'] ?? 0, stotal > 0 ? parseFloat(((sgc['3'] ?? 0) / stotal * 100).toFixed(1)) : 0,
+              sgc['4'] ?? 0, stotal > 0 ? parseFloat(((sgc['4'] ?? 0) / stotal * 100).toFixed(1)) : 0,
+              sgc['5'] ?? 0, stotal > 0 ? parseFloat(((sgc['5'] ?? 0) / stotal * 100).toFixed(1)) : 0,
+              sgc['6'] ?? 0, stotal > 0 ? parseFloat(((sgc['6'] ?? 0) / stotal * 100).toFixed(1)) : 0,
+              s.totalVarsels, s.missingWarnings,
+              s.varselsByType['F'] ?? 0, s.varselsByType['G'] ?? 0,
+            ])
+          })
+        })
+        return rows
+      }
+
+      const colWidths = [24, 28, 7, 10, 7, 5, 6, 5, 6, 5, 6, 5, 6, 5, 6, 5, 6, 5, 6, 9, 10, 5, 5]
+
+      const makeSheet = (rows: (string | number)[][]) => {
+        const ws = XLSX.utils.aoa_to_sheet(rows)
+        ws['!cols'] = colWidths.map(w => ({ wch: w }))
+        ws['!freeze'] = { xSplit: 0, ySplit: 1 }
+        return ws
+      }
+
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, makeSheet(buildRows(t => t.gradesCountsT1)), `${skoleårLabel}H1`)
+      XLSX.utils.book_append_sheet(wb, makeSheet(buildRows(t => t.gradesCountsT2)), `${skoleårLabel}H2`)
+      XLSX.writeFile(wb, `laererinnsikt-${skoleårLabel}.xlsx`)
+    })
+  }
+
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6">
-        <h2 className="text-base font-semibold text-slate-900 mb-4">Lærere</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-slate-900">Lærere</h2>
+          <button
+            type="button"
+            onClick={exportToExcel}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
+          >
+            Eksporter til Excel
+          </button>
+        </div>
         
         <div className="mb-4">
           <div className="mb-3 flex flex-wrap gap-2">

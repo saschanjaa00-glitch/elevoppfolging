@@ -635,10 +635,81 @@ export default function FaginnsiktView({ data }: Props) {
   const showDeltaColumn = termMode === 'compare'
   const totalColumnCount = 1 + 1 + (showWarningColumns ? 4 : 0) + allGrades.length + 1 + (showDeltaColumn ? 1 : 0) + 1
 
+  const exportToExcel = () => {
+    void import('xlsx').then(XLSX => {
+      const skoleårLabel = data.skoleår ?? 'Ukjent'
+      const headers = ['Fag', 'Lærer', 'Elever', 'Snitt', 'IV', 'IV%', '1', '1%', '2', '2%', '3', '3%', '4', '4%', '5', '5%', '6', '6%', 'Varsler', 'Manglende', 'F', 'G']
+
+      const buildRows = (termCounts: (row: SubjectRow | TeacherInSubject) => Record<string, number>) => {
+        const rows: (string | number)[][] = [headers]
+        filteredAndSorted.forEach(row => {
+          const gc = termCounts(row)
+          const total = totalGrades(gc)
+          const avg = avgGradeNum(gc)
+          rows.push([
+            row.subject, '', row.studentCount,
+            avg !== null ? parseFloat(avg.toFixed(2)) : '',
+            gc['IV'] ?? 0, total > 0 ? parseFloat(((gc['IV'] ?? 0) / total * 100).toFixed(1)) : 0,
+            gc['1'] ?? 0, total > 0 ? parseFloat(((gc['1'] ?? 0) / total * 100).toFixed(1)) : 0,
+            gc['2'] ?? 0, total > 0 ? parseFloat(((gc['2'] ?? 0) / total * 100).toFixed(1)) : 0,
+            gc['3'] ?? 0, total > 0 ? parseFloat(((gc['3'] ?? 0) / total * 100).toFixed(1)) : 0,
+            gc['4'] ?? 0, total > 0 ? parseFloat(((gc['4'] ?? 0) / total * 100).toFixed(1)) : 0,
+            gc['5'] ?? 0, total > 0 ? parseFloat(((gc['5'] ?? 0) / total * 100).toFixed(1)) : 0,
+            gc['6'] ?? 0, total > 0 ? parseFloat(((gc['6'] ?? 0) / total * 100).toFixed(1)) : 0,
+            row.totalVarsels, row.missingWarnings,
+            row.varselsByType['F'] ?? 0, row.varselsByType['G'] ?? 0,
+          ])
+          row.teachers.forEach(t => {
+            const tgc = termCounts(t)
+            const ttotal = totalGrades(tgc)
+            const tavg = avgGradeNum(tgc)
+            rows.push([
+              '', t.name, t.studentCount,
+              tavg !== null ? parseFloat(tavg.toFixed(2)) : '',
+              tgc['IV'] ?? 0, ttotal > 0 ? parseFloat(((tgc['IV'] ?? 0) / ttotal * 100).toFixed(1)) : 0,
+              tgc['1'] ?? 0, ttotal > 0 ? parseFloat(((tgc['1'] ?? 0) / ttotal * 100).toFixed(1)) : 0,
+              tgc['2'] ?? 0, ttotal > 0 ? parseFloat(((tgc['2'] ?? 0) / ttotal * 100).toFixed(1)) : 0,
+              tgc['3'] ?? 0, ttotal > 0 ? parseFloat(((tgc['3'] ?? 0) / ttotal * 100).toFixed(1)) : 0,
+              tgc['4'] ?? 0, ttotal > 0 ? parseFloat(((tgc['4'] ?? 0) / ttotal * 100).toFixed(1)) : 0,
+              tgc['5'] ?? 0, ttotal > 0 ? parseFloat(((tgc['5'] ?? 0) / ttotal * 100).toFixed(1)) : 0,
+              tgc['6'] ?? 0, ttotal > 0 ? parseFloat(((tgc['6'] ?? 0) / ttotal * 100).toFixed(1)) : 0,
+              t.totalVarsels, t.missingWarnings,
+              t.varselsByType['F'] ?? 0, t.varselsByType['G'] ?? 0,
+            ])
+          })
+        })
+        return rows
+      }
+
+      const colWidths = [28, 24, 7, 7, 5, 6, 5, 6, 5, 6, 5, 6, 5, 6, 5, 6, 5, 6, 9, 10, 5, 5]
+
+      const makeSheet = (rows: (string | number)[][]) => {
+        const ws = XLSX.utils.aoa_to_sheet(rows)
+        ws['!cols'] = colWidths.map(w => ({ wch: w }))
+        ws['!freeze'] = { xSplit: 0, ySplit: 1 }
+        return ws
+      }
+
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, makeSheet(buildRows(r => r.gradesCountsT1)), `${skoleårLabel}H1`)
+      XLSX.utils.book_append_sheet(wb, makeSheet(buildRows(r => r.gradesCountsT2)), `${skoleårLabel}H2`)
+      XLSX.writeFile(wb, `faginnsikt-${skoleårLabel}.xlsx`)
+    })
+  }
+
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6">
-        <h2 className="text-base font-semibold text-slate-900 mb-4">Fag</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-slate-900">Fag</h2>
+          <button
+            type="button"
+            onClick={exportToExcel}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
+          >
+            Eksporter til Excel
+          </button>
+        </div>
 
         <div className="mb-4">
           <div className="mb-3 flex flex-wrap gap-2">
