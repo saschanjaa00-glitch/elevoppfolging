@@ -1,5 +1,5 @@
 import { useMemo, useState, Fragment } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight } from 'lucide-react'
 import type { DataStore } from '../types'
 import {
   buildStudentClassKey,
@@ -21,6 +21,8 @@ interface SubjectStats {
   missingWarnings: number
   varselsByType: Record<string, number>
   gradesCounts: Record<string, number>
+  gradesCountsT1: Record<string, number>
+  gradesCountsT2: Record<string, number>
 }
 
 interface TeacherStats {
@@ -31,6 +33,8 @@ interface TeacherStats {
   missingWarnings: number
   varselsByType: Record<string, number>
   gradesCounts: Record<string, number>
+  gradesCountsT1: Record<string, number>
+  gradesCountsT2: Record<string, number>
   subjectStats: SubjectStats[]
 }
 
@@ -49,13 +53,16 @@ type SortKey =
   | 'grade5'
   | 'grade6'
   | 'avgGrade'
+  | 'avgDelta'
 type SortDirection = 'asc' | 'desc'
+type TermMode = 't1' | 't2' | 'compare'
 
 export default function InnsiktView({ data, threshold }: Props) {
   const [searchTerm, setSearchTerm] = useState<string>('')
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [expandedTeacher, setExpandedTeacher] = useState<string | null>(null)
+  const [termMode, setTermMode] = useState<TermMode>('t1')
   const absenceSubjectClassLookup = useMemo(
     () => createAbsenceSubjectClassLookup(data.absences),
     [data.absences]
@@ -67,12 +74,18 @@ export default function InnsiktView({ data, threshold }: Props) {
         const resolvedClass = grade.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, grade.navn, grade.subjectGroup)
         if (!resolvedClass) return null
 
+        const halvaar = (grade.halvår ?? '').trim()
+        const isT1 = halvaar === '1' || halvaar.toLowerCase().includes('1')
+        const isT2 = !isT1 && (halvaar === '2' || halvaar.toLowerCase().includes('2'))
+
         return {
           teacher: grade.subjectTeacher?.trim() ?? '',
           subjectDisplay: grade.subjectGroup?.trim() ?? '',
           subjectNorm: normalizeMatch(grade.subjectGroup),
           studentKey: buildStudentClassKey(grade.navn, resolvedClass),
           gradeValue: grade.grade.toUpperCase().trim(),
+          isT1,
+          isT2,
         }
       })
       .filter((grade): grade is {
@@ -81,6 +94,8 @@ export default function InnsiktView({ data, threshold }: Props) {
         subjectNorm: string
         studentKey: string
         gradeValue: string
+        isT1: boolean
+        isT2: boolean
       } => Boolean(grade?.teacher && grade.subjectDisplay))
   }, [data.grades, absenceSubjectClassLookup])
 
@@ -149,6 +164,8 @@ export default function InnsiktView({ data, threshold }: Props) {
           missingWarnings: 0,
           varselsByType: {},
           gradesCounts: {},
+          gradesCountsT1: {},
+          gradesCountsT2: {},
           subjectStats: [],
         })
       }
@@ -184,6 +201,8 @@ export default function InnsiktView({ data, threshold }: Props) {
           missingWarnings: 0,
           varselsByType: {},
           gradesCounts: {},
+          gradesCountsT1: {},
+          gradesCountsT2: {},
         })
       }
 
@@ -191,9 +210,19 @@ export default function InnsiktView({ data, threshold }: Props) {
       const gradeValue = grade.gradeValue
       stats.gradeCount += 1
       stats.gradesCounts[gradeValue] = (stats.gradesCounts[gradeValue] ?? 0) + 1
+      if (grade.isT1) {
+        stats.gradesCountsT1[gradeValue] = (stats.gradesCountsT1[gradeValue] ?? 0) + 1
+      } else if (grade.isT2) {
+        stats.gradesCountsT2[gradeValue] = (stats.gradesCountsT2[gradeValue] ?? 0) + 1
+      }
 
       const subjectStat = teacherSubjects.get(teacher)!.get(subject)!
       subjectStat.gradesCounts[gradeValue] = (subjectStat.gradesCounts[gradeValue] ?? 0) + 1
+      if (grade.isT1) {
+        subjectStat.gradesCountsT1[gradeValue] = (subjectStat.gradesCountsT1[gradeValue] ?? 0) + 1
+      } else if (grade.isT2) {
+        subjectStat.gradesCountsT2[gradeValue] = (subjectStat.gradesCountsT2[gradeValue] ?? 0) + 1
+      }
     })
 
     // Set student counts from vurderinger-derived student sets.
@@ -311,22 +340,42 @@ export default function InnsiktView({ data, threshold }: Props) {
     return count > 0 ? sum / count : null
   }
 
+  const countsForMode = (
+    t1: Record<string, number>,
+    t2: Record<string, number>,
+    all: Record<string, number>
+  ): Record<string, number> => {
+    if (termMode === 't1') return t1
+    if (termMode === 't2') return t2
+    return all
+  }
+
+  const avgDelta = (t1: Record<string, number>, t2: Record<string, number>): number | null => {
+    const a1 = avgGradeNum(t1)
+    const a2 = avgGradeNum(t2)
+    if (a1 === null || a2 === null) return null
+    return a2 - a1
+  }
+
   const filteredAndSorted = useMemo(() => {
     let filtered = teacherStats.filter(t =>
       t.name.toLowerCase().includes(searchTerm.toLowerCase())
     )
 
     const numericSortValue = (row: TeacherStats, key: SortKey): number => {
-      if (key === 'grades') return row.gradeCount
+      const gc = countsForMode(row.gradesCountsT1, row.gradesCountsT2, row.gradesCounts)
+      const total = Object.values(gc).reduce((a, b) => a + b, 0)
+      if (key === 'grades') return total
       if (key === 'totalVarsels') return row.totalVarsels
       if (key === 'missingWarnings') return row.missingWarnings
       if (key === 'warningsF') return row.varselsByType['F'] ?? 0
       if (key === 'warningsG') return row.varselsByType['G'] ?? 0
-      if (key === 'avgGrade') return avgGradeNum(row.gradesCounts) ?? -1
+      if (key === 'avgGrade') return avgGradeNum(gc) ?? -1
+      if (key === 'avgDelta') return avgDelta(row.gradesCountsT1, row.gradesCountsT2) ?? -999
       const gradeKey = sortGradeByKey[key]
       if (gradeKey) {
-        if (row.gradeCount === 0) return 0
-        return ((row.gradesCounts[gradeKey] ?? 0) / row.gradeCount) * 100
+        if (total === 0) return 0
+        return ((gc[gradeKey] ?? 0) / total) * 100
       }
       return 0
     }
@@ -345,19 +394,21 @@ export default function InnsiktView({ data, threshold }: Props) {
     })
 
     return filtered
-  }, [teacherStats, searchTerm, sortKey, sortDirection])
+  }, [teacherStats, searchTerm, sortKey, sortDirection, termMode])
 
   const sortedSubjectsForTeacher = (subjects: SubjectStats[]): SubjectStats[] => {
     const numVal = (s: SubjectStats): number => {
-      const total = Object.values(s.gradesCounts).reduce((a, b) => a + b, 0)
+      const gc = countsForMode(s.gradesCountsT1, s.gradesCountsT2, s.gradesCounts)
+      const total = Object.values(gc).reduce((a, b) => a + b, 0)
       if (sortKey === 'grades') return total
       if (sortKey === 'totalVarsels') return s.totalVarsels
       if (sortKey === 'missingWarnings') return s.missingWarnings
       if (sortKey === 'warningsF') return s.varselsByType['F'] ?? 0
       if (sortKey === 'warningsG') return s.varselsByType['G'] ?? 0
-      if (sortKey === 'avgGrade') return avgGradeNum(s.gradesCounts) ?? -1
+      if (sortKey === 'avgGrade') return avgGradeNum(gc) ?? -1
+      if (sortKey === 'avgDelta') return avgDelta(s.gradesCountsT1, s.gradesCountsT2) ?? -999
       const gradeKey = sortGradeByKey[sortKey]
-      if (gradeKey) return total === 0 ? 0 : ((s.gradesCounts[gradeKey] ?? 0) / total) * 100
+      if (gradeKey) return total === 0 ? 0 : ((gc[gradeKey] ?? 0) / total) * 100
       return 0
     }
     return [...subjects].sort((a, b) => {
@@ -584,12 +635,51 @@ export default function InnsiktView({ data, threshold }: Props) {
     doc.save(`innsikt-${safeName}.pdf`)
   }
 
+  const showWarningColumns = termMode !== 'compare'
+  const showDeltaColumn = termMode === 'compare'
+  const totalColumnCount = 1 + 1 + (showWarningColumns ? 4 : 0) + allGrades.length + 1 + (showDeltaColumn ? 1 : 0) + 1
+
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6">
         <h2 className="text-base font-semibold text-slate-900 mb-4">Lærere</h2>
         
         <div className="mb-4">
+          <div className="mb-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setTermMode('t1')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+                termMode === 't1'
+                  ? 'bg-sky-100 text-sky-800 border-sky-300'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+              }`}
+            >
+              Halvår 1
+            </button>
+            <button
+              type="button"
+              onClick={() => setTermMode('t2')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+                termMode === 't2'
+                  ? 'bg-sky-100 text-sky-800 border-sky-300'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+              }`}
+            >
+              Halvår 2
+            </button>
+            <button
+              type="button"
+              onClick={() => setTermMode('compare')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+                termMode === 'compare'
+                  ? 'bg-sky-100 text-sky-800 border-sky-300'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+              }`}
+            >
+              Sammenlign
+            </button>
+          </div>
           <input
             type="text"
             placeholder="Søk etter lærer..."
@@ -600,10 +690,10 @@ export default function InnsiktView({ data, threshold }: Props) {
         </div>
 
         <div className="overflow-x-auto overflow-y-auto max-h-[70vh]">
-          <table className="w-full text-sm border-separate border-spacing-0">
+          <table className={`${termMode === 'compare' ? 'w-max [&_th]:!px-2 [&_th]:!py-2 [&_td]:!px-2 [&_td]:!py-1' : 'w-full'} table-auto text-sm border-separate border-spacing-0`}>
             <thead>
               <tr className="border-b-2 border-slate-200">
-                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap min-w-[160px]">
                   <button
                     type="button"
                     onClick={() => toggleSort('name')}
@@ -627,54 +717,58 @@ export default function InnsiktView({ data, threshold }: Props) {
                     </span>
                   </button>
                 </th>
-                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
-                  <button
-                    type="button"
-                    onClick={() => toggleSort('totalVarsels')}
-                    className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
-                  >
-                    <span>Varsler totalt</span>
-                    <span className="min-w-2 text-[10px] leading-none text-slate-400">
-                      {getSortIndicator('totalVarsels')}
-                    </span>
-                  </button>
-                </th>
-                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
-                  <button
-                    type="button"
-                    onClick={() => toggleSort('missingWarnings')}
-                    className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
-                  >
-                    <span>Manglende</span>
-                    <span className="min-w-2 text-[10px] leading-none text-slate-400">
-                      {getSortIndicator('missingWarnings')}
-                    </span>
-                  </button>
-                </th>
-                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
-                  <button
-                    type="button"
-                    onClick={() => toggleSort('warningsF')}
-                    className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
-                  >
-                    <span>F</span>
-                    <span className="min-w-2 text-[10px] leading-none text-slate-400">
-                      {getSortIndicator('warningsF')}
-                    </span>
-                  </button>
-                </th>
-                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
-                  <button
-                    type="button"
-                    onClick={() => toggleSort('warningsG')}
-                    className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
-                  >
-                    <span>G</span>
-                    <span className="min-w-2 text-[10px] leading-none text-slate-400">
-                      {getSortIndicator('warningsG')}
-                    </span>
-                  </button>
-                </th>
+                {showWarningColumns && (
+                  <>
+                    <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort('totalVarsels')}
+                        className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
+                      >
+                        <span>Varsler totalt</span>
+                        <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                          {getSortIndicator('totalVarsels')}
+                        </span>
+                      </button>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort('missingWarnings')}
+                        className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
+                      >
+                        <span>Manglende</span>
+                        <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                          {getSortIndicator('missingWarnings')}
+                        </span>
+                      </button>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort('warningsF')}
+                        className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
+                      >
+                        <span>F</span>
+                        <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                          {getSortIndicator('warningsF')}
+                        </span>
+                      </button>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort('warningsG')}
+                        className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
+                      >
+                        <span>G</span>
+                        <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                          {getSortIndicator('warningsG')}
+                        </span>
+                      </button>
+                    </th>
+                  </>
+                )}
                 {allGrades.map(grade => (
                   <th
                     key={grade}
@@ -704,13 +798,33 @@ export default function InnsiktView({ data, threshold }: Props) {
                     </span>
                   </button>
                 </th>
+                {showDeltaColumn && (
+                  <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => toggleSort('avgDelta')}
+                      className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
+                    >
+                      <span>Endring</span>
+                      <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                        {getSortIndicator('avgDelta')}
+                      </span>
+                    </button>
+                  </th>
+                )}
                 <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   PDF
                 </th>
               </tr>
             </thead>
             <tbody>
-              {filteredAndSorted.map(teacher => (
+              {filteredAndSorted.map(teacher => {
+                const gc = countsForMode(teacher.gradesCountsT1, teacher.gradesCountsT2, teacher.gradesCounts)
+                const gcTotal = Object.values(gc).reduce((a, b) => a + b, 0)
+                const t1Total = Object.values(teacher.gradesCountsT1).reduce((a, b) => a + b, 0)
+                const t2Total = Object.values(teacher.gradesCountsT2).reduce((a, b) => a + b, 0)
+                const rowDelta = avgDelta(teacher.gradesCountsT1, teacher.gradesCountsT2)
+                return (
                 <Fragment key={teacher.name}>
                   <tr
                     onClick={() => setExpandedTeacher(expandedTeacher === teacher.name ? null : teacher.name)}
@@ -718,7 +832,7 @@ export default function InnsiktView({ data, threshold }: Props) {
                       expandedTeacher && expandedTeacher !== teacher.name ? 'opacity-35' : 'opacity-100'
                     }`}
                   >
-                    <td className="py-2 px-3 font-medium text-slate-900">
+                    <td className="py-2 px-3 font-medium text-slate-900 min-w-[160px]">
                       <div className="flex items-center gap-2">
                         {expandedTeacher === teacher.name ? (
                           <ChevronDown className="w-4 h-4 flex-shrink-0" />
@@ -728,15 +842,21 @@ export default function InnsiktView({ data, threshold }: Props) {
                         <span>{formatTeacherDisplay(teacher.name)}</span>
                       </div>
                     </td>
-                    <td className="py-2 px-3 text-center text-slate-700">{teacher.gradeCount}</td>
-                    <td className="py-2 px-3 text-center text-slate-700 font-medium">{teacher.totalVarsels}</td>
-                    <td className="py-2 px-3 text-center text-amber-700 font-medium">{teacher.missingWarnings > 0 ? teacher.missingWarnings : '—'}</td>
                     <td className="py-2 px-3 text-center text-slate-700">
-                      {teacher.varselsByType['F'] ?? 0}
+                      {termMode === 'compare' ? `${t1Total} / ${t2Total}` : gcTotal}
                     </td>
-                    <td className="py-2 px-3 text-center text-slate-700">
-                      {teacher.varselsByType['G'] ?? 0}
-                    </td>
+                    {showWarningColumns && (
+                      <>
+                        <td className="py-2 px-3 text-center text-slate-700 font-medium">{teacher.totalVarsels}</td>
+                        <td className="py-2 px-3 text-center text-amber-700 font-medium">{teacher.missingWarnings > 0 ? teacher.missingWarnings : '—'}</td>
+                        <td className="py-2 px-3 text-center text-slate-700">
+                          {teacher.varselsByType['F'] ?? 0}
+                        </td>
+                        <td className="py-2 px-3 text-center text-slate-700">
+                          {teacher.varselsByType['G'] ?? 0}
+                        </td>
+                      </>
+                    )}
                     {allGrades.map(grade => (
                       <td
                         key={grade}
@@ -748,15 +868,52 @@ export default function InnsiktView({ data, threshold }: Props) {
                             : 'text-slate-700'
                         }`}
                       >
-                        <div className="leading-tight">
-                          <div>{gradePercentLabel(teacher.gradesCounts[grade] ?? 0, teacher.gradeCount)}</div>
-                          <div className="text-[10px] text-slate-500">{teacher.gradesCounts[grade] ?? 0}</div>
-                        </div>
+                        {termMode === 'compare' ? (
+                          <div className="leading-tight">
+                            <div className="inline-flex items-center gap-1 whitespace-nowrap text-xs">
+                              <span>{gradePercentLabel(teacher.gradesCountsT1[grade] ?? 0, t1Total)} / {gradePercentLabel(teacher.gradesCountsT2[grade] ?? 0, t2Total)}</span>
+                              {(() => {
+                                const pctT1 = t1Total > 0 ? ((teacher.gradesCountsT1[grade] ?? 0) / t1Total) * 100 : 0
+                                const pctT2 = t2Total > 0 ? ((teacher.gradesCountsT2[grade] ?? 0) / t2Total) * 100 : 0
+                                if (pctT2 > pctT1) return <ArrowUp className="w-[14px] h-[14px] text-emerald-600" />
+                                if (pctT2 < pctT1) return <ArrowDown className="w-[14px] h-[14px] text-red-600" />
+                                return null
+                              })()}
+                            </div>
+                            <div className="text-[10px] text-slate-500">({teacher.gradesCountsT1[grade] ?? 0}/{teacher.gradesCountsT2[grade] ?? 0})</div>
+                          </div>
+                        ) : (
+                          <div className="leading-tight">
+                            <div>{gradePercentLabel(gc[grade] ?? 0, gcTotal)}</div>
+                            <div className="text-[10px] text-slate-500">{gc[grade] ?? 0}</div>
+                          </div>
+                        )}
                       </td>
                     ))}
-                    <td className="py-2 px-3 text-center font-semibold text-slate-800">
-                      {avgGradeNum(teacher.gradesCounts)?.toFixed(2).replace('.', ',') ?? '—'}
+                    <td className={`${termMode === 'compare' ? 'text-xs' : ''} py-2 px-3 text-center font-semibold text-slate-800 ${
+                      termMode === 'compare' && rowDelta !== null
+                        ? rowDelta > 0
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : rowDelta < 0
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-slate-100 text-slate-700'
+                        : ''
+                    }`}>
+                      {termMode === 'compare' ? (
+                        <div className="inline-flex items-center gap-1 whitespace-nowrap">
+                          <span>{avgGradeNum(teacher.gradesCountsT1)?.toFixed(2).replace('.', ',') ?? '—'} / {avgGradeNum(teacher.gradesCountsT2)?.toFixed(2).replace('.', ',') ?? '—'}</span>
+                        </div>
+                      ) : (
+                        <>{avgGradeNum(gc)?.toFixed(2).replace('.', ',') ?? '—'}</>
+                      )}
                     </td>
+                    {showDeltaColumn && (
+                      <td className="text-xs py-2 px-3 text-center font-semibold text-slate-700 whitespace-nowrap">
+                        {rowDelta === null
+                          ? '—'
+                          : `${rowDelta > 0 ? '+' : ''}${rowDelta.toFixed(2).replace('.', ',')}`}
+                      </td>
+                    )}
                     <td className="py-2 px-3 text-center">
                       <button
                         type="button"
@@ -774,16 +931,26 @@ export default function InnsiktView({ data, threshold }: Props) {
                     <>
                       {teacher.subjectStats.length > 0 ? (
                         sortedSubjectsForTeacher(teacher.subjectStats).map(subject => {
-                          const subjectGradeTotal = Object.values(subject.gradesCounts).reduce((sum, count) => sum + count, 0)
+                          const sgc = countsForMode(subject.gradesCountsT1, subject.gradesCountsT2, subject.gradesCounts)
+                          const sgcTotal = Object.values(sgc).reduce((a, b) => a + b, 0)
+                          const st1Total = Object.values(subject.gradesCountsT1).reduce((a, b) => a + b, 0)
+                          const st2Total = Object.values(subject.gradesCountsT2).reduce((a, b) => a + b, 0)
+                          const sDelta = avgDelta(subject.gradesCountsT1, subject.gradesCountsT2)
 
                           return (
                           <tr key={`${teacher.name}-${subject.subjectKey}`} className="bg-slate-50 border-b border-slate-200">
                             <td className="py-2 px-3 text-left text-slate-700 pl-10">- {subject.subject}</td>
-                            <td className="py-2 px-3 text-center text-slate-700">{subjectGradeTotal}</td>
-                            <td className="py-2 px-3 text-center text-slate-700 font-medium">{subject.totalVarsels}</td>
-                            <td className="py-2 px-3 text-center text-amber-700 font-medium">{subject.missingWarnings > 0 ? subject.missingWarnings : '—'}</td>
-                            <td className="py-2 px-3 text-center text-slate-700">{subject.varselsByType['F'] ?? 0}</td>
-                            <td className="py-2 px-3 text-center text-slate-700">{subject.varselsByType['G'] ?? 0}</td>
+                            <td className="py-2 px-3 text-center text-slate-700">
+                              {termMode === 'compare' ? `${st1Total} / ${st2Total}` : sgcTotal}
+                            </td>
+                            {showWarningColumns && (
+                              <>
+                                <td className="py-2 px-3 text-center text-slate-700 font-medium">{subject.totalVarsels}</td>
+                                <td className="py-2 px-3 text-center text-amber-700 font-medium">{subject.missingWarnings > 0 ? subject.missingWarnings : '—'}</td>
+                                <td className="py-2 px-3 text-center text-slate-700">{subject.varselsByType['F'] ?? 0}</td>
+                                <td className="py-2 px-3 text-center text-slate-700">{subject.varselsByType['G'] ?? 0}</td>
+                              </>
+                            )}
                             {allGrades.map(grade => (
                               <td
                                 key={grade}
@@ -795,21 +962,58 @@ export default function InnsiktView({ data, threshold }: Props) {
                                     : 'text-slate-700'
                                 }`}
                               >
-                                <div className="leading-tight">
-                                  <div>{gradePercentLabel(subject.gradesCounts[grade] ?? 0, subjectGradeTotal)}</div>
-                                  <div className="text-[10px] text-slate-500">{subject.gradesCounts[grade] ?? 0}</div>
-                                </div>
+                                {termMode === 'compare' ? (
+                                  <div className="leading-tight">
+                                    <div className="inline-flex items-center gap-1 whitespace-nowrap text-xs">
+                                      <span>{gradePercentLabel(subject.gradesCountsT1[grade] ?? 0, st1Total)} / {gradePercentLabel(subject.gradesCountsT2[grade] ?? 0, st2Total)}</span>
+                                      {(() => {
+                                        const pctT1 = st1Total > 0 ? ((subject.gradesCountsT1[grade] ?? 0) / st1Total) * 100 : 0
+                                        const pctT2 = st2Total > 0 ? ((subject.gradesCountsT2[grade] ?? 0) / st2Total) * 100 : 0
+                                        if (pctT2 > pctT1) return <ArrowUp className="w-[14px] h-[14px] text-emerald-600" />
+                                        if (pctT2 < pctT1) return <ArrowDown className="w-[14px] h-[14px] text-red-600" />
+                                        return null
+                                      })()}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500">({subject.gradesCountsT1[grade] ?? 0}/{subject.gradesCountsT2[grade] ?? 0})</div>
+                                  </div>
+                                ) : (
+                                  <div className="leading-tight">
+                                    <div>{gradePercentLabel(sgc[grade] ?? 0, sgcTotal)}</div>
+                                    <div className="text-[10px] text-slate-500">{sgc[grade] ?? 0}</div>
+                                  </div>
+                                )}
                               </td>
                             ))}
-                            <td className="py-2 px-3 text-center font-semibold text-slate-800">
-                              {avgGradeNum(subject.gradesCounts)?.toFixed(2).replace('.', ',') ?? '—'}
+                            <td className={`${termMode === 'compare' ? 'text-xs' : ''} py-2 px-3 text-center font-semibold text-slate-800 ${
+                              termMode === 'compare' && sDelta !== null
+                                ? sDelta > 0
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : sDelta < 0
+                                    ? 'bg-red-100 text-red-800'
+                                    : 'bg-slate-100 text-slate-700'
+                                : ''
+                            }`}>
+                              {termMode === 'compare' ? (
+                                <div className="inline-flex items-center gap-1 whitespace-nowrap">
+                                  <span>{avgGradeNum(subject.gradesCountsT1)?.toFixed(2).replace('.', ',') ?? '—'} / {avgGradeNum(subject.gradesCountsT2)?.toFixed(2).replace('.', ',') ?? '—'}</span>
+                                </div>
+                              ) : (
+                                <>{avgGradeNum(sgc)?.toFixed(2).replace('.', ',') ?? '—'}</>
+                              )}
                             </td>
+                            {showDeltaColumn && (
+                              <td className="text-xs py-2 px-3 text-center font-semibold text-slate-700 whitespace-nowrap">
+                                {sDelta === null
+                                  ? '—'
+                                  : `${sDelta > 0 ? '+' : ''}${sDelta.toFixed(2).replace('.', ',')}`}
+                              </td>
+                            )}
                             <td className="py-2 px-3 text-center text-slate-400">-</td>
                           </tr>
                         )})
                       ) : (
                         <tr className="bg-slate-50 border-b border-slate-200">
-                          <td colSpan={14} className="py-3 px-3 text-center text-slate-500 text-sm">
+                          <td colSpan={totalColumnCount} className="py-3 px-3 text-center text-slate-500 text-sm">
                             Ingen fag med vurderingsdata for denne læreren.
                           </td>
                         </tr>
@@ -817,12 +1021,13 @@ export default function InnsiktView({ data, threshold }: Props) {
                     </>
                   )}
                 </Fragment>
-              ))}
+                )
+              })}
             </tbody>
             {filteredAndSorted.length === 0 && (
               <tbody>
                 <tr>
-                  <td colSpan={14} className="py-6 px-3 text-center text-slate-500">
+                  <td colSpan={totalColumnCount} className="py-6 px-3 text-center text-slate-500">
                     Ingen lærere funnet
                   </td>
                 </tr>
