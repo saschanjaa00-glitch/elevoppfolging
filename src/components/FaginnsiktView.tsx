@@ -1,6 +1,7 @@
-import { useMemo, useState, Fragment } from 'react'
+import { useEffect, useMemo, useState, Fragment } from 'react'
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight } from 'lucide-react'
 import type { DataStore } from '../types'
+import KarakterutviklingPanel from './KarakterutviklingPanel'
 import {
   buildStudentClassKey,
   createAbsenceSubjectClassLookup,
@@ -21,6 +22,8 @@ const subjectDisplayCode = (value: string): string => {
 
 interface Props {
   data: DataStore
+  subtab?: 'oversikt' | 'karakterutvikling'
+  onSubtabChange?: (subtab: 'oversikt' | 'karakterutvikling') => void
 }
 
 interface TeacherInSubject {
@@ -99,14 +102,24 @@ const avgGradeNum = (gradesCounts: Record<string, number>): number | null => {
 const gradePercentLabel = (count: number, total: number): string =>
   `${total > 0 ? ((count / total) * 100).toFixed(0) : '0'}%`
 
-export default function FaginnsiktView({ data }: Props) {
+export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChange }: Props) {
   const [searchTerm, setSearchTerm] = useState('')
+  const [activeSubtab, setActiveSubtab] = useState<'oversikt' | 'karakterutvikling'>(subtab)
   const [termMode, setTermMode] = useState<TermMode>('t1')
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [expandedSubject, setExpandedSubject] = useState<string | null>(null)
   const [subjectForPdfPrompt, setSubjectForPdfPrompt] = useState<SubjectRow | null>(null)
   const [anonymizedTeacherNames, setAnonymizedTeacherNames] = useState<string[]>([])
+    useEffect(() => {
+      setActiveSubtab(subtab)
+    }, [subtab])
+
+    const selectSubtab = (next: 'oversikt' | 'karakterutvikling') => {
+      setActiveSubtab(next)
+      onSubtabChange?.(next)
+    }
+
   const absenceSubjectClassLookup = useMemo(
     () => createAbsenceSubjectClassLookup(data.absences),
     [data.absences]
@@ -636,12 +649,16 @@ export default function FaginnsiktView({ data }: Props) {
   const totalColumnCount = 1 + 1 + (showWarningColumns ? 4 : 0) + allGrades.length + 1 + (showDeltaColumn ? 1 : 0) + 1
 
   const exportToExcel = () => {
-    void import('xlsx').then(XLSX => {
-      const skoleårLabel = data.skoleår ?? 'Ukjent'
+    void import('exceljs').then(async exceljs => {
+      const workbook = new exceljs.Workbook()
+      const skoleårLabel = (data.skoleår ?? 'Ukjent').replace(/[^0-9A-Za-z]/g, '') || 'Ukjent'
       const headers = ['Fag', 'Lærer', 'Elever', 'Snitt', 'IV', 'IV%', '1', '1%', '2', '2%', '3', '3%', '4', '4%', '5', '5%', '6', '6%', 'Varsler', 'Manglende', 'F', 'G']
+      const colWidths = [28, 24, 12, 12, 9, 11, 9, 11, 9, 11, 9, 11, 9, 11, 9, 11, 9, 11, 12, 12, 9, 9]
+      const percentCols = [6, 8, 10, 12, 14, 16, 18]
 
       const buildRows = (termCounts: (row: SubjectRow | TeacherInSubject) => Record<string, number>) => {
-        const rows: (string | number)[][] = [headers]
+        const rows: (string | number)[][] = []
+        const rowLevels: number[] = []
         filteredAndSorted.forEach(row => {
           const gc = termCounts(row)
           const total = totalGrades(gc)
@@ -649,16 +666,18 @@ export default function FaginnsiktView({ data }: Props) {
           rows.push([
             row.subject, '', row.studentCount,
             avg !== null ? parseFloat(avg.toFixed(2)) : '',
-            gc['IV'] ?? 0, total > 0 ? parseFloat(((gc['IV'] ?? 0) / total * 100).toFixed(1)) : 0,
-            gc['1'] ?? 0, total > 0 ? parseFloat(((gc['1'] ?? 0) / total * 100).toFixed(1)) : 0,
-            gc['2'] ?? 0, total > 0 ? parseFloat(((gc['2'] ?? 0) / total * 100).toFixed(1)) : 0,
-            gc['3'] ?? 0, total > 0 ? parseFloat(((gc['3'] ?? 0) / total * 100).toFixed(1)) : 0,
-            gc['4'] ?? 0, total > 0 ? parseFloat(((gc['4'] ?? 0) / total * 100).toFixed(1)) : 0,
-            gc['5'] ?? 0, total > 0 ? parseFloat(((gc['5'] ?? 0) / total * 100).toFixed(1)) : 0,
-            gc['6'] ?? 0, total > 0 ? parseFloat(((gc['6'] ?? 0) / total * 100).toFixed(1)) : 0,
+            gc['IV'] ?? 0, total > 0 ? (gc['IV'] ?? 0) / total : 0,
+            gc['1'] ?? 0, total > 0 ? (gc['1'] ?? 0) / total : 0,
+            gc['2'] ?? 0, total > 0 ? (gc['2'] ?? 0) / total : 0,
+            gc['3'] ?? 0, total > 0 ? (gc['3'] ?? 0) / total : 0,
+            gc['4'] ?? 0, total > 0 ? (gc['4'] ?? 0) / total : 0,
+            gc['5'] ?? 0, total > 0 ? (gc['5'] ?? 0) / total : 0,
+            gc['6'] ?? 0, total > 0 ? (gc['6'] ?? 0) / total : 0,
             row.totalVarsels, row.missingWarnings,
             row.varselsByType['F'] ?? 0, row.varselsByType['G'] ?? 0,
           ])
+          rowLevels.push(0)
+
           row.teachers.forEach(t => {
             const tgc = termCounts(t)
             const ttotal = totalGrades(tgc)
@@ -666,39 +685,128 @@ export default function FaginnsiktView({ data }: Props) {
             rows.push([
               '', t.name, t.studentCount,
               tavg !== null ? parseFloat(tavg.toFixed(2)) : '',
-              tgc['IV'] ?? 0, ttotal > 0 ? parseFloat(((tgc['IV'] ?? 0) / ttotal * 100).toFixed(1)) : 0,
-              tgc['1'] ?? 0, ttotal > 0 ? parseFloat(((tgc['1'] ?? 0) / ttotal * 100).toFixed(1)) : 0,
-              tgc['2'] ?? 0, ttotal > 0 ? parseFloat(((tgc['2'] ?? 0) / ttotal * 100).toFixed(1)) : 0,
-              tgc['3'] ?? 0, ttotal > 0 ? parseFloat(((tgc['3'] ?? 0) / ttotal * 100).toFixed(1)) : 0,
-              tgc['4'] ?? 0, ttotal > 0 ? parseFloat(((tgc['4'] ?? 0) / ttotal * 100).toFixed(1)) : 0,
-              tgc['5'] ?? 0, ttotal > 0 ? parseFloat(((tgc['5'] ?? 0) / ttotal * 100).toFixed(1)) : 0,
-              tgc['6'] ?? 0, ttotal > 0 ? parseFloat(((tgc['6'] ?? 0) / ttotal * 100).toFixed(1)) : 0,
+              tgc['IV'] ?? 0, ttotal > 0 ? (tgc['IV'] ?? 0) / ttotal : 0,
+              tgc['1'] ?? 0, ttotal > 0 ? (tgc['1'] ?? 0) / ttotal : 0,
+              tgc['2'] ?? 0, ttotal > 0 ? (tgc['2'] ?? 0) / ttotal : 0,
+              tgc['3'] ?? 0, ttotal > 0 ? (tgc['3'] ?? 0) / ttotal : 0,
+              tgc['4'] ?? 0, ttotal > 0 ? (tgc['4'] ?? 0) / ttotal : 0,
+              tgc['5'] ?? 0, ttotal > 0 ? (tgc['5'] ?? 0) / ttotal : 0,
+              tgc['6'] ?? 0, ttotal > 0 ? (tgc['6'] ?? 0) / ttotal : 0,
               t.totalVarsels, t.missingWarnings,
               t.varselsByType['F'] ?? 0, t.varselsByType['G'] ?? 0,
             ])
+            rowLevels.push(1)
           })
         })
-        return rows
+        return { rows, rowLevels }
       }
 
-      const colWidths = [28, 24, 7, 7, 5, 6, 5, 6, 5, 6, 5, 6, 5, 6, 5, 6, 5, 6, 9, 10, 5, 5]
+      const addSheet = (sheetName: string, termCounts: (row: SubjectRow | TeacherInSubject) => Record<string, number>) => {
+        const worksheet = workbook.addWorksheet(sheetName.slice(0, 31), {
+          views: [{ state: 'frozen', ySplit: 1 }],
+        })
+        worksheet.properties.outlineLevelRow = 1
+        worksheet.addRow(headers)
+        const built = buildRows(termCounts)
+        built.rows.forEach((row, idx) => {
+          const level = built.rowLevels[idx]
+          const excelRow = worksheet.addRow(row)
+          if (level > 0) {
+            excelRow.outlineLevel = 1
+            excelRow.hidden = true
+            excelRow.getCell(2).alignment = { indent: 1, vertical: 'middle' }
+          }
+        })
 
-      const makeSheet = (rows: (string | number)[][]) => {
-        const ws = XLSX.utils.aoa_to_sheet(rows)
-        ws['!cols'] = colWidths.map(w => ({ wch: w }))
-        ws['!freeze'] = { xSplit: 0, ySplit: 1 }
-        return ws
+        worksheet.columns.forEach((col, idx) => {
+          col.width = colWidths[idx]
+        })
+        worksheet.autoFilter = {
+          from: { row: 1, column: 1 },
+          to: { row: 1, column: headers.length },
+        }
+
+        const headerRow = worksheet.getRow(1)
+        headerRow.height = 22
+        headerRow.eachCell(cell => {
+          cell.font = { bold: true, color: { argb: 'FF0F172A' } }
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } }
+          cell.alignment = { horizontal: 'center', vertical: 'middle' }
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+          }
+        })
+
+        for (let i = 2; i <= worksheet.rowCount; i += 1) {
+          const row = worksheet.getRow(i)
+          const isChild = (row.outlineLevel ?? 0) > 0
+          row.height = 20
+          row.eachCell(cell => {
+            cell.border = {
+              top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+              left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+              bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+              right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            }
+            if (!isChild) {
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
+            }
+          })
+          row.getCell(4).numFmt = '0.00'
+          percentCols.forEach(col => {
+            row.getCell(col).numFmt = '0.0%'
+          })
+        }
       }
 
-      const wb = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(wb, makeSheet(buildRows(r => r.gradesCountsT1)), `${skoleårLabel}H1`)
-      XLSX.utils.book_append_sheet(wb, makeSheet(buildRows(r => r.gradesCountsT2)), `${skoleårLabel}H2`)
-      XLSX.writeFile(wb, `faginnsikt-${skoleårLabel}.xlsx`)
+      addSheet(`${skoleårLabel}H1`, r => r.gradesCountsT1)
+      addSheet(`${skoleårLabel}H2`, r => r.gradesCountsT2)
+
+      const buffer = await workbook.xlsx.writeBuffer()
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      })
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = `faginnsikt-${skoleårLabel}.xlsx`
+      link.click()
+      URL.revokeObjectURL(link.href)
     })
   }
 
   return (
     <div className="space-y-4">
+      <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => selectSubtab('oversikt')}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+              activeSubtab === 'oversikt'
+                ? 'bg-sky-100 text-sky-800 border-sky-300'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+            }`}
+          >
+            Fagoversikt
+          </button>
+          <button
+            type="button"
+            onClick={() => selectSubtab('karakterutvikling')}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+              activeSubtab === 'karakterutvikling'
+                ? 'bg-sky-100 text-sky-800 border-sky-300'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+            }`}
+          >
+            Karakterutvikling
+          </button>
+        </div>
+      </div>
+
+      {activeSubtab === 'oversikt' ? (
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold text-slate-900">Fag</h2>
@@ -1011,6 +1119,9 @@ export default function FaginnsiktView({ data }: Props) {
           {filteredAndSorted.length} fag av {subjectRows.length} totalt
         </div>
       </div>
+      ) : (
+        <KarakterutviklingPanel baseGrades={data.grades} />
+      )}
 
       {subjectForPdfPrompt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">

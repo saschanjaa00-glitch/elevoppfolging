@@ -9,9 +9,10 @@ import { normalizeCellText } from '../securityUtils'
 interface FileUploadProps {
   onDataImport: (data: DataStore) => void;
   onPresetImport?: (presets: PresetRecord[]) => void;
+  onOpenKarakterutvikling?: () => void;
 }
 
-export default function FileUpload({ onDataImport, onPresetImport }: FileUploadProps) {
+export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakterutvikling }: FileUploadProps) {
   const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
   const MAX_TOTAL_SIZE_BYTES = 100 * 1024 * 1024
   const MAX_CELL_CHARS = 10000
@@ -696,6 +697,21 @@ export default function FileUpload({ onDataImport, onPresetImport }: FileUploadP
           </div>
           </div>
         </div>
+
+        <div className="mt-8 rounded-lg border border-sky-200 bg-sky-50 p-4">
+          <h3 className="text-sm font-semibold text-sky-900 mb-1">Karakterutvikling</h3>
+          <p className="text-sm text-sky-800 mb-3">
+            Åpne Faginnsikt sin underfane for karakterutvikling. Der kan du laste opp flere karakterfiler og sammenligne snitt per skoleår.
+          </p>
+          <button
+            type="button"
+            onClick={() => onOpenKarakterutvikling?.()}
+            className="px-3 py-2 rounded-lg text-sm font-medium border bg-white text-sky-800 border-sky-300 hover:bg-sky-100"
+          >
+            Åpne Karakterutvikling i Faginnsikt
+          </button>
+        </div>
+
         <p className="mt-4 text-xs text-slate-500">
           * Finn i VIS under <span className="font-medium">Kommunikasjon &rarr; Varselbrev</span>. La siden laste helt inn før du trykker på nedtrekksmeny for <span className="font-medium">Antall per side</span> og velger <span className="font-medium">Alle</span>. Trykk tannhjulet og vis alle kolonner unntatt &laquo;Nedlasting&raquo;. Kopier radene uten headere og lim inn i Excel.{' '}
           <button

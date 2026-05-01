@@ -32,6 +32,7 @@ const InnsiktView = lazy(loadInnsiktView)
 const FaginnsiktView = lazy(loadFaginnsiktView)
 
 type AppTab = 'elever' | 'statistikk' | 'faginnsikt' | 'innsikt'
+type FaginnsiktSubtab = 'oversikt' | 'karakterutvikling'
 
 const IDLE_TIMEOUT_MS = 45 * 60 * 1000
 
@@ -69,6 +70,8 @@ function App() {
   const [thresholdEnabled, setThresholdEnabled] = useState<boolean>(true)
   const [noFilter, setNoFilter] = useState<boolean>(false)
   const [activeTab, setActiveTab] = useState<AppTab>('elever')
+  const [faginnsiktSubtab, setFaginnsiktSubtab] = useState<FaginnsiktSubtab>('oversikt')
+  const [allowInsightsWithoutAbsence, setAllowInsightsWithoutAbsence] = useState(false)
   const [studentSearch, setStudentSearch] = useState<string>('')
   const [kontaktlaererSearch, setKontaktlaererSearch] = useState<string>('')
   const [faglaererSearch, setFaglaererSearch] = useState<string>('')
@@ -106,16 +109,20 @@ function App() {
     setVurderingFromDate('')
     setPreOverrideFilters(null)
     setIdleRemainingMs(IDLE_TIMEOUT_MS)
+    setFaginnsiktSubtab('oversikt')
+    setAllowInsightsWithoutAbsence(false)
     idleDeadlineRef.current = null
   }
 
   const handleDataImport = (importedData: DataStore) => {
     setData(importedData)
+    setAllowInsightsWithoutAbsence(false)
     const allClasses = Array.from(new Set(importedData.absences.map(a => a.class))).sort()
     setSelectedClasses(allClasses)
   }
 
-  const hasData = data.absences.length > 0
+  const hasAbsenceData = data.absences.length > 0
+  const hasData = hasAbsenceData || allowInsightsWithoutAbsence
   const isNameSearchActive = studentSearch.trim().length > 0
   const filtersDisabled = isNameSearchActive || noFilter
   const prefetchedChunks = useRef<Set<string>>(new Set())
@@ -127,6 +134,12 @@ function App() {
   }, [idleRemainingMs])
 
   const effectiveThreshold = isNameSearchActive ? 0 : (thresholdEnabled ? absenceThreshold : 0)
+
+  const openKarakterutviklingFromImport = () => {
+    setAllowInsightsWithoutAbsence(true)
+    setActiveTab('faginnsikt')
+    setFaginnsiktSubtab('karakterutvikling')
+  }
 
   const missingWarningsStats = useMemo(() => {
     if (selectedClasses.length === 0) return { count: 0, teacherCount: 0 }
@@ -728,11 +741,16 @@ function App() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {!hasData ? (
-          <FileUpload onDataImport={handleDataImport} onPresetImport={setPresets} />
+          <FileUpload
+            onDataImport={handleDataImport}
+            onPresetImport={setPresets}
+            onOpenKarakterutvikling={openKarakterutviklingFromImport}
+          />
         ) : (
           <div className="space-y-6">
             {/* Top bar */}
             <div className="flex items-center border-b border-slate-200 pb-2 gap-1">
+              {hasAbsenceData && (
               <button
                 onClick={() => setActiveTab('elever')}
                 className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
@@ -743,6 +761,8 @@ function App() {
               >
                 Elever
               </button>
+              )}
+              {hasAbsenceData && (
               <button
                 onClick={() => setActiveTab('statistikk')}
                 className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
@@ -753,6 +773,7 @@ function App() {
               >
                 Statistikk
               </button>
+              )}
               <button
                 onClick={() => setActiveTab('faginnsikt')}
                 className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
@@ -763,6 +784,7 @@ function App() {
               >
                 Faginnsikt
               </button>
+              {hasAbsenceData && (
               <button
                 onClick={() => setActiveTab('innsikt')}
                 className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
@@ -773,13 +795,16 @@ function App() {
               >
                 Lærerinnsikt
               </button>
+              )}
               <div className="ml-auto flex items-center gap-2">
-                <button
-                  onClick={() => setOversiktModalOpen(true)}
-                  className="px-4 py-2 text-sm font-medium text-emerald-700 hover:text-emerald-900 transition-colors"
-                >
-                  Generer oppfølgingsoversikt
-                </button>
+                {hasAbsenceData && (
+                  <button
+                    onClick={() => setOversiktModalOpen(true)}
+                    className="px-4 py-2 text-sm font-medium text-emerald-700 hover:text-emerald-900 transition-colors"
+                  >
+                    Generer oppfølgingsoversikt
+                  </button>
+                )}
                 <button
                   onClick={clearImportedData}
                   className="px-4 py-2 text-slate-600 hover:text-slate-900 font-medium transition-colors"
@@ -796,7 +821,11 @@ function App() {
             )}
             {activeTab === 'faginnsikt' && (
               <Suspense fallback={<div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 text-slate-600">Laster faginnsikt...</div>}>
-                <FaginnsiktView data={data} />
+                <FaginnsiktView
+                  data={data}
+                  subtab={faginnsiktSubtab}
+                  onSubtabChange={setFaginnsiktSubtab}
+                />
               </Suspense>
             )}
             {activeTab === 'innsikt' && (

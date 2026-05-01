@@ -640,12 +640,16 @@ export default function InnsiktView({ data, threshold }: Props) {
   const totalColumnCount = 1 + 1 + (showWarningColumns ? 4 : 0) + allGrades.length + 1 + (showDeltaColumn ? 1 : 0) + 1
 
   const exportToExcel = () => {
-    void import('xlsx').then(XLSX => {
-      const skoleårLabel = data.skoleår ?? 'Ukjent'
+    void import('exceljs').then(async exceljs => {
+      const workbook = new exceljs.Workbook()
+      const skoleårLabel = (data.skoleår ?? 'Ukjent').replace(/[^0-9A-Za-z]/g, '') || 'Ukjent'
       const headers = ['Lærer', 'Fag', 'Elever', 'Karakterer', 'Snitt', 'IV', 'IV%', '1', '1%', '2', '2%', '3', '3%', '4', '4%', '5', '5%', '6', '6%', 'Varsler', 'Manglende', 'F', 'G']
+      const colWidths = [24, 28, 12, 12, 12, 9, 11, 9, 11, 9, 11, 9, 11, 9, 11, 9, 11, 9, 11, 12, 12, 9, 9]
+      const percentCols = [7, 9, 11, 13, 15, 17, 19]
 
       const buildRows = (termCounts: (t: TeacherStats | SubjectStats) => Record<string, number>) => {
-        const rows: (string | number)[][] = [headers]
+        const rows: (string | number)[][] = []
+        const rowLevels: number[] = []
         filteredAndSorted.forEach(teacher => {
           const gc = termCounts(teacher)
           const total = Object.values(gc).reduce((a, b) => a + b, 0)
@@ -653,16 +657,18 @@ export default function InnsiktView({ data, threshold }: Props) {
           rows.push([
             teacher.name, '', teacher.studentCount, total,
             avg !== null ? parseFloat(avg.toFixed(2)) : '',
-            gc['IV'] ?? 0, total > 0 ? parseFloat(((gc['IV'] ?? 0) / total * 100).toFixed(1)) : 0,
-            gc['1'] ?? 0, total > 0 ? parseFloat(((gc['1'] ?? 0) / total * 100).toFixed(1)) : 0,
-            gc['2'] ?? 0, total > 0 ? parseFloat(((gc['2'] ?? 0) / total * 100).toFixed(1)) : 0,
-            gc['3'] ?? 0, total > 0 ? parseFloat(((gc['3'] ?? 0) / total * 100).toFixed(1)) : 0,
-            gc['4'] ?? 0, total > 0 ? parseFloat(((gc['4'] ?? 0) / total * 100).toFixed(1)) : 0,
-            gc['5'] ?? 0, total > 0 ? parseFloat(((gc['5'] ?? 0) / total * 100).toFixed(1)) : 0,
-            gc['6'] ?? 0, total > 0 ? parseFloat(((gc['6'] ?? 0) / total * 100).toFixed(1)) : 0,
+            gc['IV'] ?? 0, total > 0 ? (gc['IV'] ?? 0) / total : 0,
+            gc['1'] ?? 0, total > 0 ? (gc['1'] ?? 0) / total : 0,
+            gc['2'] ?? 0, total > 0 ? (gc['2'] ?? 0) / total : 0,
+            gc['3'] ?? 0, total > 0 ? (gc['3'] ?? 0) / total : 0,
+            gc['4'] ?? 0, total > 0 ? (gc['4'] ?? 0) / total : 0,
+            gc['5'] ?? 0, total > 0 ? (gc['5'] ?? 0) / total : 0,
+            gc['6'] ?? 0, total > 0 ? (gc['6'] ?? 0) / total : 0,
             teacher.totalVarsels, teacher.missingWarnings,
             teacher.varselsByType['F'] ?? 0, teacher.varselsByType['G'] ?? 0,
           ])
+          rowLevels.push(0)
+
           teacher.subjectStats.forEach(s => {
             const sgc = termCounts(s)
             const stotal = Object.values(sgc).reduce((a, b) => a + b, 0)
@@ -670,34 +676,95 @@ export default function InnsiktView({ data, threshold }: Props) {
             rows.push([
               '', s.subject, s.studentCount, stotal,
               savg !== null ? parseFloat(savg.toFixed(2)) : '',
-              sgc['IV'] ?? 0, stotal > 0 ? parseFloat(((sgc['IV'] ?? 0) / stotal * 100).toFixed(1)) : 0,
-              sgc['1'] ?? 0, stotal > 0 ? parseFloat(((sgc['1'] ?? 0) / stotal * 100).toFixed(1)) : 0,
-              sgc['2'] ?? 0, stotal > 0 ? parseFloat(((sgc['2'] ?? 0) / stotal * 100).toFixed(1)) : 0,
-              sgc['3'] ?? 0, stotal > 0 ? parseFloat(((sgc['3'] ?? 0) / stotal * 100).toFixed(1)) : 0,
-              sgc['4'] ?? 0, stotal > 0 ? parseFloat(((sgc['4'] ?? 0) / stotal * 100).toFixed(1)) : 0,
-              sgc['5'] ?? 0, stotal > 0 ? parseFloat(((sgc['5'] ?? 0) / stotal * 100).toFixed(1)) : 0,
-              sgc['6'] ?? 0, stotal > 0 ? parseFloat(((sgc['6'] ?? 0) / stotal * 100).toFixed(1)) : 0,
+              sgc['IV'] ?? 0, stotal > 0 ? (sgc['IV'] ?? 0) / stotal : 0,
+              sgc['1'] ?? 0, stotal > 0 ? (sgc['1'] ?? 0) / stotal : 0,
+              sgc['2'] ?? 0, stotal > 0 ? (sgc['2'] ?? 0) / stotal : 0,
+              sgc['3'] ?? 0, stotal > 0 ? (sgc['3'] ?? 0) / stotal : 0,
+              sgc['4'] ?? 0, stotal > 0 ? (sgc['4'] ?? 0) / stotal : 0,
+              sgc['5'] ?? 0, stotal > 0 ? (sgc['5'] ?? 0) / stotal : 0,
+              sgc['6'] ?? 0, stotal > 0 ? (sgc['6'] ?? 0) / stotal : 0,
               s.totalVarsels, s.missingWarnings,
               s.varselsByType['F'] ?? 0, s.varselsByType['G'] ?? 0,
             ])
+            rowLevels.push(1)
           })
         })
-        return rows
+        return { rows, rowLevels }
       }
 
-      const colWidths = [24, 28, 7, 10, 7, 5, 6, 5, 6, 5, 6, 5, 6, 5, 6, 5, 6, 5, 6, 9, 10, 5, 5]
+      const addSheet = (sheetName: string, termCounts: (t: TeacherStats | SubjectStats) => Record<string, number>) => {
+        const worksheet = workbook.addWorksheet(sheetName.slice(0, 31), {
+          views: [{ state: 'frozen', ySplit: 1 }],
+        })
+        worksheet.properties.outlineLevelRow = 1
+        worksheet.addRow(headers)
+        const built = buildRows(termCounts)
+        built.rows.forEach((row, idx) => {
+          const level = built.rowLevels[idx]
+          const excelRow = worksheet.addRow(row)
+          if (level > 0) {
+            excelRow.outlineLevel = 1
+            excelRow.hidden = true
+            excelRow.getCell(2).alignment = { indent: 1, vertical: 'middle' }
+          }
+        })
 
-      const makeSheet = (rows: (string | number)[][]) => {
-        const ws = XLSX.utils.aoa_to_sheet(rows)
-        ws['!cols'] = colWidths.map(w => ({ wch: w }))
-        ws['!freeze'] = { xSplit: 0, ySplit: 1 }
-        return ws
+        worksheet.columns.forEach((col, idx) => {
+          col.width = colWidths[idx]
+        })
+        worksheet.autoFilter = {
+          from: { row: 1, column: 1 },
+          to: { row: 1, column: headers.length },
+        }
+
+        const headerRow = worksheet.getRow(1)
+        headerRow.height = 22
+        headerRow.eachCell(cell => {
+          cell.font = { bold: true, color: { argb: 'FF0F172A' } }
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } }
+          cell.alignment = { horizontal: 'center', vertical: 'middle' }
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+          }
+        })
+
+        for (let i = 2; i <= worksheet.rowCount; i += 1) {
+          const row = worksheet.getRow(i)
+          const isChild = (row.outlineLevel ?? 0) > 0
+          row.height = 20
+          row.eachCell(cell => {
+            cell.border = {
+              top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+              left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+              bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+              right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            }
+            if (!isChild) {
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
+            }
+          })
+          row.getCell(5).numFmt = '0.00'
+          percentCols.forEach(col => {
+            row.getCell(col).numFmt = '0.0%'
+          })
+        }
       }
 
-      const wb = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(wb, makeSheet(buildRows(t => t.gradesCountsT1)), `${skoleårLabel}H1`)
-      XLSX.utils.book_append_sheet(wb, makeSheet(buildRows(t => t.gradesCountsT2)), `${skoleårLabel}H2`)
-      XLSX.writeFile(wb, `laererinnsikt-${skoleårLabel}.xlsx`)
+      addSheet(`${skoleårLabel}H1`, t => t.gradesCountsT1)
+      addSheet(`${skoleårLabel}H2`, t => t.gradesCountsT2)
+
+      const buffer = await workbook.xlsx.writeBuffer()
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      })
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = `laererinnsikt-${skoleårLabel}.xlsx`
+      link.click()
+      URL.revokeObjectURL(link.href)
     })
   }
 
