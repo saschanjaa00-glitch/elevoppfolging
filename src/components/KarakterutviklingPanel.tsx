@@ -32,7 +32,6 @@ interface GraphSeries {
 }
 
 const TEACHER_SERIES_COLORS = ['#f97316', '#16a34a', '#a855f7', '#e11d48', '#14b8a6', '#f59e0b', '#7c3aed', '#65a30d']
-const LINKED_SUBJECT_COLORS = ['#dc2626', '#9333ea', '#0891b2', '#b45309', '#be185d', '#15803d']
 
 const normalizeHeader = (header: string): string =>
   header
@@ -310,7 +309,13 @@ function TrendGraph({
       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-600">
         {series.map(s => (
           <div key={`legend-${s.name}`} className="inline-flex items-center gap-1.5">
-            <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+            {s.isMainLine && !!s.connectTo ? (
+              <svg width="16" height="8" aria-hidden="true" className="block">
+                <line x1="0" y1="4" x2="16" y2="4" stroke={s.color} strokeWidth="2" strokeDasharray="4 3" />
+              </svg>
+            ) : (
+              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+            )}
             {s.name}
           </div>
         ))}
@@ -895,10 +900,10 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                 const linkedRows = filteredRows.filter(r => r.key !== row.key && linkedKeys.includes(r.key))
                 const h2Series: GraphSeries[] = [
                   { name: row.label, values: row.yearlyH2, color: '#0284c7', isMainLine: true },
-                  ...linkedRows.map((linkedRow, li) => ({
+                  ...linkedRows.map((linkedRow) => ({
                     name: linkedRow.label,
                     values: linkedRow.yearlyH2,
-                    color: LINKED_SUBJECT_COLORS[li % LINKED_SUBJECT_COLORS.length],
+                    color: '#0284c7',
                     isMainLine: true as const,
                     connectTo: row.label,
                   })),
@@ -919,10 +924,10 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                 ]
                 const termSeries: GraphSeries[] = [
                   { name: row.label, values: row.termSeries, color: '#0284c7', isMainLine: true },
-                  ...linkedRows.map((linkedRow, li) => ({
+                  ...linkedRows.map((linkedRow) => ({
                     name: linkedRow.label,
                     values: linkedRow.termSeries,
-                    color: LINKED_SUBJECT_COLORS[li % LINKED_SUBJECT_COLORS.length],
+                    color: '#0284c7',
                     isMainLine: true as const,
                     connectTo: row.label,
                   })),
@@ -1048,9 +1053,9 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                                 Koble til andre fag (overlay i grafene)
                               </div>
                               <div className="divide-y divide-slate-200">
-                                {filteredRows.filter(r => r.key !== row.key).map((otherRow, li) => {
+                                {filteredRows.filter(r => r.key !== row.key).map((otherRow) => {
                                   const isLinked = (linkedSubjectsByKey[row.key] ?? []).includes(otherRow.key)
-                                  const color = LINKED_SUBJECT_COLORS[li % LINKED_SUBJECT_COLORS.length]
+                                  const color = '#0284c7'
                                   return (
                                     <div key={otherRow.key} className="px-3 py-2">
                                       <label className="inline-flex items-center gap-2 text-sm text-slate-800 cursor-pointer">
