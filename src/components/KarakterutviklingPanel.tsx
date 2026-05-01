@@ -22,6 +22,14 @@ interface SubjectTeacherRow extends TrendRow {
   teacher: string
 }
 
+interface GraphSeries {
+  name: string
+  values: Record<string, { avg: number; count: number }>
+  color: string
+}
+
+const TEACHER_SERIES_COLORS = ['#f97316', '#16a34a', '#a855f7', '#e11d48', '#14b8a6', '#f59e0b', '#7c3aed', '#65a30d']
+
 const normalizeHeader = (header: string): string =>
   header
     .toLowerCase()
@@ -116,14 +124,14 @@ const addAggregate = (
 
 function TrendGraph({
   labels,
-  values,
+  series,
   width = 560,
   height = 180,
   svgRef,
   labelMap,
 }: {
   labels: string[]
-  values: Record<string, { avg: number; count: number }>
+  series: GraphSeries[]
   width?: number
   height?: number
   svgRef?: RefObject<SVGSVGElement | null>
@@ -132,17 +140,20 @@ function TrendGraph({
   const padX = 34
   const padY = 24
 
-  const points = labels
-    .map((label, idx) => {
-      const avg = values[label]?.avg
-      if (avg === undefined) return null
-      const x = padX + (idx * (width - padX * 2)) / Math.max(1, labels.length - 1)
-      const y = padY + ((6 - avg) * (height - padY * 2)) / 5
-      return { x, y, label, avg }
-    })
-    .filter((p): p is { x: number; y: number; label: string; avg: number } => Boolean(p))
+  const seriesPoints = series.map(s => ({
+    ...s,
+    points: labels
+      .map((label, idx) => {
+        const avg = s.values[label]?.avg
+        if (avg === undefined) return null
+        const x = padX + (idx * (width - padX * 2)) / Math.max(1, labels.length - 1)
+        const y = padY + ((6 - avg) * (height - padY * 2)) / 5
+        return { x, y, label, avg }
+      })
+      .filter((p): p is { x: number; y: number; label: string; avg: number } => Boolean(p)),
+  }))
 
-  if (points.length === 0) {
+  if (seriesPoints.every(s => s.points.length === 0)) {
     return <div className="text-sm text-slate-500">Ingen grafdata for denne raden.</div>
   }
 
@@ -155,24 +166,40 @@ function TrendGraph({
           const y = padY + ((6 - Number(level)) * (height - padY * 2)) / 5
           return <line key={level} x1={padX} y1={y} x2={width - padX} y2={y} stroke="#e2e8f0" strokeWidth="1" />
         })}
-        <polyline
-          fill="none"
-          stroke="#0284c7"
-          strokeWidth="2"
-          points={points.map(p => `${p.x},${p.y}`).join(' ')}
-        />
-        {points.map(p => (
-          <g key={p.label}>
-            <circle cx={p.x} cy={p.y} r="4" fill="#0ea5e9" />
-            <text x={p.x} y={height - 8} textAnchor="middle" fontSize="11" fill="#334155">
-              {labelMap?.[p.label] ?? p.label}
-            </text>
-            <text x={p.x} y={p.y - 8} textAnchor="middle" fontSize="11" fill="#0f172a">
-              {p.avg.toFixed(2).replace('.', ',')}
-            </text>
+        {seriesPoints.map((s, seriesIdx) => (
+          <g key={s.name}>
+            <polyline
+              fill="none"
+              stroke={s.color}
+              strokeWidth={seriesIdx === 0 ? '2.75' : '1.5'}
+              points={s.points.map(p => `${p.x},${p.y}`).join(' ')}
+            />
+            {s.points.map(p => (
+              <g key={`${s.name}::${p.label}`}>
+                <circle cx={p.x} cy={p.y} r={seriesIdx === 0 ? '4' : '2.5'} fill={s.color} />
+                {seriesIdx === 0 && (
+                  <>
+                    <text x={p.x} y={height - 8} textAnchor="middle" fontSize="11" fill="#334155">
+                      {labelMap?.[p.label] ?? p.label}
+                    </text>
+                    <text x={p.x} y={p.y - 8} textAnchor="middle" fontSize="11" fill="#0f172a">
+                      {p.avg.toFixed(2).replace('.', ',')}
+                    </text>
+                  </>
+                )}
+              </g>
+            ))}
           </g>
         ))}
       </svg>
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-600">
+        {series.map(s => (
+          <div key={`legend-${s.name}`} className="inline-flex items-center gap-1.5">
+            <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+            {s.name}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -184,11 +211,12 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>('subject')
   const [filterText, setFilterText] = useState('')
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
-  const [expandedTeacherKey, setExpandedTeacherKey] = useState<string | null>(null)
+  const [selectedTeacherKeysBySubject, setSelectedTeacherKeysBySubject] = useState<Record<string, string[]>>({})
+  const [anonymizeTeachers, setAnonymizeTeachers] = useState(false)
   const [expandedGraph, setExpandedGraph] = useState<null | {
     title: string
     labels: string[]
-    values: Record<string, { avg: number; count: number }>
+    series: GraphSeries[]
     fileBase: string
   }>(null)
   const modalSvgRef = useRef<SVGSVGElement | null>(null)
@@ -332,12 +360,16 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
     return rows.filter(row => normalizeHeader(row.label).includes(normalizedFilter))
   }, [rows, normalizedFilter])
 
+  const maskTeacher = (name: string, idx?: number): string =>
+    anonymizeTeachers ? (idx !== undefined ? `Lærer ${idx + 1}` : '**********') : name
+
   const exportFilteredToExcel = () => {
     void import('exceljs').then(async exceljs => {
       const workbook = new exceljs.Workbook()
       const worksheet = workbook.addWorksheet('Karakterutvikling', {
         views: [{ state: 'frozen', ySplit: 1 }],
       })
+      worksheet.properties.outlineLevelRow = 1
 
       const headers = [
         viewMode === 'subject' ? 'Fagkode' : 'Lærer',
@@ -347,7 +379,7 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
       ]
       worksheet.addRow(headers)
 
-      const addRowForTrend = (label: string, row: TrendRow) => {
+      const addRowForTrend = (label: string, row: TrendRow, level = 0) => {
         const firstYear = schoolYears[0]
         const lastYear = schoolYears[schoolYears.length - 1]
         const startH2 = firstYear ? row.yearlyH2[firstYear]?.avg : undefined
@@ -357,7 +389,7 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
         const endH1 = lastYear ? row.yearlyH1[lastYear]?.avg : undefined
         const deltaH1 = startH1 !== undefined && endH1 !== undefined ? endH1 - startH1 : null
 
-        worksheet.addRow([
+        const excelRow = worksheet.addRow([
           label,
           ...schoolYears.flatMap(year => {
             const h2 = row.yearlyH2[year]
@@ -370,14 +402,20 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
           deltaH2 === null ? '' : Number(deltaH2.toFixed(2)),
           deltaH1 === null ? '' : Number(deltaH1.toFixed(2)),
         ])
+
+        if (level > 0) {
+          excelRow.outlineLevel = 1
+          excelRow.hidden = true
+          excelRow.getCell(1).alignment = { indent: 1, vertical: 'middle', horizontal: 'left' }
+        }
       }
 
-      filteredRows.forEach(row => {
-        addRowForTrend(row.label, row)
+      filteredRows.forEach((row, rowIdx) => {
+        addRowForTrend(viewMode === 'teacher' ? maskTeacher(row.label, rowIdx) : row.label, row)
         if (viewMode === 'subject') {
           const teacherRows = teacherRowsBySubject.get(row.label) ?? []
-          teacherRows.forEach(teacherRow => {
-            addRowForTrend(`  - ${teacherRow.label}`, teacherRow)
+          teacherRows.forEach((teacherRow, teacherIdx) => {
+            addRowForTrend(maskTeacher(teacherRow.label, teacherIdx), teacherRow, 1)
           })
         }
       })
@@ -386,16 +424,45 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
         col.width = idx === 0 ? 28 : 12
       })
 
+      worksheet.autoFilter = {
+        from: { row: 1, column: 1 },
+        to: { row: 1, column: headers.length },
+      }
+
       const headerRow = worksheet.getRow(1)
+      headerRow.height = 22
       headerRow.eachCell(cell => {
         cell.font = { bold: true, color: { argb: 'FF0F172A' } }
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } }
+        cell.alignment = { horizontal: 'center', vertical: 'middle' }
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+          left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+          bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+          right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+        }
       })
 
       for (let i = 2; i <= worksheet.rowCount; i += 1) {
-        worksheet.getRow(i).getCell(1).alignment = { horizontal: 'left' }
+        const row = worksheet.getRow(i)
+        const isChild = (row.outlineLevel ?? 0) > 0
+        row.height = 20
+        row.eachCell(cell => {
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          }
+          if (!isChild) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
+          }
+        })
+        if (!isChild) {
+          row.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' }
+        }
         for (let col = 2; col <= headers.length; col += 1) {
-          worksheet.getRow(i).getCell(col).numFmt = '0.00'
+          row.getCell(col).numFmt = '0.00'
         }
       }
 
@@ -509,56 +576,86 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          id="karakterutvikling-upload"
-          type="file"
-          multiple
-          accept=".xlsx,.xls,.csv"
-          onChange={e => handleFileImport(e.currentTarget.files)}
-          className="hidden"
-        />
-        <label
-          htmlFor="karakterutvikling-upload"
-          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border bg-sky-50 text-sky-800 border-sky-300 hover:bg-sky-100 cursor-pointer"
-        >
-          <Upload className="w-4 h-4" />
-          {loading ? 'Laster opp...' : 'Last opp karakterfiler'}
-        </label>
-        <button
-          type="button"
-          onClick={() => {
-            setUploadedGrades([])
-            setFilterText('')
-            setExpandedKey(null)
-            setExpandedTeacherKey(null)
+      <div className="space-y-3">
+        <div
+          className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-sky-400 hover:bg-sky-50 transition-colors cursor-pointer"
+          onDragOver={e => {
+            e.preventDefault()
+            e.currentTarget.classList.add('border-sky-400', 'bg-sky-50')
           }}
-          className="px-3 py-2 rounded-lg text-sm font-medium border bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
-        >
-          Tøm opplastede filer
-        </button>
-        <input
-          type="text"
-          value={filterText}
-          onChange={e => {
-            setFilterText(e.currentTarget.value)
-            setExpandedKey(null)
-            setExpandedTeacherKey(null)
+          onDragLeave={e => {
+            e.preventDefault()
+            e.currentTarget.classList.remove('border-sky-400', 'bg-sky-50')
           }}
-          placeholder={viewMode === 'subject' ? 'Filtrer på fagkode...' : 'Filtrer på lærer...'}
-          className="px-3 py-2 rounded-lg text-sm border border-slate-300 bg-white text-slate-800 placeholder:text-slate-400 min-w-56"
-        />
-        <button
-          type="button"
-          onClick={exportFilteredToExcel}
-          disabled={filteredRows.length === 0}
-          className="px-3 py-2 rounded-lg text-sm font-medium border bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          onDrop={e => {
+            e.preventDefault()
+            e.currentTarget.classList.remove('border-sky-400', 'bg-sky-50')
+            handleFileImport(e.dataTransfer.files)
+          }}
         >
-          Eksporter filtrerte linjer
-        </button>
-        <span className="text-xs text-slate-500">
-          Datagrunnlag: {allGrades.length} karakterrader ({uploadedGrades.length} fra opplasting). Viser {filteredRows.length} av {rows.length} linjer.
-        </span>
+          <input
+            id="karakterutvikling-upload"
+            type="file"
+            multiple
+            accept=".xlsx,.xls,.csv"
+            onChange={e => handleFileImport(e.currentTarget.files)}
+            className="hidden"
+          />
+          <label htmlFor="karakterutvikling-upload" className="cursor-pointer inline-flex flex-col items-center">
+            <Upload className="w-6 h-6 text-sky-600 mb-2" />
+            <p className="font-medium text-slate-900">
+              {loading ? 'Laster opp...' : 'Klikk for å velge karakterfiler eller dra dem hit'}
+            </p>
+            <p className="text-sm text-slate-600 mt-1">XLSX-, XLS- eller CSV-filer</p>
+          </label>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setUploadedGrades([])
+              setFilterText('')
+              setExpandedKey(null)
+              setSelectedTeacherKeysBySubject({})
+            }}
+            className="px-3 py-2 rounded-lg text-sm font-medium border bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+          >
+            Tøm opplastede filer
+          </button>
+          <input
+            type="text"
+            value={filterText}
+            onChange={e => {
+              setFilterText(e.currentTarget.value)
+              setExpandedKey(null)
+            }}
+            placeholder={viewMode === 'subject' ? 'Filtrer på fagkode...' : 'Filtrer på lærer...'}
+            className="px-3 py-2 rounded-lg text-sm border border-slate-300 bg-white text-slate-800 placeholder:text-slate-400 min-w-56"
+          />
+          <button
+            type="button"
+            onClick={exportFilteredToExcel}
+            disabled={filteredRows.length === 0}
+            className="px-3 py-2 rounded-lg text-sm font-medium border bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Eksporter filtrert til Excel
+          </button>
+          <button
+            type="button"
+            onClick={() => setAnonymizeTeachers(prev => !prev)}
+            className={`px-3 py-2 rounded-lg text-sm font-medium border ${
+              anonymizeTeachers
+                ? 'bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+            }`}
+          >
+            {anonymizeTeachers ? 'Anonymisert ✓' : 'Anonymiser lærere'}
+          </button>
+          <span className="text-xs text-slate-500">
+            Datagrunnlag: {allGrades.length} karakterrader ({uploadedGrades.length} fra opplasting). Viser {filteredRows.length} av {rows.length} linjer.
+          </span>
+        </div>
       </div>
 
       {error && (
@@ -595,7 +692,8 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
               </tr>
             </thead>
             <tbody>
-              {filteredRows.map(row => {
+              {filteredRows.map((row, rowIdx) => {
+                const displayRowLabel = viewMode === 'teacher' ? maskTeacher(row.label, rowIdx) : row.label
                 const firstYear = schoolYears[0]
                 const lastYear = schoolYears[schoolYears.length - 1]
                 const startH2 = firstYear ? row.yearlyH2[firstYear]?.avg : undefined
@@ -606,6 +704,24 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                 const deltaH1 = startH1 !== undefined && endH1 !== undefined ? endH1 - startH1 : null
                 const isExpanded = expandedKey === row.key
                 const subjectTeacherRows = viewMode === 'subject' ? (teacherRowsBySubject.get(row.label) ?? []) : []
+                const selectedTeacherKeys = selectedTeacherKeysBySubject[row.label] ?? []
+                const selectedTeacherRows = subjectTeacherRows.filter(teacherRow => selectedTeacherKeys.includes(teacherRow.key))
+                const h2Series: GraphSeries[] = [
+                  { name: 'Fag totalt', values: row.yearlyH2, color: '#0284c7' },
+                  ...selectedTeacherRows.map((teacherRow, idx) => ({
+                    name: maskTeacher(teacherRow.label, subjectTeacherRows.indexOf(teacherRow)),
+                    values: teacherRow.yearlyH2,
+                    color: TEACHER_SERIES_COLORS[idx % TEACHER_SERIES_COLORS.length],
+                  })),
+                ]
+                const termSeries: GraphSeries[] = [
+                  { name: 'Fag totalt', values: row.termSeries, color: '#0284c7' },
+                  ...selectedTeacherRows.map((teacherRow, idx) => ({
+                    name: maskTeacher(teacherRow.label, subjectTeacherRows.indexOf(teacherRow)),
+                    values: teacherRow.termSeries,
+                    color: TEACHER_SERIES_COLORS[idx % TEACHER_SERIES_COLORS.length],
+                  })),
+                ]
 
                 return (
                   <>
@@ -615,17 +731,15 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                       onClick={() => {
                         if (isExpanded) {
                           setExpandedKey(null)
-                          setExpandedTeacherKey(null)
                         } else {
                           setExpandedKey(row.key)
-                          setExpandedTeacherKey(null)
                         }
                       }}
                     >
                       <td className="py-2 px-3 font-medium text-slate-900">
                         <div className="flex items-center gap-2">
                           {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                          {row.label}
+                          {displayRowLabel}
                         </div>
                       </td>
                       {schoolYears.map(year => {
@@ -671,9 +785,9 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                                 <button
                                   type="button"
                                   onClick={() => setExpandedGraph({
-                                    title: `${row.label} - Halvår 2`,
+                                    title: `${displayRowLabel} - Halvår 2`,
                                     labels: schoolYears,
-                                    values: row.yearlyH2,
+                                    series: h2Series,
                                     fileBase: `karakterutvikling-${normalizeHeader(row.label)}-h2`,
                                   })}
                                   className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-300 text-xs text-slate-700 hover:bg-slate-50"
@@ -682,7 +796,7 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                                   Utvid
                                 </button>
                               </div>
-                              <TrendGraph labels={schoolYears} values={row.yearlyH2} labelMap={schoolYearDisplayMap} />
+                              <TrendGraph labels={schoolYears} series={h2Series} labelMap={schoolYearDisplayMap} />
                             </div>
                             <div className="rounded-lg border border-slate-200 bg-white p-3">
                               <div className="flex items-center justify-between mb-2">
@@ -690,9 +804,9 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                                 <button
                                   type="button"
                                   onClick={() => setExpandedGraph({
-                                    title: `${row.label} - Halvår 1 og 2`,
+                                    title: `${displayRowLabel} - Halvår 1 og 2`,
                                     labels: termTimelineLabels,
-                                    values: row.termSeries,
+                                    series: termSeries,
                                     fileBase: `karakterutvikling-${normalizeHeader(row.label)}-h1-h2`,
                                   })}
                                   className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-300 text-xs text-slate-700 hover:bg-slate-50"
@@ -701,80 +815,42 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                                   Utvid
                                 </button>
                               </div>
-                              <TrendGraph labels={termTimelineLabels} values={row.termSeries} labelMap={termTimelineDisplayMap} />
+                              <TrendGraph labels={termTimelineLabels} series={termSeries} labelMap={termTimelineDisplayMap} />
                             </div>
                           </div>
 
                           {viewMode === 'subject' && (
                             <div className="rounded-lg border border-slate-200 bg-white">
                               <div className="px-3 py-2 border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                Lærere i faget
+                                Lærere i faget (kryss av for å legge til i grafene)
                               </div>
                               {subjectTeacherRows.length === 0 ? (
                                 <div className="px-3 py-3 text-sm text-slate-500">Ingen lærerdata for denne fagkoden.</div>
                               ) : (
                                 <div className="divide-y divide-slate-200">
-                                  {subjectTeacherRows.map(teacherRow => {
-                                    const teacherExpanded = expandedTeacherKey === teacherRow.key
+                                  {subjectTeacherRows.map((teacherRow, teacherIdx) => {
+                                    const checked = selectedTeacherKeys.includes(teacherRow.key)
                                     return (
                                       <div key={teacherRow.key} className="px-3 py-2">
-                                        <button
-                                          type="button"
-                                          className="w-full flex items-center justify-between text-left hover:text-sky-800"
-                                          onClick={() => setExpandedTeacherKey(teacherExpanded ? null : teacherRow.key)}
-                                        >
-                                          <span className="inline-flex items-center gap-2 text-sm font-medium text-slate-800">
-                                            {teacherExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                                            {teacherRow.label}
-                                          </span>
-                                          <span className="text-xs text-slate-500">
-                                            {Object.keys(teacherRow.yearly).length} år
-                                          </span>
-                                        </button>
-                                        {teacherExpanded && (
-                                          <div className="mt-2">
-                                            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                                              <div className="rounded-lg border border-slate-200 bg-white p-3">
-                                                <div className="flex items-center justify-between mb-2">
-                                                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Halvår 2</div>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => setExpandedGraph({
-                                                      title: `${row.label} - ${teacherRow.label} - Halvår 2`,
-                                                      labels: schoolYears,
-                                                      values: teacherRow.yearlyH2,
-                                                      fileBase: `karakterutvikling-${normalizeHeader(row.label)}-${normalizeHeader(teacherRow.label)}-h2`,
-                                                    })}
-                                                    className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-300 text-xs text-slate-700 hover:bg-slate-50"
-                                                  >
-                                                    <Expand className="w-3.5 h-3.5" />
-                                                    Utvid
-                                                  </button>
-                                                </div>
-                                                <TrendGraph labels={schoolYears} values={teacherRow.yearlyH2} labelMap={schoolYearDisplayMap} />
-                                              </div>
-                                              <div className="rounded-lg border border-slate-200 bg-white p-3">
-                                                <div className="flex items-center justify-between mb-2">
-                                                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Halvår 1 og 2 (separate)</div>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => setExpandedGraph({
-                                                      title: `${row.label} - ${teacherRow.label} - Halvår 1 og 2`,
-                                                      labels: termTimelineLabels,
-                                                      values: teacherRow.termSeries,
-                                                      fileBase: `karakterutvikling-${normalizeHeader(row.label)}-${normalizeHeader(teacherRow.label)}-h1-h2`,
-                                                    })}
-                                                    className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-300 text-xs text-slate-700 hover:bg-slate-50"
-                                                  >
-                                                    <Expand className="w-3.5 h-3.5" />
-                                                    Utvid
-                                                  </button>
-                                                </div>
-                                                <TrendGraph labels={termTimelineLabels} values={teacherRow.termSeries} labelMap={termTimelineDisplayMap} />
-                                              </div>
-                                            </div>
-                                          </div>
-                                        )}
+                                        <label className="inline-flex items-center gap-2 text-sm text-slate-800 cursor-pointer">
+                                          <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            onChange={e => {
+                                              const nextChecked = e.currentTarget.checked
+                                              setSelectedTeacherKeysBySubject(prev => {
+                                                const current = prev[row.label] ?? []
+                                                const next = nextChecked
+                                                  ? Array.from(new Set([...current, teacherRow.key]))
+                                                  : current.filter(key => key !== teacherRow.key)
+                                                return { ...prev, [row.label]: next }
+                                              })
+                                            }}
+                                            className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                                          />
+                                          {maskTeacher(teacherRow.label, teacherIdx)}
+                                          <span className="text-xs text-slate-500">({Object.keys(teacherRow.yearly).length} år)</span>
+                                        </label>
                                       </div>
                                     )
                                   })}
@@ -819,7 +895,7 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
             <div className="p-4 overflow-auto">
               <TrendGraph
                 labels={expandedGraph.labels}
-                values={expandedGraph.values}
+                series={expandedGraph.series}
                 width={1000}
                 height={420}
                 svgRef={modalSvgRef}
