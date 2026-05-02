@@ -2,6 +2,7 @@ import { useMemo, useRef, useState, type RefObject } from 'react'
 import * as XLSX from 'xlsx'
 import { ChevronDown, ChevronRight, Upload, X, Expand } from 'lucide-react'
 import type { GradeRecord } from '../types'
+import { getFagnavn } from '../fagkodeLookup'
 
 type ViewMode = 'subject' | 'teacher'
 
@@ -490,14 +491,18 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
   }, [rows, normalizedFilter])
 
   const sortedFilteredRows = useMemo(() => {
-    if (!tableSortKey) return filteredRows
     const lastYear = schoolYears[schoolYears.length - 1]
     const firstYear = schoolYears[0]
+    if (!tableSortKey) {
+      return [...filteredRows].sort((a, b) =>
+        getFagnavn(a.label).localeCompare(getFagnavn(b.label), 'nb-NO')
+      )
+    }
     return [...filteredRows].sort((a, b) => {
       let av: number
       let bv: number
       if (tableSortKey === 'label') {
-        const cmp = a.label.localeCompare(b.label, 'nb-NO')
+        const cmp = getFagnavn(a.label).localeCompare(getFagnavn(b.label), 'nb-NO')
         return tableSortDir === 'asc' ? cmp : -cmp
       } else if (tableSortKey === 'endring') {
         const deltaA = firstYear && lastYear ? (a.yearlyH2[lastYear]?.avg ?? NaN) - (a.yearlyH2[firstYear]?.avg ?? NaN) : NaN
@@ -534,7 +539,7 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
       worksheet.properties.outlineLevelRow = 1
 
       const headers = [
-        viewMode === 'subject' ? 'Fagkode' : 'Lærer',
+        viewMode === 'subject' ? 'Fag' : 'Lærer',
         ...schoolYears.flatMap(year => [`${formatSchoolYearLabel(year)} H2`, `${formatSchoolYearLabel(year)} (H1)`]),
         'Endring H2',
         '(H1)',
@@ -902,7 +907,7 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
               <tr className="border-b-2 border-slate-200">
                 <th className="sticky top-0 z-10 bg-white py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   <button type="button" onClick={() => toggleTableSort('label')} className="inline-flex items-center gap-1 hover:text-slate-700">
-                    {viewMode === 'subject' ? 'Fagkode' : 'Lærer'}
+                    {viewMode === 'subject' ? 'Fag' : 'Lærer'}
                     <span className="min-w-2 text-[10px] leading-none text-slate-400">
                       {tableSortKey === 'label' ? (tableSortDir === 'asc' ? '▲' : '▼') : ''}
                     </span>
@@ -1016,7 +1021,18 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                       <td className="py-2 px-3 font-medium text-slate-900">
                         <div className="flex items-center gap-2">
                           {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                          {displayRowLabel}
+                          {viewMode === 'subject' ? (() => {
+                            const fagnavn = getFagnavn(displayRowLabel)
+                            const short = fagnavn.length > 25 ? fagnavn.slice(0, 25) + '…' : fagnavn
+                            return (
+                              <div className="leading-tight" title={fagnavn}>
+                                <div>{short}</div>
+                                {fagnavn !== displayRowLabel && (
+                                  <div className="text-[11px] text-slate-400 font-normal">{displayRowLabel}</div>
+                                )}
+                              </div>
+                            )
+                          })() : displayRowLabel}
                         </div>
                       </td>
                       {schoolYears.map(year => {
