@@ -70,6 +70,7 @@ export interface GradeRecord {
   subjectTeacher?: string
   halvår: string
   skoleår?: string
+  assessmentType?: string
 }
 
 export interface DataStore {

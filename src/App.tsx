@@ -26,7 +26,6 @@ import './index.css'
 const loadStatsView = () => import('./components/StatsView')
 const loadInnsiktView = () => import('./components/InnsiktView')
 const loadFaginnsiktView = () => import('./components/FaginnsiktView')
-
 const StatsView = lazy(loadStatsView)
 const InnsiktView = lazy(loadInnsiktView)
 const FaginnsiktView = lazy(loadFaginnsiktView)
@@ -806,6 +805,7 @@ function App() {
                 Lærerinnsikt
               </button>
               )}
+
               <div className="ml-auto flex items-center gap-2 pb-0.5">
                 {hasAbsenceData && (
                   <button

@@ -268,8 +268,8 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
     return hasElev && hasGruppe && hasGrade
   }
 
-  const parseGradeSheet = (sheet: Record<string, any>[]): import('../types').GradeRecord[] => {
-    return sheet
+  const parseGradeSheet = (sheet: Record<string, any>[]): { grades: import('../types').GradeRecord[] } => {
+    const all = sheet
       .map(row => ({
         navn: getRowValue(row, ['elev', 'navn', 'student']),
         class: getRowValue(row, ['klasse', 'klassegruppe', 'class']) || undefined,
@@ -279,8 +279,19 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
         subjectTeacher: getRowValue(row, ['subject teacher', 'faglærer', 'faglaerer', 'lærer', 'larer', 'teacher']),
         halvår: getRowValue(row, ['halvår', 'halvar', 'termin', 'term']),
         skoleår: getRowValue(row, ['skoleår', 'skolear', 'school year', 'schoolyear']),
+        assessmentType: getRowValue(row, ['assessment type', 'vurderingstype', 'type']),
       }))
       .filter(r => r.navn && r.subjectGroup && r.grade)
+
+    const isTermType = (t: string) => {
+      if (!t) return true // no assessment type column — keep as before
+      const n = t.toLowerCase()
+      return n.includes('halvår') || n.includes('halvar') || n.includes('standpunkt') || n.includes('termin')
+    }
+
+    return {
+      grades: all.filter(r => isTermType(r.assessmentType ?? '')),
+    }
   }
 
   const looksLikeWarningWorkbook = (sheet: Record<string, any>[]): boolean => {
@@ -446,10 +457,10 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
             const missing = getMissingGradeColumns(sheetRaw)
             if (missing.length > 0) missingWarnings.push({ fileName: file.name, fileType: 'Karakterfil', missing })
             const parsed = parseGradeSheet(sheetRaw)
-            data.grades = parsed
+            data.grades = parsed.grades
             // Derive skoleår from most common non-empty value in parsed grades
             const skYearCounts = new Map<string, number>()
-            parsed.forEach(r => { if (r.skoleår) skYearCounts.set(r.skoleår, (skYearCounts.get(r.skoleår) ?? 0) + 1) })
+            parsed.grades.forEach(r => { if (r.skoleår) skYearCounts.set(r.skoleår, (skYearCounts.get(r.skoleår) ?? 0) + 1) })
             const topSkoleår = Array.from(skYearCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0]
             if (topSkoleår) data.skoleår = topSkoleår.replace(/[^0-9A-Za-z]/g, '')
             detected.add('grades')
