@@ -555,41 +555,41 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
         </div>
       )}
       <div className="max-w-4xl mx-auto">
-        <div className="flex justify-center mb-6">
-          <div className="w-16 h-16 bg-sky-100 rounded-lg flex items-center justify-center">
+        <div className="flex justify-center mb-5">
+          <div className="w-16 h-16 bg-gradient-to-br from-sky-100 to-sky-200 rounded-2xl flex items-center justify-center shadow-sm">
             <Upload className="w-8 h-8 text-sky-600" />
           </div>
         </div>
-        <h2 className="text-2xl font-bold text-center text-slate-900 mb-2">
+        <h2 className="text-2xl font-bold text-center text-slate-900 mb-1.5">
           Importer fraværsdata
         </h2>
-        <p className="text-center text-slate-600 mb-4">
+        <p className="text-center text-slate-500 mb-5">
           Dra og slipp Excel-filer eller klikk for å laste opp
         </p>
 
-        <label className="flex items-center justify-center gap-2 mb-6 cursor-pointer select-none">
+        <label className="flex items-center justify-center gap-2.5 mb-5 cursor-pointer select-none group">
           <input
             type="checkbox"
             checked={anonymize}
             onChange={e => setAnonymize(e.target.checked)}
             className="w-4 h-4 rounded accent-sky-600"
           />
-          <span className="text-sm text-slate-700 font-medium">Anonymiser navn (elever og lærere)</span>
+          <span className="text-sm text-slate-600 font-medium group-hover:text-slate-800 transition-colors">Anonymiser navn (elever og lærere)</span>
         </label>
 
         <div
-          className="border-2 border-dashed border-slate-300 rounded-lg p-12 text-center hover:border-sky-400 hover:bg-sky-50 transition-colors cursor-pointer"
+          className="border-2 border-dashed border-slate-200 rounded-2xl p-12 text-center bg-slate-50/60 hover:border-sky-400 hover:bg-sky-50/60 transition-all duration-200 cursor-pointer"
           onDragOver={e => {
             e.preventDefault()
-            e.currentTarget.classList.add('border-sky-400', 'bg-sky-50')
+            e.currentTarget.classList.add('border-sky-400', '!bg-sky-50')
           }}
           onDragLeave={e => {
             e.preventDefault()
-            e.currentTarget.classList.remove('border-sky-400', 'bg-sky-50')
+            e.currentTarget.classList.remove('border-sky-400', '!bg-sky-50')
           }}
           onDrop={e => {
             e.preventDefault()
-            e.currentTarget.classList.remove('border-sky-400', 'bg-sky-50')
+            e.currentTarget.classList.remove('border-sky-400', '!bg-sky-50')
             handleFileSelect(e.dataTransfer.files)
           }}
         >
@@ -602,99 +602,64 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
             id="file-input"
           />
           <label htmlFor="file-input" className="cursor-pointer">
-            <p className="font-medium text-slate-900">
-              {loading ? 'Behandler...' : 'Klikk for å velge filer eller dra dem hit'}
+            <div className="flex justify-center mb-3">
+              <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 shadow-sm flex items-center justify-center">
+                <Upload className="w-5 h-5 text-slate-400" />
+              </div>
+            </div>
+            <p className="font-semibold text-slate-700">
+              {loading ? 'Behandler...' : 'Klikk for å velge filer'}
             </p>
-            <p className="text-sm text-slate-600 mt-1">
-              XLSX-, XLS- eller CSV-filer
+            <p className="text-sm text-slate-400 mt-1">
+              eller dra dem hit &middot; XLSX, XLS, CSV
             </p>
           </label>
         </div>
 
         {error && (
-          <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-red-700 font-medium">{error}</p>
-            <p className="text-sm text-red-600 mt-2">
-              Kontroller at filene inneholder riktige kolonner: Fraværsfil: Navn, Klasse, Fagnavn, Faggruppe/Fagkode, H1+H2 % udok. fravær, H1+H2 timer udok. fravær, Lærer. Varselfil: Elevnavn/Navn, Klasse, Faggruppe, Type varsel, Sendt, Fødselsdato. Karakterfil: Elev, Klasse, Gruppe, Fagkode, Karakter, Faglærer, Halvår. Elevfil: Fornavn, Etternavn, Fødselsdato, Programområde, Fritak i sidemål, Inntakspoeng.
-            </p>
+          <div className="mt-5 p-4 bg-red-50 border border-red-200 rounded-xl flex gap-3">
+            <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-red-700 font-semibold text-sm">{error}</p>
+              <p className="text-xs text-red-500 mt-1.5 leading-relaxed">
+                Kontroller at filene inneholder riktige kolonner: Fraværsfil: Navn, Klasse, Fagnavn, Faggruppe/Fagkode, H1+H2 % udok. fravær, H1+H2 timer udok. fravær, Lærer. Varselfil: Elevnavn/Navn, Klasse, Faggruppe, Type varsel, Sendt, Fødselsdato. Karakterfil: Elev, Klasse, Gruppe, Fagkode, Karakter, Faglærer, Halvår. Elevfil: Fornavn, Etternavn, Fødselsdato, Programområde, Fritak i sidemål, Inntakspoeng.
+              </p>
+            </div>
           </div>
         )}
 
-        <div className="mt-8">
-          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">Filer</h3>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-          <div className={`rounded-lg p-4 transition-colors duration-500 ${detectedTypes.has('absence') ? 'bg-green-50' : 'bg-slate-50'}`}>
-            <h4 className={`font-semibold mb-2 transition-colors duration-500 ${detectedTypes.has('absence') ? 'text-green-800' : 'text-slate-900'}`}>
-              Fravær
-              <span className={`block text-xs font-normal transition-colors duration-500 ${detectedTypes.has('absence') ? 'text-green-600' : 'text-slate-500'}`}>(fra Fraværsrapport)</span>
-            </h4>
-            <ul className={`space-y-1 text-xs transition-colors duration-500 ${detectedTypes.has('absence') ? 'text-green-700' : 'text-slate-600'}`}>
-              <li>• Navn</li>
-              <li>• Klasse</li>
-              <li>• Fagnavn</li>
-              <li>• Faggruppe</li>
-              <li>• H1+H2 % udok. fravær</li>
-              <li>• H1+H2 timer udok. fravær</li>
-              <li>• Lærer</li>
-              <li>• Kontaktlærer</li>
-              <li>• Avbrudd i skoleåret</li>
-            </ul>
-          </div>
-          <div className={`rounded-lg p-4 transition-colors duration-500 ${detectedTypes.has('warnings') ? 'bg-green-50' : 'bg-slate-50'}`}>
-            <h4 className={`font-semibold mb-2 transition-colors duration-500 ${detectedTypes.has('warnings') ? 'text-green-800' : 'text-slate-900'}`}>
-              Varsler
-              <span className={`block text-xs font-normal transition-colors duration-500 ${detectedTypes.has('warnings') ? 'text-green-600' : 'text-slate-500'}`}>(manuelt fra varseloversikt*)</span>
-            </h4>
-            <ul className={`space-y-1 text-xs transition-colors duration-500 ${detectedTypes.has('warnings') ? 'text-green-700' : 'text-slate-600'}`}>
-              <li>• Elevnavn</li>
-              <li>• Klasse</li>
-              <li>• Faggruppe</li>
-              <li>• Type varsel</li>
-              <li>• Sendt dato</li>
-              <li>• Fødselsdato</li>
-            </ul>
-          </div>
-          <div className={`rounded-lg p-4 transition-colors duration-500 ${detectedTypes.has('grades') ? 'bg-green-50' : 'bg-slate-50'}`}>
-            <h4 className={`font-semibold mb-2 transition-colors duration-500 ${detectedTypes.has('grades') ? 'text-green-800' : 'text-slate-900'}`}>
-              Karakterfil
-              <span className={`block text-xs font-normal transition-colors duration-500 ${detectedTypes.has('grades') ? 'text-green-600' : 'text-slate-500'}`}>(fra rapport)</span>
-            </h4>
-            <ul className={`space-y-1 text-xs transition-colors duration-500 ${detectedTypes.has('grades') ? 'text-green-700' : 'text-slate-600'}`}>
-              <li>• Elev</li>
-              <li>• Klassegruppe</li>
-              <li>• Gruppe</li>
-              <li>• Fagkode</li>
-              <li>• Grade</li>
-              <li>• Subject Teacher</li>
-              <li>• Halvår</li>
-            </ul>
-          </div>
-          <div className={`rounded-lg p-4 transition-colors duration-500 ${detectedTypes.has('studentInfo') ? 'bg-green-50' : 'bg-slate-50'}`}>
-            <h4 className={`font-semibold mb-2 transition-colors duration-500 ${detectedTypes.has('studentInfo') ? 'text-green-800' : 'text-slate-900'}`}>
-              Elevfil
-              <span className={`block text-xs font-normal transition-colors duration-500 ${detectedTypes.has('studentInfo') ? 'text-green-600' : 'text-slate-500'}`}>(eksporter elevliste)</span>
-            </h4>
-            <ul className={`space-y-1 text-xs transition-colors duration-500 ${detectedTypes.has('studentInfo') ? 'text-green-700' : 'text-slate-600'}`}>
-              <li>• Fornavn</li>
-              <li>• Etternavn</li>
-              <li>• Fødselsdato</li>
-              <li>• Programområde</li>
-              <li>• Fritak i sidemål</li>
-              <li>• Inntakspoeng</li>
-              <li>• Klasse</li>
-            </ul>
-          </div>
-          <div className={`rounded-lg p-4 transition-colors duration-500 ${detectedTypes.has('preset') ? 'bg-green-50' : 'bg-slate-50'}`}>
-            <h4 className={`font-semibold mb-2 transition-colors duration-500 ${detectedTypes.has('preset') ? 'text-green-800' : 'text-slate-900'}`}>
-              Preset-fil
-              <span className={`block text-xs font-normal transition-colors duration-500 ${detectedTypes.has('preset') ? 'text-green-600' : 'text-slate-500'}`}>(valgfri)</span>
-            </h4>
-            <ul className={`space-y-1 text-xs transition-colors duration-500 ${detectedTypes.has('preset') ? 'text-green-700' : 'text-slate-600'}`}>
-              <li>• Navn</li>
-              <li>• Rolle</li>
-              <li>• Klasser</li>
-            </ul>
-          </div>
+        <div className="mt-7">
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">Støttede filtyper</h3>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+          {([
+            { key: 'absence', label: 'Fravær', sub: 'Fraværsrapport', cols: ['Navn', 'Klasse', 'Fagnavn', 'Faggruppe', 'H1+H2 % udok. fravær', 'H1+H2 timer udok. fravær', 'Lærer', 'Kontaktlærer', 'Avbrudd i skoleåret'] },
+            { key: 'warnings', label: 'Varsler', sub: 'Varseloversikt*', cols: ['Elevnavn', 'Klasse', 'Faggruppe', 'Type varsel', 'Sendt dato', 'Fødselsdato'] },
+            { key: 'grades', label: 'Karakterer', sub: 'Karakterrapport', cols: ['Elev', 'Klassegruppe', 'Gruppe', 'Fagkode', 'Karakter', 'Faglærer', 'Halvår'] },
+            { key: 'studentInfo', label: 'Elevfil', sub: 'Elevliste', cols: ['Fornavn', 'Etternavn', 'Fødselsdato', 'Programområde', 'Fritak i sidemål', 'Inntakspoeng', 'Klasse'] },
+            { key: 'preset', label: 'Preset-fil', sub: 'Valgfri', cols: ['Navn', 'Rolle', 'Klasser'] },
+          ] as const).map(({ key, label, sub, cols }) => {
+            const detected = detectedTypes.has(key)
+            return (
+              <div key={key} className={`relative rounded-xl border p-3.5 transition-all duration-300 ${
+                detected
+                  ? 'bg-green-50 border-green-200 shadow-sm'
+                  : 'bg-white border-slate-200'
+              }`}>
+                {detected && (
+                  <span className="absolute top-2.5 right-2.5 w-4 h-4 rounded-full bg-green-500 flex items-center justify-center">
+                    <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 10 10"><path d="M2 5l2.5 2.5L8 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </span>
+                )}
+                <h4 className={`font-semibold text-xs mb-0.5 pr-5 ${ detected ? 'text-green-800' : 'text-slate-800'}`}>
+                  {label}
+                </h4>
+                <span className={`block text-xs mb-2 ${detected ? 'text-green-500' : 'text-slate-400'}`}>{sub}</span>
+                <ul className={`space-y-0.5 text-xs ${detected ? 'text-green-700' : 'text-slate-500'}`}>
+                  {cols.map(c => <li key={c}>· {c}</li>)}
+                </ul>
+              </div>
+            )
+          })}
           </div>
         </div>
 

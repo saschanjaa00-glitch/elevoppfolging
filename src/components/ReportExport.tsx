@@ -87,19 +87,19 @@ export default function ReportExport({ data }: ReportExportProps) {
   const allClasses = Array.from(new Set(data.absences.map(a => a.class))).sort()
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="card p-6">
-        <h2 className="text-2xl font-bold text-slate-900 mb-6">Export Report</h2>
+        <h2 className="text-lg font-semibold text-slate-900 mb-5">Eksporter rapport</h2>
 
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-slate-900 mb-3">
-            Select Classes to Export
+        <div className="mb-5">
+          <label className="block text-sm font-medium text-slate-700 mb-2">
+            Velg klasser å eksportere
           </label>
-          <div className="space-y-2 max-h-64 overflow-y-auto border border-slate-200 rounded-lg p-4">
+          <div className="space-y-1.5 max-h-60 overflow-y-auto border border-slate-200 rounded-xl p-3 bg-slate-50">
             {allClasses.map(cls => (
               <label
                 key={cls}
-                className="flex items-center gap-2 cursor-pointer"
+                className="flex items-center gap-2.5 cursor-pointer px-1 py-0.5 rounded hover:bg-slate-100 transition-colors"
               >
                 <input
                   type="checkbox"
@@ -115,7 +115,7 @@ export default function ReportExport({ data }: ReportExportProps) {
                   }}
                   className="w-4 h-4 text-sky-600 rounded border-slate-300"
                 />
-                <span className="text-sm text-slate-700">{cls}</span>
+                <span className="text-sm font-medium text-slate-700">{cls}</span>
               </label>
             ))}
           </div>
@@ -123,40 +123,40 @@ export default function ReportExport({ data }: ReportExportProps) {
 
         <button
           onClick={generateCSV}
-          className="flex items-center gap-2 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-medium transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors"
         >
           <Download className="w-4 h-4" />
-          Export as CSV
+          Eksporter som CSV
         </button>
       </div>
 
       {selectedClasses.length > 0 && (
         <div className="card p-6">
-          <h3 className="text-lg font-semibold text-slate-900 mb-4">
-            Preview
+          <h3 className="text-sm font-semibold text-slate-900 mb-4 uppercase tracking-wide text-slate-500">
+            Forhåndsvisning
           </h3>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded-lg border border-slate-200">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-200">
-                  <th className="text-left py-2 px-3 font-semibold text-slate-900">
-                    Student
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="text-left py-2.5 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Elev
                   </th>
-                  <th className="text-left py-2 px-3 font-semibold text-slate-900">
-                    Class
+                  <th className="text-left py-2.5 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Klasse
                   </th>
-                  <th className="text-left py-2 px-3 font-semibold text-slate-900">
-                    Subject
+                  <th className="text-left py-2.5 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Fag
                   </th>
-                  <th className="text-right py-2 px-3 font-semibold text-slate-900">
-                    Absence %
+                  <th className="text-right py-2.5 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Fravær %
                   </th>
-                  <th className="text-left py-2 px-3 font-semibold text-slate-900">
-                    Warning
+                  <th className="text-left py-2.5 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Varsel
                   </th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-100">
                 {data.absences
                   .filter(a => selectedClasses.includes(a.class))
                   .slice(0, 20)
@@ -169,22 +169,22 @@ export default function ReportExport({ data }: ReportExportProps) {
                     return (
                       <tr
                         key={idx}
-                        className="border-b border-slate-100 hover:bg-slate-50"
+                        className="hover:bg-slate-50 transition-colors"
                       >
-                        <td className="py-2 px-3 text-slate-900">
+                        <td className="py-2 px-3 font-medium text-slate-900">
                           {absence.navn}
                         </td>
-                        <td className="py-2 px-3 text-slate-600">
+                        <td className="py-2 px-3 text-slate-500">
                           {absence.class}
                         </td>
                         <td className="py-2 px-3 text-slate-600">
                           {absence.subject}
                         </td>
-                        <td className="py-2 px-3 text-right font-medium text-slate-900">
+                        <td className="py-2 px-3 text-right font-semibold text-slate-900">
                           {absence.percentageAbsence.toFixed(1)}%
                         </td>
-                        <td className="py-2 px-3 text-slate-600">
-                          {matched ? matched.warningType : '-'}
+                        <td className="py-2 px-3 text-slate-500">
+                          {matched ? matched.warningType : '–'}
                         </td>
                       </tr>
                     )
@@ -192,8 +192,8 @@ export default function ReportExport({ data }: ReportExportProps) {
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-slate-500 mt-4">
-            Showing first 20 rows. Full export includes all data.
+          <p className="text-xs text-slate-400 mt-3">
+            Viser de første 20 radene. Full eksport inkluderer alle data.
           </p>
         </div>
       )}

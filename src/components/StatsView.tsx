@@ -1,5 +1,6 @@
 import { useMemo, useState, useRef } from 'react'
 import type { ReactNode } from 'react'
+import { Download, BarChart2 } from 'lucide-react'
 import type { DataStore } from '../types'
 import {
   buildStudentClassKey,
@@ -106,12 +107,16 @@ function StatCard({
     <button
       type="button"
       onClick={onClick}
-      className={`w-full rounded-lg border p-4 text-left transition-colors ${
-        highlight ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
-      } ${active ? 'ring-2 ring-sky-300 ring-offset-1' : ''}`}
+      className={`w-full rounded-xl border p-4 text-left transition-all duration-150 ${
+        highlight
+          ? 'bg-amber-50 border-amber-200 hover:bg-amber-100 hover:shadow-sm'
+          : 'bg-white border-slate-200 hover:bg-slate-50 hover:shadow-sm'
+      } ${active ? 'ring-2 ring-sky-400 ring-offset-1 shadow-sm' : ''}`}
     >
-      <p className="text-xs text-slate-500 mb-1">{label}</p>
-      <div className={`text-2xl font-bold ${highlight ? 'text-amber-700' : 'text-slate-900'}`}>{value}</div>
+      <p className="text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">{label}</p>
+      <div className={`text-xl font-bold leading-tight ${
+        highlight ? 'text-amber-700' : 'text-slate-900'
+      }`}>{value}</div>
     </button>
   )
 }
@@ -1113,16 +1118,18 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
         <button
           type="button"
           onClick={() => void generateStatsPptx()}
-          className="px-3 py-2 text-sm font-medium bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors"
+          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors shadow-sm"
         >
-          📊 Eksporter som PowerPoint
+          <BarChart2 className="w-4 h-4" />
+          Eksporter som PowerPoint
         </button>
         <button
           type="button"
           onClick={exportStatsPNG}
-          className="px-3 py-2 text-sm font-medium bg-slate-600 text-white rounded hover:bg-slate-700 transition-colors"
+          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors shadow-sm"
         >
-          📥 Eksporter som PNG
+          <Download className="w-4 h-4" />
+          Eksporter som PNG
         </button>
         </div>
       </div>

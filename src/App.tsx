@@ -759,14 +759,14 @@ function App() {
         ) : (
           <div className="space-y-6">
             {/* Top bar */}
-            <div className="flex items-center border-b border-slate-200 pb-2 gap-1">
+            <div className="flex items-center border-b border-slate-200 pb-0 gap-0.5">
               {hasAbsenceData && (
               <button
                 onClick={() => setActiveTab('elever')}
-                className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
+                className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
                   activeTab === 'elever'
-                    ? 'text-sky-700 border-b-2 border-sky-600'
-                    : 'text-slate-500 hover:text-slate-700'
+                    ? 'text-sky-700 border-sky-600'
+                    : 'text-slate-500 border-transparent hover:text-slate-700 hover:border-slate-300'
                 }`}
               >
                 Elever
@@ -775,10 +775,10 @@ function App() {
               {hasAbsenceData && (
               <button
                 onClick={() => setActiveTab('statistikk')}
-                className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
+                className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
                   activeTab === 'statistikk'
-                    ? 'text-sky-700 border-b-2 border-sky-600'
-                    : 'text-slate-500 hover:text-slate-700'
+                    ? 'text-sky-700 border-sky-600'
+                    : 'text-slate-500 border-transparent hover:text-slate-700 hover:border-slate-300'
                 }`}
               >
                 Statistikk
@@ -786,10 +786,10 @@ function App() {
               )}
               <button
                 onClick={() => setActiveTab('faginnsikt')}
-                className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
+                className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
                   activeTab === 'faginnsikt'
-                    ? 'text-sky-700 border-b-2 border-sky-600'
-                    : 'text-slate-500 hover:text-slate-700'
+                    ? 'text-sky-700 border-sky-600'
+                    : 'text-slate-500 border-transparent hover:text-slate-700 hover:border-slate-300'
                 }`}
               >
                 Faginnsikt
@@ -797,27 +797,27 @@ function App() {
               {hasAbsenceData && (
               <button
                 onClick={() => setActiveTab('innsikt')}
-                className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
+                className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
                   activeTab === 'innsikt'
-                    ? 'text-sky-700 border-b-2 border-sky-600'
-                    : 'text-slate-500 hover:text-slate-700'
+                    ? 'text-sky-700 border-sky-600'
+                    : 'text-slate-500 border-transparent hover:text-slate-700 hover:border-slate-300'
                 }`}
               >
                 Lærerinnsikt
               </button>
               )}
-              <div className="ml-auto flex items-center gap-2">
+              <div className="ml-auto flex items-center gap-2 pb-0.5">
                 {hasAbsenceData && (
                   <button
                     onClick={() => setOversiktModalOpen(true)}
-                    className="px-4 py-2 text-sm font-medium text-emerald-700 hover:text-emerald-900 transition-colors"
+                    className="px-3 py-1.5 text-sm font-medium text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 rounded-lg transition-colors"
                   >
                     Generer oppfølgingsoversikt
                   </button>
                 )}
                 <button
                   onClick={clearImportedData}
-                  className="px-4 py-2 text-slate-600 hover:text-slate-900 font-medium transition-colors"
+                  className="px-3 py-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 text-sm font-medium rounded-lg transition-colors"
                 >
                   Last opp nye filer
                 </button>
@@ -825,12 +825,12 @@ function App() {
             </div>
 
             {activeTab === 'statistikk' && (
-              <Suspense fallback={<div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 text-slate-600">Laster statistikk...</div>}>
+              <Suspense fallback={<div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 text-slate-600">Laster statistikk...</div>}>
                 <StatsView data={data} threshold={thresholdEnabled ? absenceThreshold : 0} />
               </Suspense>
             )}
             {activeTab === 'faginnsikt' && (
-              <Suspense fallback={<div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 text-slate-600">Laster faginnsikt...</div>}>
+              <Suspense fallback={<div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 text-slate-600">Laster faginnsikt...</div>}>
                 <FaginnsiktView
                   data={data}
                   subtab={faginnsiktSubtab}
@@ -839,7 +839,7 @@ function App() {
               </Suspense>
             )}
             {activeTab === 'innsikt' && (
-              <Suspense fallback={<div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 text-slate-600">Laster laererinnsikt...</div>}>
+              <Suspense fallback={<div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 text-slate-600">Laster laererinnsikt...</div>}>
                 <InnsiktView data={data} threshold={thresholdEnabled ? absenceThreshold : 0} />
               </Suspense>
             )}
@@ -849,7 +849,7 @@ function App() {
                   {/* Presets */}
                   {/* Dynamic preset buttons grouped by role */}
                   {presets.length > 0 && Object.entries(presetRoleMappings).map(([role, nameMap]) => (
-                    <div key={role} className="bg-white rounded-lg shadow-sm border border-slate-100 p-4 mb-4">
+                    <div key={role} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4">
                       <h3 className="text-sm font-semibold text-slate-900 mb-3">{role}</h3>
                       <div className="space-y-2">
                         {Object.entries(nameMap)
@@ -876,8 +876,8 @@ function App() {
                   />
                 </aside>
 
-                <section className="lg:col-span-3 space-y-6">
-                  <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-4 space-y-4">
+                  <section className="lg:col-span-3 space-y-6">
+                  <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 space-y-4">
                     {/* Student search */}
                     <div>
                       <label className="block text-sm font-medium text-slate-900 mb-2">
@@ -894,7 +894,7 @@ function App() {
                             if (studentSearchDebounceRef.current) clearTimeout(studentSearchDebounceRef.current)
                             studentSearchDebounceRef.current = setTimeout(() => setStudentSearch(v), 150)
                           }}
-                          className="w-full sm:w-72 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+                          className="w-full sm:w-72 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 bg-slate-50 placeholder-slate-400 focus:border-transparent"
                         />
                         <button
                           onClick={() => setNoFilter(v => !v)}
@@ -919,10 +919,10 @@ function App() {
                           placeholder="Søk navn..."
                           value={kontaktlaererSearch}
                           onChange={e => setKontaktlaererSearch(e.target.value)}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-transparent bg-slate-50 placeholder-slate-400"
                         />
                         {kontaktlaererSuggestions.length > 0 && (
-                          <div className="mt-1.5 border border-emerald-100 rounded-lg bg-emerald-50 max-h-36 overflow-auto">
+                          <div className="mt-1.5 border border-emerald-100 rounded-xl bg-emerald-50 max-h-36 overflow-auto shadow-sm">
                             {kontaktlaererSuggestions.map(name => (
                               <button
                                 key={name}
@@ -946,10 +946,10 @@ function App() {
                           placeholder="Søk navn..."
                           value={faglaererSearch}
                           onChange={e => setFaglaererSearch(e.target.value)}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-transparent bg-slate-50 placeholder-slate-400"
                         />
                         {faglaererSuggestions.length > 0 && (
-                          <div className="mt-1.5 border border-emerald-100 rounded-lg bg-emerald-50 max-h-36 overflow-auto">
+                          <div className="mt-1.5 border border-emerald-100 rounded-xl bg-emerald-50 max-h-36 overflow-auto shadow-sm">
                             {faglaererSuggestions.map(name => (
                               <button
                                 key={name}

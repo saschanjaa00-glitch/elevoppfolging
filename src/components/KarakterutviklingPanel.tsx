@@ -334,6 +334,8 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
   const [selectedTeacherKeysBySubject, setSelectedTeacherKeysBySubject] = useState<Record<string, string[]>>({})
   const [anonymizeTeachers, setAnonymizeTeachers] = useState(false)
   const [linkedSubjectsByKey, setLinkedSubjectsByKey] = useState<Record<string, string[]>>({})
+  const [tableSortKey, setTableSortKey] = useState<string | null>(null)
+  const [tableSortDir, setTableSortDir] = useState<'asc' | 'desc'>('asc')
   const [expandedGraph, setExpandedGraph] = useState<null | {
     title: string
     labels: string[]
@@ -487,6 +489,39 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
     return rows.filter(row => normalizeHeader(row.label).includes(normalizedFilter))
   }, [rows, normalizedFilter])
 
+  const sortedFilteredRows = useMemo(() => {
+    if (!tableSortKey) return filteredRows
+    const lastYear = schoolYears[schoolYears.length - 1]
+    const firstYear = schoolYears[0]
+    return [...filteredRows].sort((a, b) => {
+      let av: number
+      let bv: number
+      if (tableSortKey === 'label') {
+        const cmp = a.label.localeCompare(b.label, 'nb-NO')
+        return tableSortDir === 'asc' ? cmp : -cmp
+      } else if (tableSortKey === 'endring') {
+        const deltaA = firstYear && lastYear ? (a.yearlyH2[lastYear]?.avg ?? NaN) - (a.yearlyH2[firstYear]?.avg ?? NaN) : NaN
+        const deltaB = firstYear && lastYear ? (b.yearlyH2[lastYear]?.avg ?? NaN) - (b.yearlyH2[firstYear]?.avg ?? NaN) : NaN
+        av = isNaN(deltaA) ? (tableSortDir === 'asc' ? Infinity : -Infinity) : deltaA
+        bv = isNaN(deltaB) ? (tableSortDir === 'asc' ? Infinity : -Infinity) : deltaB
+      } else {
+        // tableSortKey is a schoolYear string
+        av = a.yearlyH2[tableSortKey]?.avg ?? (tableSortDir === 'asc' ? Infinity : -Infinity)
+        bv = b.yearlyH2[tableSortKey]?.avg ?? (tableSortDir === 'asc' ? Infinity : -Infinity)
+      }
+      return tableSortDir === 'asc' ? av - bv : bv - av
+    })
+  }, [filteredRows, tableSortKey, tableSortDir, schoolYears])
+
+  const toggleTableSort = (key: string) => {
+    if (tableSortKey === key) {
+      setTableSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setTableSortKey(key)
+      setTableSortDir('asc')
+    }
+  }
+
   const maskTeacher = (name: string, idx?: number): string =>
     anonymizeTeachers ? (idx !== undefined ? `Lærer ${idx + 1}` : '**********') : name
 
@@ -537,7 +572,7 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
         }
       }
 
-      filteredRows.forEach((row, rowIdx) => {
+      sortedFilteredRows.forEach((row, rowIdx) => {
         addRowForTrend(viewMode === 'teacher' ? maskTeacher(row.label, rowIdx) : row.label, row)
         if (viewMode === 'subject') {
           const teacherRows = teacherRowsBySubject.get(row.label) ?? []
@@ -742,7 +777,7 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setViewMode('subject')}
+            onClick={() => { setViewMode('subject'); setTableSortKey(null) }}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
               viewMode === 'subject'
                 ? 'bg-sky-100 text-sky-800 border-sky-300'
@@ -753,7 +788,7 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
           </button>
           <button
             type="button"
-            onClick={() => setViewMode('teacher')}
+            onClick={() => { setViewMode('teacher'); setTableSortKey(null) }}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
               viewMode === 'teacher'
                 ? 'bg-sky-100 text-sky-800 border-sky-300'
@@ -866,23 +901,38 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
             <thead>
               <tr className="border-b-2 border-slate-200">
                 <th className="sticky top-0 z-10 bg-white py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
-                  {viewMode === 'subject' ? 'Fagkode' : 'Lærer'}
+                  <button type="button" onClick={() => toggleTableSort('label')} className="inline-flex items-center gap-1 hover:text-slate-700">
+                    {viewMode === 'subject' ? 'Fagkode' : 'Lærer'}
+                    <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                      {tableSortKey === 'label' ? (tableSortDir === 'asc' ? '▲' : '▼') : ''}
+                    </span>
+                  </button>
                 </th>
                 {schoolYears.map(year => (
                   <th
                     key={year}
                     className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap"
                   >
-                    {schoolYearDisplayMap[year] ?? year}
+                    <button type="button" onClick={() => toggleTableSort(year)} className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center">
+                      {schoolYearDisplayMap[year] ?? year}
+                      <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                        {tableSortKey === year ? (tableSortDir === 'asc' ? '▲' : '▼') : ''}
+                      </span>
+                    </button>
                   </th>
                 ))}
                 <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
-                  Endring
+                  <button type="button" onClick={() => toggleTableSort('endring')} className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center">
+                    Endring
+                    <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                      {tableSortKey === 'endring' ? (tableSortDir === 'asc' ? '▲' : '▼') : ''}
+                    </span>
+                  </button>
                 </th>
               </tr>
             </thead>
             <tbody>
-              {filteredRows.map((row, rowIdx) => {
+              {sortedFilteredRows.map((row, rowIdx) => {
                 const displayRowLabel = viewMode === 'teacher' ? maskTeacher(row.label, rowIdx) : row.label
                 const firstYear = schoolYears[0]
                 const lastYear = schoolYears[schoolYears.length - 1]

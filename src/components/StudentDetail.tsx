@@ -234,22 +234,27 @@ export default function StudentDetail({
         const isLowGradeT2 = gradeT2 && ['1', '2', 'iv'].includes(gradeT2.toLowerCase())
 
         return (
-          <div key={subject} className="flex items-start justify-between px-4 py-3 gap-4 transition-colors hover:bg-slate-100">
+          <div
+            key={subject}
+            className={`flex items-start justify-between px-4 py-3 gap-4 transition-colors hover:bg-slate-50 ${
+              isHighRisk ? 'border-l-2 border-red-400' : isAtRisk ? 'border-l-2 border-amber-400' : 'border-l-2 border-transparent'
+            }`}
+          >
             <div className="flex-1 min-w-0">
-              <p className="font-medium text-slate-900 truncate">{subject}</p>
-              {!noAbsenceData && <p className="text-xs text-slate-500">{teacher}</p>}
+              <p className="font-semibold text-slate-900 truncate text-sm">{subject}</p>
+              {!noAbsenceData && <p className="text-xs text-slate-400 mt-0.5">{teacher}</p>}
               {!noAbsenceData && showSidemalExemption && isNorskSubject(subject) && (
-                <div className="mt-1">
-                  <span className="inline-block px-2 py-0.5 rounded text-xs font-bold bg-emerald-100 text-emerald-800">
+                <div className="mt-1.5">
+                  <span className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
                     Fritak sidemål
                   </span>
                 </div>
               )}
               {!noAbsenceData && warnings.length > 0 && (
-                <div className="text-xs text-slate-600 mt-1 space-y-0.5">
+                <div className="text-xs text-slate-500 mt-1.5 space-y-0.5">
                   {groupWarnings(warnings).map(([label, dates]) => (
                     <div key={label}>
-                      <span className="font-semibold">{label}:</span>{' '}
+                      <span className="font-semibold text-slate-600">{label}:</span>{' '}
                       {dates.map((d, i) => (
                         <span key={i} className={dateColor(d)}>{d}{i < dates.length - 1 ? ', ' : ''}</span>
                       ))}
@@ -258,25 +263,27 @@ export default function StudentDetail({
                 </div>
               )}
             </div>
-            <div className="text-right shrink-0 space-y-1">
+            <div className="text-right shrink-0 flex flex-col items-end gap-1">
               {!noAbsenceData && (
                 <>
-                  <p className={`text-base font-bold ${isHighRisk ? 'text-red-600' : isAtRisk ? 'text-amber-600' : 'text-green-600'}`}>
+                  <p className={`text-base font-bold tabular-nums ${isHighRisk ? 'text-red-600' : isAtRisk ? 'text-amber-600' : 'text-emerald-600'}`}>
                     {record.percentageAbsence.toFixed(1)}%
                   </p>
-                  <p className="text-xs text-slate-500">{record.hoursAbsence.toFixed(0)}h</p>
+                  <p className="text-xs text-slate-400">{record.hoursAbsence.toFixed(0)}t</p>
                 </>
               )}
-              {grade && (
-                <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${isLowGrade ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-600'}`}>
-                  T1: {grade}
-                </span>
-              )}
-              {gradeT2 && (
-                <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${isLowGradeT2 ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-600'}`}>
-                  T2: {gradeT2}
-                </span>
-              )}
+              <div className="flex flex-wrap gap-1 justify-end">
+                {grade && (
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${isLowGrade ? 'bg-purple-100 text-purple-700 ring-1 ring-purple-200' : 'bg-slate-100 text-slate-500'}`}>
+                    T1: {grade}
+                  </span>
+                )}
+                {gradeT2 && (
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${isLowGradeT2 ? 'bg-purple-100 text-purple-700 ring-1 ring-purple-200' : 'bg-slate-100 text-slate-500'}`}>
+                    T2: {gradeT2}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         )

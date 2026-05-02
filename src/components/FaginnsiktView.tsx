@@ -779,15 +779,15 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
 
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-2">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-2">
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => selectSubtab('oversikt')}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
               activeSubtab === 'oversikt'
-                ? 'bg-sky-100 text-sky-800 border-sky-300'
-                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                ? 'bg-sky-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             Fagoversikt
@@ -795,10 +795,10 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
           <button
             type="button"
             onClick={() => selectSubtab('karakterutvikling')}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
               activeSubtab === 'karakterutvikling'
-                ? 'bg-sky-100 text-sky-800 border-sky-300'
-                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                ? 'bg-sky-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             Karakterutvikling
@@ -807,27 +807,27 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
       </div>
 
       {activeSubtab === 'oversikt' ? (
-      <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold text-slate-900">Fag</h2>
           <button
             type="button"
             onClick={exportToExcel}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium border bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm transition-colors"
           >
             Eksporter til Excel
           </button>
         </div>
 
         <div className="mb-4">
-          <div className="mb-3 flex flex-wrap gap-2">
+          <div className="mb-3 flex flex-wrap gap-1 p-1 bg-slate-100 rounded-xl w-fit">
             <button
               type="button"
               onClick={() => setTermMode('t1')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                 termMode === 't1'
-                  ? 'bg-sky-100 text-sky-800 border-sky-300'
-                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                  ? 'bg-white text-sky-700 shadow-sm font-semibold'
+                  : 'text-slate-600 hover:text-slate-800'
               }`}
             >
               Halvår 1
@@ -835,10 +835,10 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
             <button
               type="button"
               onClick={() => setTermMode('t2')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                 termMode === 't2'
-                  ? 'bg-sky-100 text-sky-800 border-sky-300'
-                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                  ? 'bg-white text-sky-700 shadow-sm font-semibold'
+                  : 'text-slate-600 hover:text-slate-800'
               }`}
             >
               Halvår 2
@@ -846,10 +846,10 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
             <button
               type="button"
               onClick={() => setTermMode('compare')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                 termMode === 'compare'
-                  ? 'bg-sky-100 text-sky-800 border-sky-300'
-                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                  ? 'bg-white text-sky-700 shadow-sm font-semibold'
+                  : 'text-slate-600 hover:text-slate-800'
               }`}
             >
               Sammenlign
@@ -860,7 +860,7 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
             placeholder="Søk etter fag..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+            className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 bg-slate-50 placeholder-slate-400"
           />
         </div>
 
