@@ -1,4 +1,13 @@
 // One-time script: fetches all fagkoder from UDIR and writes src/fagkodeLookup.ts
+//
+// To update the lookup file with new/changed fagkoder:
+//   1. Run: node scripts/generateFagkodeLookup.mjs
+//
+// Data source (REST API, no auth, returns all codes in one JSON array):
+//   https://data.udir.no/kl06/v201906/fagkoder
+//
+// Human-readable table (LK20 codes, paginated UI):
+//   https://www.udir.no/laring-og-trivsel/lareplanverket/nye-fagkoder-LK20/
 import { writeFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
