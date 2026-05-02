@@ -34,7 +34,7 @@ const FaginnsiktView = lazy(loadFaginnsiktView)
 type AppTab = 'elever' | 'statistikk' | 'faginnsikt' | 'innsikt'
 type FaginnsiktSubtab = 'oversikt' | 'karakterutvikling'
 
-const IDLE_TIMEOUT_MS = 45 * 60 * 1000
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000
 
 const TAB_PREFETCH_ORDER: Record<AppTab, Array<{ key: string; load: () => Promise<unknown> }>> = {
   elever: [
@@ -73,6 +73,8 @@ function App() {
   const [faginnsiktSubtab, setFaginnsiktSubtab] = useState<FaginnsiktSubtab>('oversikt')
   const [allowInsightsWithoutAbsence, setAllowInsightsWithoutAbsence] = useState(false)
   const [studentSearch, setStudentSearch] = useState<string>('')
+  const [studentSearchInput, setStudentSearchInput] = useState<string>('')
+  const studentSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [kontaktlaererSearch, setKontaktlaererSearch] = useState<string>('')
   const [faglaererSearch, setFaglaererSearch] = useState<string>('')
   const [missingWarningsOnly, setMissingWarningsOnly] = useState<boolean>(false)
@@ -80,6 +82,7 @@ function App() {
   const [vurderingFromDate, setVurderingFromDate] = useState<string>('')
   const [oversiktModalOpen, setOversiktModalOpen] = useState<boolean>(false)
   const [lowGradeFilter, setLowGradeFilter] = useState<string[]>(['IV', '1', '2'])
+  const [gradeHalvaar, setGradeHalvaar] = useState<'H1' | 'H2' | 'begge'>('begge')
   const [filterLogic, setFilterLogic] = useState<'og' | 'eller'>('eller')
   const [fullRapport, setFullRapport] = useState<boolean>(false)
   const [fullRapportInclude2, setFullRapportInclude2] = useState<boolean>(false)
@@ -102,6 +105,7 @@ function App() {
     setSelectedClasses([])
     setActiveTab('elever')
     setStudentSearch('')
+    setStudentSearchInput('')
     setKontaktlaererSearch('')
     setFaglaererSearch('')
     setMissingWarningsOnly(false)
@@ -111,6 +115,7 @@ function App() {
     setIdleRemainingMs(IDLE_TIMEOUT_MS)
     setFaginnsiktSubtab('oversikt')
     setAllowInsightsWithoutAbsence(false)
+    setGradeHalvaar('H1')
     idleDeadlineRef.current = null
   }
 
@@ -119,6 +124,11 @@ function App() {
     setAllowInsightsWithoutAbsence(false)
     const allClasses = Array.from(new Set(importedData.absences.map(a => a.class))).sort()
     setSelectedClasses(allClasses)
+    const hasH2 = importedData.grades.some(g => {
+      const h = g.halvår.toString().trim().toLowerCase()
+      return h === '2' || h.includes('2')
+    })
+    setGradeHalvaar(hasH2 ? 'H2' : 'H1')
   }
 
   const hasAbsenceData = data.absences.length > 0
@@ -877,8 +887,13 @@ function App() {
                         <input
                           type="text"
                           placeholder="Navn..."
-                          value={studentSearch}
-                          onChange={e => setStudentSearch(e.target.value)}
+                          value={studentSearchInput}
+                          onChange={e => {
+                            const v = e.target.value
+                            setStudentSearchInput(v)
+                            if (studentSearchDebounceRef.current) clearTimeout(studentSearchDebounceRef.current)
+                            studentSearchDebounceRef.current = setTimeout(() => setStudentSearch(v), 150)
+                          }}
                           className="w-full sm:w-72 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                         />
                         <button
@@ -1043,6 +1058,25 @@ function App() {
                           ))}
                         </div>
                       </div>
+
+                      <div className={data.grades.length === 0 || filtersDisabled ? 'opacity-40 pointer-events-none' : ''}>
+                        <label className={`block text-sm font-medium mb-2 ${fullRapport ? 'text-slate-400' : 'text-slate-900'}`}>
+                          Halvår (karakter)
+                        </label>
+                        <div className={`flex rounded-lg border border-slate-300 overflow-hidden text-sm font-medium ${fullRapport ? 'opacity-40 pointer-events-none' : ''}`}>
+                          {(['H1', 'H2', 'begge'] as const).map(opt => (
+                            <button
+                              key={opt}
+                              type="button"
+                              onClick={() => setGradeHalvaar(opt)}
+                              disabled={data.grades.length === 0 || fullRapport || filtersDisabled}
+                              className={`flex-1 px-3 py-2 border-l first:border-l-0 border-slate-300 transition-colors ${gradeHalvaar === opt ? 'bg-sky-600 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
+                            >
+                              {opt === 'begge' ? 'Begge' : opt}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
 
                     {/* Secondary actions */}
@@ -1060,11 +1094,13 @@ function App() {
                             setWarnedOnVurdering(false)
                             setPreOverrideFilters({ studentSearch, lowGradeFilter, fullRapport, fullRapportInclude2 })
                             setStudentSearch('')
+                            setStudentSearchInput('')
                             setLowGradeFilter([])
                             setFullRapport(false)
                             setFullRapportInclude2(false)
                           } else if (preOverrideFilters) {
                             setStudentSearch(preOverrideFilters.studentSearch)
+                            setStudentSearchInput(preOverrideFilters.studentSearch)
                             setLowGradeFilter(preOverrideFilters.lowGradeFilter)
                             setFullRapport(preOverrideFilters.fullRapport)
                             setFullRapportInclude2(preOverrideFilters.fullRapportInclude2)
@@ -1096,11 +1132,13 @@ function App() {
                             setMissingWarningsOnly(false)
                             setPreOverrideFilters({ studentSearch, lowGradeFilter, fullRapport, fullRapportInclude2 })
                             setStudentSearch('')
+                            setStudentSearchInput('')
                             setLowGradeFilter([])
                             setFullRapport(false)
                             setFullRapportInclude2(false)
                           } else if (preOverrideFilters) {
                             setStudentSearch(preOverrideFilters.studentSearch)
+                            setStudentSearchInput(preOverrideFilters.studentSearch)
                             setLowGradeFilter(preOverrideFilters.lowGradeFilter)
                             setFullRapport(preOverrideFilters.fullRapport)
                             setFullRapportInclude2(preOverrideFilters.fullRapportInclude2)
@@ -1149,6 +1187,7 @@ function App() {
                       vurderingFromDate={vurderingFromDate}
                       lowGradeFilter={isNameSearchActive ? [] : lowGradeFilter}
                       filterLogic={filterLogic}
+                      gradeHalvaar={isNameSearchActive ? 'begge' : gradeHalvaar}
                       fullRapport={isNameSearchActive ? false : fullRapport}
                       fullRapportInclude2={isNameSearchActive ? false : fullRapportInclude2}
                       noFilter={isNameSearchActive ? true : noFilter}

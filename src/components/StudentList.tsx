@@ -31,6 +31,7 @@ interface StudentListProps {
   warnedOnVurdering: boolean
   vurderingFromDate: string
   lowGradeFilter: string[]
+  gradeHalvaar?: 'H1' | 'H2' | 'begge'
   filterLogic?: 'og' | 'eller'
   fullRapport: boolean
   fullRapportInclude2: boolean
@@ -83,6 +84,7 @@ export default function StudentList({
   warnedOnVurdering,
   vurderingFromDate,
   lowGradeFilter,
+  gradeHalvaar = 'begge',
   filterLogic = 'eller',
   fullRapport,
   fullRapportInclude2,
@@ -246,12 +248,19 @@ export default function StudentList({
     const lowGradeSet = new Set(lowGradeFilter)
     const effectiveLowGradeSet = new Set(effectiveLowGrades.map(g => g.toUpperCase()))
 
-    const shouldIncludeSubject = (percentageAbsence: number, grade: string | undefined): boolean => {
+    const shouldIncludeSubject = (percentageAbsence: number, grade: string | undefined, gradeT2: string | undefined): boolean => {
       if (noFilter) return true
 
       const overThreshold = percentageAbsence > threshold
-      const matchesSelectedGrade = grade !== undefined && lowGradeSet.has(grade)
-      const matchesFullRapportGrade = grade !== undefined && effectiveLowGradeSet.has(grade.toUpperCase())
+
+      // Pick which grade(s) to check based on gradeHalvaar
+      const gradesToCheck: (string | undefined)[] =
+        gradeHalvaar === 'H1' ? [grade] :
+        gradeHalvaar === 'H2' ? [gradeT2] :
+        [grade, gradeT2]
+
+      const matchesSelectedGrade = gradesToCheck.some(g => g !== undefined && lowGradeSet.has(g))
+      const matchesFullRapportGrade = gradesToCheck.some(g => g !== undefined && effectiveLowGradeSet.has(g.toUpperCase()))
 
       if (fullRapport) return overThreshold || matchesFullRapportGrade
       if (lowGradeFilter.length > 0) {
@@ -276,7 +285,7 @@ export default function StudentList({
       const grade = gradeMap.get(warningKey)
       const gradeT2 = gradeMapT2.get(warningKey)
       const subjectTeacher = subjectTeacherMap.get(warningKey) ?? record.teacher
-      const includeSubject = shouldIncludeSubject(record.percentageAbsence, grade)
+      const includeSubject = shouldIncludeSubject(record.percentageAbsence, grade, gradeT2)
 
       const studentInfoKey = buildStudentClassKey(record.navn, record.class)
       if (!studentInfoCache.has(studentInfoKey)) {
@@ -375,10 +384,15 @@ export default function StudentList({
         const codeKey = normalizeSubjectGroupKey(code)
         const gradeKey = buildStudentSubjectKey(summary.navn, summary.className, code)
         const grade = gradeMap.get(gradeKey)
-        if (!grade) return
+        const gradeT2ForCode = gradeMapT2.get(gradeKey)
+        if (!grade && !gradeT2ForCode) return
 
-        const matchesSelectedGrade = lowGradeSet.has(grade)
-        const matchesFullRapportGrade = effectiveLowGradeSet.has(grade.toUpperCase())
+        const gradesToCheck: (string | undefined)[] =
+          gradeHalvaar === 'H1' ? [grade] :
+          gradeHalvaar === 'H2' ? [gradeT2ForCode] :
+          [grade, gradeT2ForCode]
+        const matchesSelectedGrade = gradesToCheck.some(g => g !== undefined && lowGradeSet.has(g))
+        const matchesFullRapportGrade = gradesToCheck.some(g => g !== undefined && effectiveLowGradeSet.has(g.toUpperCase()))
 
         let includeSubject = noFilter
         if (!noFilter && fullRapport) includeSubject = matchesFullRapportGrade
@@ -414,7 +428,7 @@ export default function StudentList({
     })
 
     return Array.from(summaryMap.values())
-  }, [classData, warningLookup, gradeLookup, threshold, lowGradeFilter, filterLogic, fullRapport, fullRapportInclude2, noFilter, studentInfoLookup])
+  }, [classData, warningLookup, gradeLookup, threshold, lowGradeFilter, filterLogic, fullRapport, fullRapportInclude2, noFilter, gradeHalvaar, studentInfoLookup])
 
   const kontaktlaererByStudentKey = useMemo(() => {
     const explicitMap = new Map<string, string>()
