@@ -158,6 +158,7 @@ function TrendGraph({
   xAxisLabelFilter?: (label: string) => boolean
 }) {
   const [hoveredSeries, setHoveredSeries] = useState<string | null>(null)
+  const [pinnedSeries, setPinnedSeries] = useState<Set<string>>(new Set())
   const padX = 42
   const padY = 24
 
@@ -248,11 +249,14 @@ function TrendGraph({
           return null
         })}
         {seriesPoints.map((s, seriesIdx) => {
+          const isPinned = pinnedSeries.has(s.name)
           const isHovered = hoveredSeries === s.name
+          const anyPinned = pinnedSeries.size > 0
           const anyHovered = hoveredSeries !== null
+          const isActive = isPinned || isHovered
           const baseWidth = s.isMainLine ? 2.75 : 1.5
-          const strokeWidth = isHovered ? baseWidth + 2 : anyHovered ? baseWidth * 0.45 : baseWidth
-          const opacity = anyHovered && !isHovered ? 0.3 : 1
+          const strokeWidth = isActive ? baseWidth + 2 : (anyPinned || anyHovered) ? baseWidth * 0.45 : baseWidth
+          const opacity = (anyPinned || anyHovered) && !isActive ? 0.25 : 1
           return (
           <g key={s.name} style={{ opacity }}>
             <polyline
@@ -316,11 +320,28 @@ function TrendGraph({
         })}
       </svg>
       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-600">
-        {series.map(s => (
+        {series.map(s => {
+          const isPinned = pinnedSeries.has(s.name)
+          const isHovered = hoveredSeries === s.name
+          const anyPinned = pinnedSeries.size > 0
+          const anyHovered = hoveredSeries !== null
+          const isActive = isPinned || isHovered
+          const dimmed = (anyPinned || anyHovered) && !isActive
+          return (
           <div
             key={`legend-${s.name}`}
-            className="inline-flex items-center gap-1.5 cursor-pointer select-none"
-            style={{ opacity: hoveredSeries !== null && hoveredSeries !== s.name ? 0.4 : 1, fontWeight: hoveredSeries === s.name ? 700 : undefined }}
+            className={`inline-flex items-center gap-1.5 cursor-pointer select-none rounded px-1 py-0.5 ${isPinned ? 'ring-1 ring-current' : ''}`}
+            style={{
+              opacity: dimmed ? 0.35 : 1,
+              fontWeight: isActive ? 700 : undefined,
+              color: isPinned ? s.color : undefined,
+            }}
+            onClick={() => setPinnedSeries(prev => {
+              const next = new Set(prev)
+              if (next.has(s.name)) next.delete(s.name)
+              else next.add(s.name)
+              return next
+            })}
             onMouseEnter={() => setHoveredSeries(s.name)}
             onMouseLeave={() => setHoveredSeries(null)}
           >
@@ -333,7 +354,17 @@ function TrendGraph({
             )}
             {s.name}
           </div>
-        ))}
+          )
+        })}
+        {pinnedSeries.size > 0 && (
+          <button
+            type="button"
+            className="text-xs text-slate-400 hover:text-slate-600 underline"
+            onClick={() => setPinnedSeries(new Set())}
+          >
+            Nullstill
+          </button>
+        )}
       </div>
     </div>
   )
@@ -546,7 +577,10 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
 
   const filteredRows = useMemo(() => {
     if (!normalizedFilter) return rows
-    return rows.filter(row => normalizeHeader(row.label).includes(normalizedFilter))
+    return rows.filter(row =>
+      normalizeHeader(row.label).includes(normalizedFilter) ||
+      normalizeHeader(getFagnavn(row.label)).includes(normalizedFilter)
+    )
   }, [rows, normalizedFilter])
 
   const sortedFilteredRows = useMemo(() => {
@@ -568,6 +602,30 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
         const deltaB = firstYear && lastYear ? (b.yearlyH2[lastYear]?.avg ?? NaN) - (b.yearlyH2[firstYear]?.avg ?? NaN) : NaN
         av = isNaN(deltaA) ? (tableSortDir === 'asc' ? Infinity : -Infinity) : deltaA
         bv = isNaN(deltaB) ? (tableSortDir === 'asc' ? Infinity : -Infinity) : deltaB
+      } else if (tableSortKey === 'spread') {
+        const calcMetric = (row: TrendRow) => {
+          if (viewMode === 'subject') {
+            const tRows = teacherRowsBySubject.get(row.label) ?? []
+            const vals = schoolYears.map(y => {
+              const avgs = tRows.map(tr => tr.yearlyH2[y]?.avg).filter((v): v is number => v !== undefined)
+              return avgs.length >= 2 ? Math.max(...avgs) - Math.min(...avgs) : null
+            }).filter((v): v is number => v !== null)
+            return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : NaN
+          } else {
+            const sRows = subjectRowsByTeacher.get(row.label) ?? []
+            const devs = sRows.flatMap(sr => schoolYears.map(y => {
+              const teacherAvg = sr.yearlyH2[y]?.avg
+              const allAvgs = (teacherRowsBySubject.get(sr.label) ?? []).map(tr => tr.yearlyH2[y]?.avg).filter((v): v is number => v !== undefined)
+              if (teacherAvg === undefined || allAvgs.length < 2) return null
+              return teacherAvg - (allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length)
+            }).filter((v): v is number => v !== null))
+            return devs.length > 0 ? devs.reduce((a, b) => a + b, 0) / devs.length : NaN
+          }
+        }
+        av = calcMetric(a)
+        bv = calcMetric(b)
+        if (isNaN(av)) av = tableSortDir === 'asc' ? Infinity : -Infinity
+        if (isNaN(bv)) bv = tableSortDir === 'asc' ? Infinity : -Infinity
       } else {
         // tableSortKey is a schoolYear string
         av = a.yearlyH2[tableSortKey]?.avg ?? (tableSortDir === 'asc' ? Infinity : -Infinity)
@@ -602,6 +660,7 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
         ...schoolYears.flatMap(year => [`${formatSchoolYearLabel(year)} H2`, `${formatSchoolYearLabel(year)} (H1)`]),
         'Endring H2',
         '(H1)',
+        viewMode === 'subject' ? 'Spredning (snitt)' : 'Avvik (snitt)',
       ]
       worksheet.addRow(headers)
 
@@ -627,6 +686,28 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
           }),
           deltaH2 === null ? '' : Number(deltaH2.toFixed(2)),
           deltaH1 === null ? '' : Number(deltaH1.toFixed(2)),
+          (() => {
+            if (viewMode === 'subject' && level === 0) {
+              const tRows = teacherRowsBySubject.get(row.label) ?? []
+              const perYear = schoolYears.map(y => {
+                const avgs = tRows.map(tr => tr.yearlyH2[y]?.avg).filter((v): v is number => v !== undefined)
+                return avgs.length >= 2 ? Math.max(...avgs) - Math.min(...avgs) : null
+              }).filter((v): v is number => v !== null)
+              const avg = perYear.length > 0 ? perYear.reduce((a, b) => a + b, 0) / perYear.length : null
+              return avg === null ? '' : Number(avg.toFixed(2))
+            } else if (viewMode === 'teacher') {
+              const sRows = subjectRowsByTeacher.get(row.label) ?? []
+              const devs = sRows.flatMap(sr => schoolYears.map(y => {
+                const teacherAvg = sr.yearlyH2[y]?.avg
+                const allAvgs = (teacherRowsBySubject.get(sr.label) ?? []).map(tr => tr.yearlyH2[y]?.avg).filter((v): v is number => v !== undefined)
+                if (teacherAvg === undefined || allAvgs.length < 2) return null
+                return teacherAvg - (allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length)
+              }).filter((v): v is number => v !== null))
+              const avg = devs.length > 0 ? devs.reduce((a, b) => a + b, 0) / devs.length : null
+              return avg === null ? '' : Number(avg.toFixed(2))
+            }
+            return ''
+          })(),
         ])
 
         if (level > 0) {
@@ -993,6 +1074,17 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                     </span>
                   </button>
                 </th>
+                <th
+                  className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap"
+                  title={viewMode === 'subject' ? 'Spredning mellom høyeste og laveste lærersnitt per år (H2)' : 'Gjennomsnittlig avvik fra fagsnitt (H2)'}
+                >
+                  <button type="button" onClick={() => toggleTableSort('spread')} className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center">
+                    {viewMode === 'subject' ? 'Spredning' : 'Avvik'}
+                    <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                      {tableSortKey === 'spread' ? (tableSortDir === 'asc' ? '▲' : '▼') : ''}
+                    </span>
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -1139,10 +1231,59 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                           ({deltaH1 === null ? '—' : `${deltaH1 > 0 ? '+' : ''}${deltaH1.toFixed(2).replace('.', ',')}`})
                         </div>
                       </td>
+                      {(() => {
+                        if (viewMode === 'subject') {
+                          const tRows = teacherRowsBySubject.get(row.label) ?? []
+                          const perYear = schoolYears.map(y => {
+                            const avgs = tRows.map(tr => tr.yearlyH2[y]?.avg).filter((v): v is number => v !== undefined)
+                            return avgs.length >= 2 ? Math.max(...avgs) - Math.min(...avgs) : null
+                          }).filter((v): v is number => v !== null)
+                          const avgSpread = perYear.length > 0
+                            ? perYear.reduce((s, v) => s + v, 0) / perYear.length
+                            : null
+                          return (
+                            <td className="py-2 px-3 text-center align-middle">
+                              {avgSpread === null ? (
+                                <span className="text-slate-300 text-xs">—</span>
+                              ) : (
+                                <div className={`text-[11px] font-semibold ${
+                                  avgSpread >= 1.5 ? 'text-red-600' : avgSpread >= 0.75 ? 'text-amber-500' : 'text-emerald-600'
+                                }`}>
+                                  {avgSpread.toFixed(2).replace('.', ',')}
+                                </div>
+                              )}
+                            </td>
+                          )
+                        } else {
+                          const sRows = subjectRowsByTeacher.get(row.label) ?? []
+                          const devs = sRows.flatMap(sr => schoolYears.map(y => {
+                            const teacherAvg = sr.yearlyH2[y]?.avg
+                            const allAvgs = (teacherRowsBySubject.get(sr.label) ?? []).map(tr => tr.yearlyH2[y]?.avg).filter((v): v is number => v !== undefined)
+                            if (teacherAvg === undefined || allAvgs.length < 2) return null
+                            return teacherAvg - (allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length)
+                          }).filter((v): v is number => v !== null))
+                          const avgDev = devs.length > 0 ? devs.reduce((a, b) => a + b, 0) / devs.length : null
+                          return (
+                            <td className="py-2 px-3 text-center align-middle">
+                              {avgDev === null ? (
+                                <span className="text-slate-300 text-xs">—</span>
+                              ) : (
+                                <div className={`text-[11px] font-semibold ${
+                                  Math.abs(avgDev) < 0.1 ? 'text-slate-500'
+                                  : avgDev > 0 ? 'text-emerald-600'
+                                  : 'text-rose-600'
+                                }`}>
+                                  {avgDev > 0 ? '+' : ''}{avgDev.toFixed(2).replace('.', ',')}
+                                </div>
+                              )}
+                            </td>
+                          )
+                        }
+                      })()}
                     </tr>
                     {isExpanded && (
                       <tr className="bg-slate-50 border-b border-slate-200">
-                        <td colSpan={schoolYears.length + 2} className="py-3 px-3 space-y-3">
+                        <td colSpan={schoolYears.length + 3} className="py-3 px-3 space-y-3">
                           <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                             <div className="rounded-lg border border-slate-200 bg-white p-3">
                               <div className="flex items-center justify-between mb-2">
@@ -1279,8 +1420,24 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                           })()}
                           {viewMode === 'subject' && (
                             <div className="rounded-lg border border-slate-200 bg-white">
-                              <div className="px-3 py-2 border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                Lærere i faget (kryss av for å legge til i grafene)
+                              <div className="px-3 py-2 border-b border-slate-200 flex items-center justify-between">
+                                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Lærere i faget (kryss av for å legge til i grafene)</span>
+                                {subjectTeacherRows.length > 0 && (
+                                  <button
+                                    type="button"
+                                    className="text-xs text-sky-600 hover:text-sky-800 font-medium"
+                                    onClick={() => {
+                                      const allKeys = subjectTeacherRows.map(tr => tr.key)
+                                      const allSelected = allKeys.every(k => selectedTeacherKeys.includes(k))
+                                      setSelectedTeacherKeysBySubject(prev => ({
+                                        ...prev,
+                                        [row.label]: allSelected ? [] : allKeys,
+                                      }))
+                                    }}
+                                  >
+                                    {subjectTeacherRows.every(tr => selectedTeacherKeys.includes(tr.key)) ? 'Fjern alle' : 'Velg alle'}
+                                  </button>
+                                )}
                               </div>
                               {subjectTeacherRows.length === 0 ? (
                                 <div className="px-3 py-3 text-sm text-slate-500">Ingen lærerdata for denne fagkoden.</div>
