@@ -157,6 +157,7 @@ function TrendGraph({
   labelMap?: Record<string, string>
   xAxisLabelFilter?: (label: string) => boolean
 }) {
+  const [hoveredSeries, setHoveredSeries] = useState<string | null>(null)
   const padX = 42
   const padY = 24
 
@@ -246,12 +247,18 @@ function TrendGraph({
           }
           return null
         })}
-        {seriesPoints.map((s, seriesIdx) => (
-          <g key={s.name}>
+        {seriesPoints.map((s, seriesIdx) => {
+          const isHovered = hoveredSeries === s.name
+          const anyHovered = hoveredSeries !== null
+          const baseWidth = s.isMainLine ? 2.75 : 1.5
+          const strokeWidth = isHovered ? baseWidth + 2 : anyHovered ? baseWidth * 0.45 : baseWidth
+          const opacity = anyHovered && !isHovered ? 0.3 : 1
+          return (
+          <g key={s.name} style={{ opacity }}>
             <polyline
               fill="none"
               stroke={s.color}
-              strokeWidth={s.isMainLine ? '2.75' : '1.5'}
+              strokeWidth={String(strokeWidth)}
               strokeDasharray={s.isMainLine && seriesIdx > 0 ? '6 3' : s.dashed ? '4 2' : undefined}
               points={s.points.map(p => `${p.x},${p.y}`).join(' ')}
             />
@@ -284,7 +291,8 @@ function TrendGraph({
               )
             })}
           </g>
-        ))}
+          )
+        })}
         {labels.map((label, idx) => {
           const x = padX + (idx * (width - padX * 2)) / Math.max(1, labels.length - 1)
           const showLabel = !xAxisLabelFilter || xAxisLabelFilter(label)
@@ -309,7 +317,13 @@ function TrendGraph({
       </svg>
       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-600">
         {series.map(s => (
-          <div key={`legend-${s.name}`} className="inline-flex items-center gap-1.5">
+          <div
+            key={`legend-${s.name}`}
+            className="inline-flex items-center gap-1.5 cursor-pointer select-none"
+            style={{ opacity: hoveredSeries !== null && hoveredSeries !== s.name ? 0.4 : 1, fontWeight: hoveredSeries === s.name ? 700 : undefined }}
+            onMouseEnter={() => setHoveredSeries(s.name)}
+            onMouseLeave={() => setHoveredSeries(null)}
+          >
             {s.isMainLine && !!s.connectTo ? (
               <svg width="16" height="8" aria-hidden="true" className="block">
                 <line x1="0" y1="4" x2="16" y2="4" stroke={s.color} strokeWidth="2" strokeDasharray="4 3" />
@@ -335,6 +349,9 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
   const [selectedTeacherKeysBySubject, setSelectedTeacherKeysBySubject] = useState<Record<string, string[]>>({})
   const [anonymizeTeachers, setAnonymizeTeachers] = useState(false)
   const [linkedSubjectsByKey, setLinkedSubjectsByKey] = useState<Record<string, string[]>>({})
+  const [linkedSubjectColors, setLinkedSubjectColors] = useState<Record<string, string>>({})
+  const [collapsedLinkPanels, setCollapsedLinkPanels] = useState<Record<string, boolean>>({})
+  const [teacherSubjectBreakdownByKey, setTeacherSubjectBreakdownByKey] = useState<Record<string, boolean>>({})
   const [tableSortKey, setTableSortKey] = useState<string | null>(null)
   const [tableSortDir, setTableSortDir] = useState<'asc' | 'desc'>('asc')
   const [expandedGraph, setExpandedGraph] = useState<null | {
@@ -448,6 +465,48 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
       )
     })
 
+    return sorted
+  }, [allGrades])
+
+  const subjectRowsByTeacher = useMemo(() => {
+    const source = allGrades.filter(g => g.skoleår)
+    const teacherMap = new Map<string, Map<string, TrendRow>>()
+
+    source.forEach(g => {
+      const schoolYear = g.skoleår?.replace(/[^0-9A-Za-z]/g, '')
+      if (!schoolYear) return
+      const numeric = gradeToNumeric(g.grade)
+      if (numeric === null) return
+      const teacher = g.subjectTeacher?.trim() || 'Ukjent lærer'
+      const subject = g.fagkode?.trim() || 'Ukjent fagkode'
+      const subjectSafeKey = `teacher-subject::${teacher}::${subject}`
+
+      if (!teacherMap.has(teacher)) teacherMap.set(teacher, new Map())
+      const bySubject = teacherMap.get(teacher)!
+
+      if (!bySubject.has(subjectSafeKey)) {
+        bySubject.set(subjectSafeKey, {
+          key: subjectSafeKey,
+          label: subject,
+          yearly: {},
+          yearlyH1: {},
+          yearlyH2: {},
+          termSeries: {},
+        })
+      }
+
+      const row = bySubject.get(subjectSafeKey)!
+      addAggregate(row.yearly, schoolYear, numeric)
+      const term = normalizeHalvaar(g.halvår)
+      if (term === 'H1') addAggregate(row.yearlyH1, schoolYear, numeric)
+      if (term === 'H2') addAggregate(row.yearlyH2, schoolYear, numeric)
+      if (term) addAggregate(row.termSeries, `${schoolYear} ${term}`, numeric)
+    })
+
+    const sorted = new Map<string, TrendRow[]>()
+    teacherMap.forEach((subjectMap, teacher) => {
+      sorted.set(teacher, Array.from(subjectMap.values()).sort((a, b) => a.label.localeCompare(b.label, 'nb-NO')))
+    })
     return sorted
   }, [allGrades])
 
@@ -953,15 +1012,23 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                 const selectedTeacherRows = subjectTeacherRows.filter(teacherRow => selectedTeacherKeys.includes(teacherRow.key))
                 const linkedKeys = linkedSubjectsByKey[row.key] ?? []
                 const linkedRows = filteredRows.filter(r => r.key !== row.key && linkedKeys.includes(r.key))
+                const getLinkedColor = (key: string) => linkedSubjectColors[key] ?? '#0284c7'
+                const teacherSubjectRows = viewMode === 'teacher' ? (subjectRowsByTeacher.get(row.label) ?? []) : []
+                const showSubjectBreakdown = viewMode === 'teacher' && !!teacherSubjectBreakdownByKey[row.key]
                 const h2Series: GraphSeries[] = [
                   { name: row.label, values: row.yearlyH2, color: '#0284c7', isMainLine: true },
                   ...linkedRows.map((linkedRow) => ({
                     name: linkedRow.label,
                     values: linkedRow.yearlyH2,
-                    color: '#0284c7',
+                    color: getLinkedColor(linkedRow.key),
                     isMainLine: true as const,
                     connectTo: row.label,
                   })),
+                  ...(showSubjectBreakdown ? teacherSubjectRows.map((subjectRow, i) => ({
+                    name: getFagnavn(subjectRow.label),
+                    values: subjectRow.yearlyH2,
+                    color: TEACHER_SERIES_COLORS[i % TEACHER_SERIES_COLORS.length],
+                  })) : []),
                   ...selectedTeacherRows.flatMap((teacherRow) => {
                     const stableIdx = subjectTeacherRows.indexOf(teacherRow)
                     const color = TEACHER_SERIES_COLORS[stableIdx % TEACHER_SERIES_COLORS.length]
@@ -982,10 +1049,15 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                   ...linkedRows.map((linkedRow) => ({
                     name: linkedRow.label,
                     values: linkedRow.termSeries,
-                    color: '#0284c7',
+                    color: getLinkedColor(linkedRow.key),
                     isMainLine: true as const,
                     connectTo: row.label,
                   })),
+                  ...(showSubjectBreakdown ? teacherSubjectRows.map((subjectRow, i) => ({
+                    name: getFagnavn(subjectRow.label),
+                    values: subjectRow.termSeries,
+                    color: TEACHER_SERIES_COLORS[i % TEACHER_SERIES_COLORS.length],
+                  })) : []),
                   ...selectedTeacherRows.flatMap((teacherRow) => {
                     const stableIdx = subjectTeacherRows.indexOf(teacherRow)
                     const color = TEACHER_SERIES_COLORS[stableIdx % TEACHER_SERIES_COLORS.length]
@@ -1113,42 +1185,98 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                             </div>
                           </div>
 
-                          {viewMode === 'subject' && filteredRows.length > 1 && (
+                          {viewMode === 'teacher' && teacherSubjectRows.length > 0 && (
                             <div className="rounded-lg border border-slate-200 bg-white">
-                              <div className="px-3 py-2 border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                Koble til andre fag (overlay i grafene)
+                              <div className="px-3 py-2 flex items-center justify-between border-b border-slate-200">
+                                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Vis i grafene</span>
+                                <div className="inline-flex rounded-md border border-slate-300 overflow-hidden text-xs font-medium">
+                                  <button
+                                    type="button"
+                                    className={`px-3 py-1 ${!showSubjectBreakdown ? 'bg-sky-600 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
+                                    onClick={() => setTeacherSubjectBreakdownByKey(prev => ({ ...prev, [row.key]: false }))}
+                                  >
+                                    Snitt
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`px-3 py-1 border-l border-slate-300 ${showSubjectBreakdown ? 'bg-sky-600 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
+                                    onClick={() => setTeacherSubjectBreakdownByKey(prev => ({ ...prev, [row.key]: true }))}
+                                  >
+                                    Per fag
+                                  </button>
+                                </div>
                               </div>
-                              <div className="divide-y divide-slate-200">
-                                {filteredRows.filter(r => r.key !== row.key).map((otherRow) => {
-                                  const isLinked = (linkedSubjectsByKey[row.key] ?? []).includes(otherRow.key)
-                                  const color = '#0284c7'
-                                  return (
-                                    <div key={otherRow.key} className="px-3 py-2">
-                                      <label className="inline-flex items-center gap-2 text-sm text-slate-800 cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          checked={isLinked}
-                                          onChange={e => {
-                                            const checked = e.currentTarget.checked
-                                            setLinkedSubjectsByKey(prev => {
-                                              const current = prev[row.key] ?? []
-                                              const next = checked
-                                                ? Array.from(new Set([...current, otherRow.key]))
-                                                : current.filter(k => k !== otherRow.key)
-                                              return { ...prev, [row.key]: next }
-                                            })
-                                          }}
-                                          className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
-                                        />
-                                        <span className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-                                        {otherRow.label}
-                                      </label>
-                                    </div>
-                                  )
-                                })}
-                              </div>
+                              {showSubjectBreakdown && (
+                                <div className="px-3 py-2 flex flex-wrap gap-2">
+                                  {teacherSubjectRows.map((subjectRow, i) => (
+                                    <span key={subjectRow.key} className="inline-flex items-center gap-1.5 text-xs text-slate-700">
+                                      <span className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: TEACHER_SERIES_COLORS[i % TEACHER_SERIES_COLORS.length] }} />
+                                      {getFagnavn(subjectRow.label)}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           )}
+
+                          {viewMode === 'subject' && filteredRows.length > 1 && (() => {
+                            const isLinkPanelCollapsed = collapsedLinkPanels[row.key] !== false
+                            return (
+                              <div className="rounded-lg border border-slate-200 bg-white">
+                                <button
+                                  type="button"
+                                  className="w-full flex items-center justify-between px-3 py-2 border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500 hover:bg-slate-50"
+                                  onClick={() => setCollapsedLinkPanels(prev => ({ ...prev, [row.key]: !isLinkPanelCollapsed }))}
+                                >
+                                  <span>Koble til andre fag (overlay i grafene)</span>
+                                  {isLinkPanelCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                </button>
+                                {!isLinkPanelCollapsed && (
+                                  <div className="divide-y divide-slate-200">
+                                    {filteredRows.filter(r => r.key !== row.key).map((otherRow) => {
+                                      const isLinked = (linkedSubjectsByKey[row.key] ?? []).includes(otherRow.key)
+                                      const color = getLinkedColor(otherRow.key)
+                                      return (
+                                        <div key={otherRow.key} className="px-3 py-2 flex items-center gap-2">
+                                          <input
+                                            type="checkbox"
+                                            checked={isLinked}
+                                            onChange={e => {
+                                              const checked = e.currentTarget.checked
+                                              setLinkedSubjectsByKey(prev => {
+                                                const current = prev[row.key] ?? []
+                                                const next = checked
+                                                  ? Array.from(new Set([...current, otherRow.key]))
+                                                  : current.filter(k => k !== otherRow.key)
+                                                return { ...prev, [row.key]: next }
+                                              })
+                                            }}
+                                            className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                                          />
+                                          <label
+                                            className="relative flex-shrink-0 w-4 h-4 rounded-full cursor-pointer overflow-hidden"
+                                            title="Velg farge"
+                                            style={{ backgroundColor: color }}
+                                          >
+                                            <input
+                                              type="color"
+                                              value={color}
+                                              onChange={e => {
+                                                const newColor = e.currentTarget.value
+                                                setLinkedSubjectColors(prev => ({ ...prev, [otherRow.key]: newColor }))
+                                              }}
+                                              className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+                                            />
+                                          </label>
+                                          <span className="text-sm text-slate-800">{otherRow.label}</span>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })()}
                           {viewMode === 'subject' && (
                             <div className="rounded-lg border border-slate-200 bg-white">
                               <div className="px-3 py-2 border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500">

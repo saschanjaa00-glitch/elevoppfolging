@@ -36,6 +36,7 @@ interface ClassStats {
   missingWarningStudentCount: number
   avgGrunnskolepoeng: number | null
   avgGrade: number | null
+  avgGradeT1: number | null
 }
 
 type MetricKey =
@@ -71,6 +72,7 @@ interface LevelStats {
   missingWarningStudentCount: number
   avgGrunnskolepoeng: number | null
   avgGrade: number | null
+  avgGradeT1: number | null
 }
 
 type SortKey =
@@ -82,7 +84,9 @@ type SortKey =
   | 'missingWarnings'
   | 'avgGrunnskolepoeng'
   | 'avgGrade'
+  | 'avgGradeT1'
   | 'avgGradeDelta'
+  | 'avgGradeDeltaT1'
 
 type SortDirection = 'asc' | 'desc'
 
@@ -174,6 +178,7 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
   const [selectedMetric, setSelectedMetric] = useState<MetricKey | null>(null)
   const [tableSort, setTableSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null)
   const [vgFilter, setVgFilter] = useState<string | null>(null)
+  const [termFilter, setTermFilter] = useState<'1' | '2'>('1')
   const [localThreshold, setLocalThreshold] = useState<number>(propThreshold)
   const threshold = localThreshold
   const summaryRef = useRef<HTMLDivElement>(null)
@@ -285,167 +290,251 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
     s1.addText(`${stats.overall.studentCount} elever \u00b7 ${stats.perClass.length} klasser`, { x: 0.6, y: 3.1, w: 8.8, h: 0.5, fontSize: 14, color: '7AAABB' })
     s1.addText('Generert av Oppfølging', { x: 0.6, y: 4.55, w: 8.8, h: 0.55, fontSize: 12, color: WHITE, valign: 'middle' })
 
-    // ── Slide 2: Totaloversikt ───────────────────────────────────────────
-    const s2 = pptx.addSlide()
-    s2.background = { color: 'F8FAFC' }
-    addHeader(s2 as any, 'Totaloversikt')
-    // 3×3 grid of cards (shrunk to fit 9 cards)
-    const totalCards = [
-      { label: 'Elever', value: String(stats.overall.studentCount), sub: null, warn: false },
-      { label: 'Gj.snitt fravær', value: `${fmt(stats.overall.avgAbsence, 1)}%`, sub: null, warn: false },
-      { label: 'Elever over 10% fravær', value: String(studentsOver10.size), sub: `${subjectsOver10.size} fag over 10%`, warn: studentsOver10.size > 0 },
-      { label: 'IV', value: String(stats.overall.ivCount), sub: `${stats.overall.ivStudentCount} elever`, warn: false },
-      { label: 'Karakter 1', value: String(stats.overall.grade1Count), sub: `${stats.overall.grade1StudentCount} elever`, warn: false },
-      { label: 'Varsler totalt', value: String(stats.overall.totalWarnings), sub: null, warn: false },
-      { label: `Manglende varsler (>${threshold}%)`, value: String(stats.overall.missingWarnings), sub: `${stats.overall.missingWarningStudentCount} elever`, warn: true },
-      { label: `Manglende varsler >10%`, value: String(missingWarningsOver10Students.size), sub: `${missingWarningsOver10Subjects.size} fag uten varsel`, warn: missingWarningsOver10Students.size > 0 },
-    ]
-    totalCards.forEach((card, i) => {
-      const col = i % 3
-      const row = Math.floor(i / 3)
-      const x = 0.3 + col * 3.2
-      const y = 0.85 + row * 1.45
-      const h = 1.3
-      s2.addShape('rect', { x, y, w: 3.0, h, fill: { color: card.warn ? 'FFF7ED' : WHITE }, line: { color: card.warn ? 'FDB07E' : 'CBD5E1', width: 1 } })
-      s2.addText(card.label, { x, y: y + 0.08, w: 3.0, h: 0.32, fontSize: 8, color: SLATE, align: 'center' })
-      s2.addText(card.value, { x, y: y + 0.38, w: 3.0, h: 0.62, fontSize: 26, bold: true, color: card.warn ? 'C2410C' : TEXT, align: 'center' })
-      if (card.sub) s2.addText(card.sub, { x, y: y + 1.02, w: 3.0, h: 0.24, fontSize: 7.5, color: SLATE, align: 'center' })
-    })
-    levelStats.forEach((ls, i) => {
-      const x = 0.3 + i * 3.2
-      s2.addText(`Vg${ls.level}: ${ls.studentCount} elever \u00b7 ${fmt(ls.avgAbsence, 1)}% fravær`, { x, y: 5.2, w: 3.0, h: 0.28, fontSize: 8, color: SLATE, align: 'center' })
-    })
-
-    // ── Slides per trinn ────────────────────────────────────────────────
-    // Build grade distribution by class (T1 only) — used in per-trinn and karakterfordeling slides
-    const gradeDistByClass = new Map<string, Map<string, number>>()
-    data.grades.forEach(g => {
-      const h = g.halvår.toString().trim()
-      if (!(h === '1' || h.toLowerCase().includes('1'))) return
-      const resolvedClass = g.class?.trim()
-      if (!resolvedClass) return
-      const gradeVal = g.grade.trim().toUpperCase()
-      if (!['1','2','3','4','5','6','IV'].includes(gradeVal)) return
-      if (!gradeDistByClass.has(resolvedClass)) gradeDistByClass.set(resolvedClass, new Map())
-      const dist = gradeDistByClass.get(resolvedClass)!
-      dist.set(gradeVal, (dist.get(gradeVal) ?? 0) + 1)
-    })
-
-    for (const ls of levelStats) {
-      const classRows = stats.perClass.filter(c => c.className.startsWith(ls.level))
-      const labels = classRows.map(c => c.className)
-
-      const slide = pptx.addSlide()
-      slide.background = { color: 'F8FAFC' }
-      addHeader(slide as any, `Vg${ls.level} \u2013 ${ls.studentCount} elever i ${ls.classCount} klasser`)
-
-      // Left: key metrics
-      const leftMetrics = [
-        { label: 'Gj.snitt fravær', value: `${fmt(ls.avgAbsence, 1)}%` },
-        { label: 'IV', value: `${ls.ivCount} (${ls.ivStudentCount} elever)` },
-        { label: 'Karakter 1', value: `${ls.grade1Count} (${ls.grade1StudentCount} elever)` },
-        { label: 'Neg. karakterer', value: `${ls.negativeStudentsCount} (${fmt(ls.negativeStudentsPct, 1)}%)` },
-        { label: 'Varsler F', value: String(ls.fWarnings) },
-        { label: 'Varsler G', value: String(ls.gWarnings) },
-        { label: 'Manglende varsler >5%', value: `${ls.missingWarningStudentCount} elever` },
-      ]
-      leftMetrics.forEach((m, i) => {
-        const y = 0.9 + i * 0.64
-        slide.addText(m.label + ':', { x: 0.2, y, w: 1.8, h: 0.55, fontSize: 9.5, color: SLATE, valign: 'middle' })
-        slide.addText(m.value, { x: 2.0, y, w: 1.6, h: 0.55, fontSize: 10.5, bold: true, color: TEXT, valign: 'middle' })
+    // ── Helpers: build per-term grade data ──────────────────────────────
+    const buildTermGradeData = (term: '1' | '2') => {
+      const gradeDist = new Map<string, Map<string, number>>()
+      const gradesByStudent = new Map<string, string[]>()
+      data.grades.forEach(g => {
+        const h = g.halvår.toString().trim()
+        const isT1 = h === '1' || (h.toLowerCase().includes('1') && !h.toLowerCase().includes('2'))
+        const isT2 = h === '2' || (h.toLowerCase().includes('2') && !h.toLowerCase().includes('1'))
+        if (term === '1' ? !isT1 : !isT2) return
+        const resolvedClass = g.class?.trim()
+        if (!resolvedClass) return
+        const key = buildStudentClassKey(g.navn, resolvedClass)
+        if (!gradesByStudent.has(key)) gradesByStudent.set(key, [])
+        gradesByStudent.get(key)!.push(g.grade)
+        const gradeVal = g.grade.trim().toUpperCase()
+        if (['1','2','3','4','5','6','IV'].includes(gradeVal)) {
+          if (!gradeDist.has(resolvedClass)) gradeDist.set(resolvedClass, new Map())
+          const dist = gradeDist.get(resolvedClass)!
+          dist.set(gradeVal, (dist.get(gradeVal) ?? 0) + 1)
+        }
       })
+      const perClassGrades = stats.perClass.map(c => {
+        const studentKeys = new Set(data.absences.filter(r => r.class === c.className).map(r => buildStudentClassKey(r.navn, r.class)))
+        let ivCount = 0, ivStudentCount = 0, grade1Count = 0, grade1StudentCount = 0
+        let grade2Count = 0, grade2StudentCount = 0, bothIvAnd1StudentCount = 0
+        const numericGrades: number[] = []
+        studentKeys.forEach(studentKey => {
+          const grades = gradesByStudent.get(studentKey) ?? []
+          let hasIv = false, hasGrade1 = false, hasGrade2 = false
+          grades.forEach(g => {
+            const lower = g.toLowerCase().trim()
+            if (lower === 'iv') { ivCount++; hasIv = true }
+            else if (g === '1') { grade1Count++; hasGrade1 = true }
+            else if (g === '2') { grade2Count++; hasGrade2 = true }
+            const num = parseInt(g)
+            if (!isNaN(num) && num >= 1 && num <= 6) numericGrades.push(num)
+          })
+          if (hasIv) ivStudentCount++
+          if (hasGrade1) grade1StudentCount++
+          if (hasGrade2) grade2StudentCount++
+          if (hasIv && hasGrade1) bothIvAnd1StudentCount++
+        })
+        const avgGrade = numericGrades.length > 0 ? numericGrades.reduce((a, b) => a + b, 0) / numericGrades.length : null
+        const negativeStudentsCount = ivStudentCount + grade1StudentCount - bothIvAnd1StudentCount
+        return { ...c, ivCount, ivStudentCount, grade1Count, grade1StudentCount, grade2Count, grade2StudentCount, bothIvAnd1StudentCount, negativeStudentsCount, negativeStudentsPct: c.studentCount > 0 ? (negativeStudentsCount / c.studentCount) * 100 : 0, avgGrade }
+      })
+      const lvlStats = levelStats.map(ls => {
+        const classRows = perClassGrades.filter(c => c.className.startsWith(ls.level))
+        const ivStudentCount = classRows.reduce((s, c) => s + c.ivStudentCount, 0)
+        const grade1StudentCount = classRows.reduce((s, c) => s + c.grade1StudentCount, 0)
+        const bothIvAnd1StudentCount = classRows.reduce((s, c) => s + c.bothIvAnd1StudentCount, 0)
+        const negativeStudentsCount = ivStudentCount + grade1StudentCount - bothIvAnd1StudentCount
+        const gradeValues = classRows.map(c => c.avgGrade).filter((v): v is number => v !== null)
+        return { ...ls, ivCount: classRows.reduce((s, c) => s + c.ivCount, 0), ivStudentCount, grade1Count: classRows.reduce((s, c) => s + c.grade1Count, 0), grade1StudentCount, grade2Count: classRows.reduce((s, c) => s + c.grade2Count, 0), grade2StudentCount: classRows.reduce((s, c) => s + c.grade2StudentCount, 0), bothIvAnd1StudentCount, negativeStudentsCount, negativeStudentsPct: ls.studentCount > 0 ? (negativeStudentsCount / ls.studentCount) * 100 : 0, avgGrade: gradeValues.length > 0 ? gradeValues.reduce((a, b) => a + b, 0) / gradeValues.length : null }
+      })
+      return { gradeDist, perClassGrades, lvlStats }
+    }
 
-      // Right top: absence bar chart
-      slide.addChart('bar', [{ name: 'Fravær %', labels, values: classRows.map(c => parseFloat(c.avgAbsence.toFixed(1))) }] as any, {
-        x: 3.9, y: 0.8, w: 5.8, h: 2.3,
-        barDir: 'col',
-        chartColors: [BLUE],
-        showValue: true,
-        dataLabelFontSize: 8,
-        dataLabelFormatCode: '0.0',
-        catAxisLabelFontSize: 8,
-        valAxisMinVal: 0,
-        valAxisMaxVal: 30,
-        valGridLine: { color: 'D9D9D9' },
-        valAxisLineColor: '000000',
-        showTitle: true,
-        title: 'Gj.snitt fravær %',
-        titleFontSize: 10,
-      } as any)
+    type TermGradeData = ReturnType<typeof buildTermGradeData>
 
-      // Right bottom: grades chart
-      slide.addChart('bar', [
-        { name: 'IV', labels, values: classRows.map(c => c.ivCount) },
-        { name: 'Karakter 1', labels, values: classRows.map(c => c.grade1Count) },
-        { name: 'Karakter 2', labels, values: classRows.map(c => c.grade2Count) },
-      ] as any, {
-        x: 3.9, y: 3.2, w: 5.8, h: 2.3,
-        barDir: 'col',
-        barGrouping: 'clustered',
-        chartColors: [RED, AMBER, '60A5FA'],
-        showValue: true,
-        dataLabelFontSize: 8,
-        catAxisLabelFontSize: 8,
-        valGridLine: { color: 'D9D9D9' },
-        valAxisLineColor: '000000',
-        showTitle: true,
-        title: 'IV / Karakter 1 / Karakter 2',
-        titleFontSize: 10,
-        showLegend: true,
-        legendFontSize: 8,
-        legendPos: 'b',
-      } as any)
+    const addTotaloversikt = (termLabel: string, tData: TermGradeData) => {
+      const { perClassGrades } = tData
+      const tIvCount = perClassGrades.reduce((s, c) => s + c.ivCount, 0)
+      const tIvStudentCount = perClassGrades.reduce((s, c) => s + c.ivStudentCount, 0)
+      const tGrade1Count = perClassGrades.reduce((s, c) => s + c.grade1Count, 0)
+      const tGrade1StudentCount = perClassGrades.reduce((s, c) => s + c.grade1StudentCount, 0)
+      const st = pptx.addSlide()
+      st.background = { color: 'F8FAFC' }
+      addHeader(st as any, `Totaloversikt (${termLabel})`)
+      const totalCards = [
+        { label: 'Elever', value: String(stats.overall.studentCount), sub: null, warn: false },
+        { label: 'Gj.snitt fravær', value: `${fmt(stats.overall.avgAbsence, 1)}%`, sub: null, warn: false },
+        { label: 'Elever over 10% fravær', value: String(studentsOver10.size), sub: `${subjectsOver10.size} fag over 10%`, warn: studentsOver10.size > 0 },
+        { label: 'IV', value: String(tIvCount), sub: `${tIvStudentCount} elever`, warn: false },
+        { label: 'Karakter 1', value: String(tGrade1Count), sub: `${tGrade1StudentCount} elever`, warn: false },
+        { label: 'Varsler totalt', value: String(stats.overall.totalWarnings), sub: null, warn: false },
+        { label: `Manglende varsler (>${threshold}%)`, value: String(stats.overall.missingWarnings), sub: `${stats.overall.missingWarningStudentCount} elever`, warn: true },
+        { label: `Manglende varsler >10%`, value: String(missingWarningsOver10Students.size), sub: `${missingWarningsOver10Subjects.size} fag uten varsel`, warn: missingWarningsOver10Students.size > 0 },
+      ]
+      totalCards.forEach((card, i) => {
+        const col = i % 3
+        const row = Math.floor(i / 3)
+        const x = 0.3 + col * 3.2
+        const y = 0.85 + row * 1.45
+        const h = 1.3
+        st.addShape('rect', { x, y, w: 3.0, h, fill: { color: card.warn ? 'FFF7ED' : WHITE }, line: { color: card.warn ? 'FDB07E' : 'CBD5E1', width: 1 } })
+        st.addText(card.label, { x, y: y + 0.08, w: 3.0, h: 0.32, fontSize: 8, color: SLATE, align: 'center' })
+        st.addText(card.value, { x, y: y + 0.38, w: 3.0, h: 0.62, fontSize: 26, bold: true, color: card.warn ? 'C2410C' : TEXT, align: 'center' })
+        if (card.sub) st.addText(card.sub, { x, y: y + 1.02, w: 3.0, h: 0.24, fontSize: 7.5, color: SLATE, align: 'center' })
+      })
+      levelStats.forEach((ls, i) => {
+        const x = 0.3 + i * 3.2
+        st.addText(`Vg${ls.level}: ${ls.studentCount} elever \u00b7 ${fmt(ls.avgAbsence, 1)}% fravær`, { x, y: 5.2, w: 3.0, h: 0.28, fontSize: 8, color: SLATE, align: 'center' })
+      })
+    }
 
-      // ── Grade spread slide for this trinn ──────────────────────────────
+    const addTermSlides = (termLabel: string, tData: TermGradeData) => {
+      const { gradeDist, perClassGrades, lvlStats } = tData
       const gradeKeys = ['IV', '1', '2', '3', '4', '5', '6']
       const gradeColors = [RED, 'F97316', AMBER, 'FDE68A', '86EFAC', '22C55E', '166534']
-      // Aggregate grade counts across all classes in this trinn
-      const trinnGradeCounts = gradeKeys.map(gk =>
-        classRows.reduce((sum, c) => sum + (gradeDistByClass.get(c.className)?.get(gk) ?? 0), 0)
-      )
-      const totalGradesInTrinn = trinnGradeCounts.reduce((a, b) => a + b, 0)
-      if (totalGradesInTrinn > 0) {
-        const sg2 = pptx.addSlide()
-        sg2.background = { color: 'F8FAFC' }
-        addHeader(sg2 as any, `Vg${ls.level} \u2013 Karakterspredning snitt (T1)`)
-        // Left: bar chart one bar per grade
-        sg2.addChart('bar', gradeKeys.map((gk, gi) => ({
+
+      // ── Per-trinn overview + grade spread slides ──
+      for (const ls of lvlStats) {
+        const classRows = perClassGrades.filter(c => c.className.startsWith(ls.level))
+        const labels = classRows.map(c => c.className)
+        const slide = pptx.addSlide()
+        slide.background = { color: 'F8FAFC' }
+        addHeader(slide as any, `Vg${ls.level} \u2013 ${ls.studentCount} elever i ${ls.classCount} klasser`)
+        const leftMetrics = [
+          { label: 'Gj.snitt fravær', value: `${fmt(ls.avgAbsence, 1)}%` },
+          { label: 'IV', value: `${ls.ivCount} (${ls.ivStudentCount} elever)` },
+          { label: 'Karakter 1', value: `${ls.grade1Count} (${ls.grade1StudentCount} elever)` },
+          { label: 'Neg. karakterer', value: `${ls.negativeStudentsCount} (${fmt(ls.negativeStudentsPct, 1)}%)` },
+          { label: 'Varsler F', value: String(ls.fWarnings) },
+          { label: 'Varsler G', value: String(ls.gWarnings) },
+          { label: 'Manglende varsler >5%', value: `${ls.missingWarningStudentCount} elever` },
+        ]
+        leftMetrics.forEach((m, i) => {
+          const y = 0.9 + i * 0.64
+          slide.addText(m.label + ':', { x: 0.2, y, w: 1.8, h: 0.55, fontSize: 9.5, color: SLATE, valign: 'middle' })
+          slide.addText(m.value, { x: 2.0, y, w: 1.6, h: 0.55, fontSize: 10.5, bold: true, color: TEXT, valign: 'middle' })
+        })
+        slide.addChart('bar', [{ name: 'Fravær %', labels, values: classRows.map(c => parseFloat(c.avgAbsence.toFixed(1))) }] as any, {
+          x: 3.9, y: 0.8, w: 5.8, h: 2.3, barDir: 'col', chartColors: [BLUE], showValue: true,
+          dataLabelFontSize: 8, dataLabelFormatCode: '0.0', catAxisLabelFontSize: 8,
+          valAxisMinVal: 0, valAxisMaxVal: 30, valGridLine: { color: 'D9D9D9' }, valAxisLineColor: '000000',
+          showTitle: true, title: 'Gj.snitt fravær %', titleFontSize: 10,
+        } as any)
+        slide.addChart('bar', [
+          { name: 'IV', labels, values: classRows.map(c => c.ivCount) },
+          { name: 'Karakter 1', labels, values: classRows.map(c => c.grade1Count) },
+          { name: 'Karakter 2', labels, values: classRows.map(c => c.grade2Count) },
+        ] as any, {
+          x: 3.9, y: 3.2, w: 5.8, h: 2.3, barDir: 'col', barGrouping: 'clustered',
+          chartColors: [RED, AMBER, '60A5FA'], showValue: true, dataLabelFontSize: 8, catAxisLabelFontSize: 8,
+          valGridLine: { color: 'D9D9D9' }, valAxisLineColor: '000000',
+          showTitle: true, title: 'IV / Karakter 1 / Karakter 2', titleFontSize: 10, showLegend: true, legendFontSize: 8, legendPos: 'b',
+        } as any)
+        // Grade spread slide
+        const trinnGradeCounts = gradeKeys.map(gk => classRows.reduce((sum, c) => sum + (gradeDist.get(c.className)?.get(gk) ?? 0), 0))
+        const totalGradesInTrinn = trinnGradeCounts.reduce((a, b) => a + b, 0)
+        if (totalGradesInTrinn > 0) {
+          const sg2 = pptx.addSlide()
+          sg2.background = { color: 'F8FAFC' }
+          addHeader(sg2 as any, `Vg${ls.level} \u2013 Karakterspredning snitt (${termLabel})`)
+          sg2.addChart('bar', gradeKeys.map((gk, gi) => ({ name: gk, labels: [gk], values: [trinnGradeCounts[gi]] })) as any, {
+            x: 0.3, y: 0.85, w: 5.0, h: 4.5, barDir: 'col', barGrouping: 'clustered', chartColors: gradeColors,
+            showValue: true, dataLabelFontSize: 10, catAxisLabelFontSize: 11,
+            valGridLine: { color: 'D9D9D9' }, valAxisLineColor: '000000',
+            showTitle: true, title: 'Antall karakterer (alle klasser i trinnet)', titleFontSize: 10, showLegend: false,
+          } as any)
+          sg2.addChart('pie', [{ name: 'Karakterfordeling', labels: gradeKeys, values: trinnGradeCounts }] as any, {
+            x: 5.5, y: 0.85, w: 4.2, h: 4.5, chartColors: gradeColors, showValue: false, showPercent: true,
+            dataLabelFontSize: 9, showTitle: true, title: 'Fordeling (%)', titleFontSize: 10,
+            showLegend: true, legendFontSize: 9, legendPos: 'b',
+          } as any)
+        }
+      }
+
+      // ── Inntakspoeng delta slides ──
+      for (const ls of lvlStats) {
+        const classRows = perClassGrades.filter(c => c.className.startsWith(ls.level) && c.avgGrunnskolepoeng !== null && c.avgGrade !== null)
+        if (classRows.length === 0) continue
+        const labels = classRows.map(c => c.className)
+        const deltas = classRows.map(c => parseFloat((c.avgGrade! - c.avgGrunnskolepoeng!).toFixed(2)))
+        const si = pptx.addSlide()
+        si.background = { color: 'F8FAFC' }
+        addHeader(si as any, `Vg${ls.level} \u2013 Inntakspoeng: \u0394 VGS-snitt (${termLabel}) minus grunnskolepoeng`)
+        si.addChart('bar', [
+          { name: 'Positiv utvikling (\u2191)', labels, values: deltas.map(d => d >= 0 ? d : null) },
+          { name: 'Negativ utvikling (\u2193)', labels, values: deltas.map(d => d < 0 ? d : null) },
+        ] as any, {
+          x: 0.3, y: 0.85, w: 9.4, h: 4.6, barDir: 'col', barGrouping: 'stacked',
+          chartColors: ['166534', 'C0392B'], showValue: true, dataLabelFontSize: 9, dataLabelFormatCode: '0.00',
+          valGridLine: { color: 'D9D9D9' }, valAxisLineColor: '000000', catAxisLabelFontSize: 9,
+          valAxisMinVal: Math.min(...deltas) < 0 ? Math.floor(Math.min(...deltas)) - 0.5 : -1,
+          valAxisMaxVal: Math.max(...deltas) > 0 ? Math.ceil(Math.max(...deltas)) + 0.5 : 1,
+          showTitle: true, title: `\u0394 = Snitt VGS ${termLabel} \u2212 Inntakspoeng (grunnskole) \u2014 baseline 0`,
+          titleFontSize: 10, showLegend: true, legendFontSize: 9,
+        } as any)
+      }
+
+      // ── Karakterfordeling per klasse ──
+      for (const ls of lvlStats) {
+        const classRows = perClassGrades.filter(c => c.className.startsWith(ls.level) && gradeDist.has(c.className))
+        if (classRows.length === 0) continue
+        const labels = classRows.map(c => c.className)
+        const classTotals = new Map(labels.map(cls => [
+          cls,
+          gradeKeys.reduce((sum, gk) => sum + (gradeDist.get(cls)?.get(gk) ?? 0), 0),
+        ]))
+        const lowGradeKeys = ['IV', '1', '2']
+        let worstClass = '', worstPct = -1
+        classRows.forEach(c => {
+          const total = classTotals.get(c.className) ?? 0
+          const pct = total > 0 ? lowGradeKeys.reduce((sum, gk) => sum + (gradeDist.get(c.className)?.get(gk) ?? 0), 0) / total * 100 : 0
+          if (pct > worstPct) { worstPct = pct; worstClass = c.className }
+        })
+        const sg = pptx.addSlide()
+        sg.background = { color: 'F8FAFC' }
+        addHeader(sg as any, `Vg${ls.level} \u2013 Karakterfordeling per klasse (${termLabel})`)
+        sg.addChart('bar', gradeKeys.map((gk, gi) => ({
           name: gk,
-          labels: [gk],
-          values: [trinnGradeCounts[gi]],
+          labels,
+          values: labels.map(cls => {
+            const total = classTotals.get(cls) ?? 0
+            const count = gradeDist.get(cls)?.get(gk) ?? 0
+            return total > 0 ? parseFloat((count / total * 100).toFixed(1)) : 0
+          }),
           color: gradeColors[gi],
         })) as any, {
-          x: 0.3, y: 0.85, w: 5.0, h: 4.5,
-          barDir: 'col',
-          barGrouping: 'clustered',
-          chartColors: gradeColors,
-          showValue: true,
-          dataLabelFontSize: 10,
-          catAxisLabelFontSize: 11,
-          valGridLine: { color: 'D9D9D9' },
-        valAxisLineColor: '000000',
-          showTitle: true,
-          title: 'Antall karakterer (alle klasser i trinnet)',
-          titleFontSize: 10,
-          showLegend: false,
+          x: 0.3, y: 0.85, w: 9.4, h: 3.9, barDir: 'col', barGrouping: 'stacked', chartColors: gradeColors,
+          showValue: true, dataLabelFontSize: 7, dataLabelFormatCode: '0.0"%"', catAxisLabelFontSize: 9,
+          valGridLine: { color: 'D9D9D9' }, valAxisLineColor: '000000', valAxisMaxVal: 100,
+          showTitle: true, title: `Karakterfordeling per klasse, % (${termLabel})`, titleFontSize: 10, showLegend: true, legendFontSize: 9,
         } as any)
-        // Right: pie chart
-        sg2.addChart('pie', [{
-          name: 'Karakterfordeling',
+        if (worstClass && worstPct > 0) {
+          sg.addText(`\u26a0 ${worstClass}: h\u00f8yest andel lave karakterer (IV/1/2: ${fmt(worstPct, 1)}%)`, { x: 0.3, y: 4.95, w: 9.4, h: 0.28, fontSize: 8, color: RED, bold: true, align: 'center' })
+        }
+      }
+
+      // ── Karakterspredning sammenligning per trinn ──
+      const trinnWithData = lvlStats.filter(ls => perClassGrades.some(c => c.className.startsWith(ls.level) && gradeDist.has(c.className)))
+      if (trinnWithData.length > 0) {
+        const trinnTotals = trinnWithData.map(ls => {
+          const classRows = perClassGrades.filter(c => c.className.startsWith(ls.level))
+          return gradeKeys.reduce((sum, gk) => sum + classRows.reduce((s, c) => s + (gradeDist.get(c.className)?.get(gk) ?? 0), 0), 0)
+        })
+        const sc = pptx.addSlide()
+        sc.background = { color: 'F8FAFC' }
+        addHeader(sc as any, `Karakterspredning \u2013 sammenligning per trinn (${termLabel}, %)`)
+        sc.addChart('bar', trinnWithData.map((ls, ti) => ({
+          name: `Vg${ls.level}`,
           labels: gradeKeys,
-          values: trinnGradeCounts,
-        }] as any, {
-          x: 5.5, y: 0.85, w: 4.2, h: 4.5,
-          chartColors: gradeColors,
-          showValue: false,
-          showPercent: true,
-          dataLabelFontSize: 9,
-          showTitle: true,
-          title: 'Fordeling (%)',
-          titleFontSize: 10,
-          showLegend: true,
-          legendFontSize: 9,
-          legendPos: 'b',
+          values: gradeKeys.map(gk => {
+            const classRows = perClassGrades.filter(c => c.className.startsWith(ls.level))
+            const count = classRows.reduce((s, c) => s + (gradeDist.get(c.className)?.get(gk) ?? 0), 0)
+            return trinnTotals[ti] > 0 ? parseFloat(((count / trinnTotals[ti]) * 100).toFixed(1)) : 0
+          }),
+        })) as any, {
+          x: 0.3, y: 0.85, w: 9.4, h: 4.5, barDir: 'col', barGrouping: 'clustered',
+          showValue: true, dataLabelFontSize: 8, dataLabelFormatCode: '0.0"%"',
+          valGridLine: { color: 'D9D9D9' }, valAxisLineColor: '000000', catAxisLabelFontSize: 12, valAxisMaxVal: 50,
+          showTitle: true, title: `% av karakterer per trinn (${termLabel}) \u2014 ett sett stolper per karakter, ett per trinn`,
+          titleFontSize: 10, showLegend: true, legendFontSize: 10, legendPos: 'b',
         } as any)
       }
     }
@@ -454,192 +543,49 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
     const sv = pptx.addSlide()
     sv.background = { color: 'F8FAFC' }
     addHeader(sv as any, 'Varsler \u2013 oversikt')
-
     const allLabels = stats.perClass.map(c => c.className)
     sv.addChart('bar', [
       { name: 'Fraværsvarsler (F)', labels: allLabels, values: stats.perClass.map(c => c.fWarnings) },
       { name: 'Karaktervarsler (G)', labels: allLabels, values: stats.perClass.map(c => c.gWarnings) },
     ] as any, {
-      x: 0.3, y: 0.85, w: 9.4, h: 2.9,
-      barDir: 'col',
-      barGrouping: 'stacked',
-      chartColors: [BLUE, AMBER],
-      showValue: true,
-      dataLabelFontSize: 7,
-      catAxisLabelFontSize: 8,
-      valGridLine: { color: 'D9D9D9' },
-        valAxisLineColor: '000000',
-      showTitle: true,
-      title: 'Varsler per klasse',
-      titleFontSize: 10,
+      x: 0.3, y: 0.85, w: 9.4, h: 2.9, barDir: 'col', barGrouping: 'stacked', chartColors: [BLUE, AMBER],
+      showValue: true, dataLabelFontSize: 7, catAxisLabelFontSize: 8,
+      valGridLine: { color: 'D9D9D9' }, valAxisLineColor: '000000',
+      showTitle: true, title: 'Varsler per klasse', titleFontSize: 10,
     } as any)
-
     const missingLabels = stats.perClass.filter(c => c.missingWarnings > 0).map(c => c.className)
     const missingValues = stats.perClass.filter(c => c.missingWarnings > 0).map(c => c.missingWarnings)
     if (missingLabels.length > 0) {
       sv.addChart('bar', [{ name: 'Manglende varsler', labels: missingLabels, values: missingValues }] as any, {
-        x: 0.3, y: 3.9, w: 9.4, h: 1.6,
-        barDir: 'col',
-        chartColors: [RED],
-        showValue: true,
-        dataLabelFontSize: 7,
-        catAxisLabelFontSize: 8,
-        valGridLine: { color: 'D9D9D9' },
-        valAxisLineColor: '000000',
-        showTitle: true,
-        title: 'Manglende varsler per klasse',
-        titleFontSize: 10,
+        x: 0.3, y: 3.9, w: 9.4, h: 1.6, barDir: 'col', chartColors: [RED],
+        showValue: true, dataLabelFontSize: 7, catAxisLabelFontSize: 8,
+        valGridLine: { color: 'D9D9D9' }, valAxisLineColor: '000000',
+        showTitle: true, title: 'Manglende varsler per klasse', titleFontSize: 10,
       } as any)
     }
 
-    // ── Slides: Inntakspoeng delta per trinn ─────────────────────────────
-    for (const ls of levelStats) {
-      const classRows = stats.perClass.filter(c => c.className.startsWith(ls.level) && c.avgGrunnskolepoeng !== null && c.avgGrade !== null)
-      if (classRows.length === 0) continue
-      const labels = classRows.map(c => c.className)
-      const deltas = classRows.map(c => parseFloat((c.avgGrade! - c.avgGrunnskolepoeng!).toFixed(2)))
-      const si = pptx.addSlide()
-      si.background = { color: 'F8FAFC' }
-      addHeader(si as any, `Vg${ls.level} \u2013 Inntakspoeng: \u0394 VGS-snitt minus grunnskolepoeng`)
-      // pptxgenjs doesn't natively support per-bar colours, so we split into two series: positive and negative
-      const posValues = deltas.map(d => d >= 0 ? d : null)
-      const negValues = deltas.map(d => d < 0 ? d : null)
-      si.addChart('bar', [
-        { name: 'Positiv utvikling (\u2191)', labels, values: posValues },
-        { name: 'Negativ utvikling (\u2193)', labels, values: negValues },
-      ] as any, {
-        x: 0.3, y: 0.85, w: 9.4, h: 4.6,
-        barDir: 'col',
-        barGrouping: 'stacked',
-        chartColors: ['166534', 'C0392B'],
-        showValue: true,
-        dataLabelFontSize: 9,
-        dataLabelFormatCode: '0.00',
-        valGridLine: { color: 'D9D9D9' },
-        valAxisLineColor: '000000',
-        catAxisLabelFontSize: 9,
-        valAxisMinVal: Math.min(...deltas) < 0 ? Math.floor(Math.min(...deltas)) - 0.5 : -1,
-        valAxisMaxVal: Math.max(...deltas) > 0 ? Math.ceil(Math.max(...deltas)) + 0.5 : 1,
-        showTitle: true,
-        title: '\u0394 = Snitt VGS T1 \u2212 Inntakspoeng (grunnskole) \u2014 baseline 0',
-        titleFontSize: 10,
-        showLegend: true,
-        legendFontSize: 9,
-      } as any)
+    // ── Grade slides (T1 only, or T1 + T2 with section headers) ─────────
+    const addSectionHeader = (label: string) => {
+      const sh = pptx.addSlide()
+      sh.background = { color: NAVY }
+      sh.addShape('rect', { x: 0, y: 3.5, w: '100%', h: 1.0, fill: { color: BLUE } })
+      sh.addText(`Karakterer \u2014 ${label}`, { x: 0.6, y: 1.2, w: 8.8, h: 1.5, fontSize: 36, bold: true, color: WHITE, valign: 'middle' })
+      sh.addText(todayDdMmYyyy(), { x: 0.6, y: 3.55, w: 8.8, h: 0.5, fontSize: 13, color: WHITE, valign: 'middle' })
     }
 
-    // ── Slides: Karakterfordeling per trinn ──────────────────────────────
-    for (const ls of levelStats) {
-      const classRows = stats.perClass.filter(c => c.className.startsWith(ls.level) && gradeDistByClass.has(c.className))
-      if (classRows.length === 0) continue
-      const labels = classRows.map(c => c.className)
-      const gradeKeys = ['IV', '1', '2', '3', '4', '5', '6']
-      const gradeColors = [RED, 'F97316', AMBER, 'FDE68A', '86EFAC', '22C55E', '166534']
-
-      // Find class with most low grades (IV + 1 + 2)
-      const lowGradeKeys = ['IV', '1', '2']
-      let worstClass = ''
-      let worstCount = -1
-      classRows.forEach(c => {
-        const dist = gradeDistByClass.get(c.className)
-        const count = lowGradeKeys.reduce((sum, gk) => sum + (dist?.get(gk) ?? 0), 0)
-        if (count > worstCount) { worstCount = count; worstClass = c.className }
-      })
-
-      const sg = pptx.addSlide()
-      sg.background = { color: 'F8FAFC' }
-      addHeader(sg as any, `Vg${ls.level} \u2013 Karakterfordeling per klasse (T1)`)
-      sg.addChart('bar', gradeKeys.map((gk, gi) => ({
-        name: gk,
-        labels,
-        values: labels.map(cls => gradeDistByClass.get(cls)?.get(gk) ?? 0),
-        color: gradeColors[gi],
-      })) as any, {
-        x: 0.3, y: 0.85, w: 9.4, h: 3.9,
-        barDir: 'col',
-        barGrouping: 'stacked',
-        chartColors: gradeColors,
-        showValue: true,
-        dataLabelFontSize: 7,
-        catAxisLabelFontSize: 9,
-        valGridLine: { color: 'D9D9D9' },
-        valAxisLineColor: '000000',
-        showTitle: true,
-        title: 'Antall karakterer per klasse (T1)',
-        titleFontSize: 10,
-        showLegend: true,
-        legendFontSize: 9,
-      } as any)
-
-      // Underline + annotation for class with most low grades (IV/1/2)
-      // Chart plot area: x=0.3, w=9.4, left margin ~12%, right margin ~3% in pptxgenjs stacked bar
-      if (worstClass && worstCount > 0) {
-        const idx = labels.indexOf(worstClass)
-        const n = labels.length
-        const plotLeft = 0.3 + 9.4 * 0.12
-        const plotWidth = 9.4 * 0.85
-        const barSlotW = plotWidth / n
-        const xCenter = plotLeft + (idx + 0.5) * barSlotW
-        // Line just below the chart
-        sg.addShape('line' as any, {
-          x: xCenter - barSlotW * 0.35, y: 4.82, w: barSlotW * 0.7, h: 0,
-          line: { color: RED, width: 2.5 },
-        })
-        sg.addText(`\u26a0 ${worstClass}: flest lave karakterer (IV/1/2: ${worstCount})`, {
-          x: 0.3, y: 4.95, w: 9.4, h: 0.28,
-          fontSize: 8,
-          color: RED,
-          bold: true,
-          align: 'center',
-        })
-      }
-    }
-
-    // ── Slide: Karakterspredning sammenlignet per trinn ──────────────────
-    {
-      const gradeKeys = ['IV', '1', '2', '3', '4', '5', '6']
-      // Trinn that actually have grade data
-      const trinnWithData = levelStats.filter(ls =>
-        stats.perClass.some(c => c.className.startsWith(ls.level) && gradeDistByClass.has(c.className))
-      )
-      if (trinnWithData.length > 0) {
-        // Compute percentage of each grade per trinn
-        const trinnTotals = trinnWithData.map(ls => {
-          const classRows = stats.perClass.filter(c => c.className.startsWith(ls.level))
-          return gradeKeys.reduce((sum, gk) =>
-            sum + classRows.reduce((s, c) => s + (gradeDistByClass.get(c.className)?.get(gk) ?? 0), 0), 0)
-        })
-        const sc = pptx.addSlide()
-        sc.background = { color: 'F8FAFC' }
-        addHeader(sc as any, 'Karakterspredning \u2013 sammenligning per trinn (T1, %)')
-        // One series per trinn, X-axis = grade, values = % of that grade in that trinn
-        sc.addChart('bar', trinnWithData.map((ls, ti) => ({
-          name: `Vg${ls.level}`,
-          labels: gradeKeys,
-          values: gradeKeys.map(gk => {
-            const classRows = stats.perClass.filter(c => c.className.startsWith(ls.level))
-            const count = classRows.reduce((s, c) => s + (gradeDistByClass.get(c.className)?.get(gk) ?? 0), 0)
-            return trinnTotals[ti] > 0 ? parseFloat(((count / trinnTotals[ti]) * 100).toFixed(1)) : 0
-          }),
-        })) as any, {
-          x: 0.3, y: 0.85, w: 9.4, h: 4.5,
-          barDir: 'col',
-          barGrouping: 'clustered',
-          showValue: true,
-          dataLabelFontSize: 8,
-          dataLabelFormatCode: '0.0"%"',
-          valGridLine: { color: 'D9D9D9' },
-        valAxisLineColor: '000000',
-          catAxisLabelFontSize: 12,
-          valAxisMaxVal: 50,
-          showTitle: true,
-          title: '% av karakterer per trinn \u2014 ett sett stolper per karakter, ett per trinn',
-          titleFontSize: 10,
-          showLegend: true,
-          legendFontSize: 10,
-          legendPos: 'b',
-        } as any)
-      }
+    if (termFilter === '2') {
+      const t1Data = buildTermGradeData('1')
+      const t2Data = buildTermGradeData('2')
+      addSectionHeader('Termin 1')
+      addTermSlides('T1', t1Data)
+      addTotaloversikt('T1', t1Data)
+      addSectionHeader('Termin 2')
+      addTermSlides('T2', t2Data)
+      addTotaloversikt('T2', t2Data)
+    } else {
+      const t1Data = buildTermGradeData('1')
+      addTermSlides('T1', t1Data)
+      addTotaloversikt('T1', t1Data)
     }
 
     await pptx.writeFile({ fileName: `statistikk_${todayDdMmYyyy()}.pptx` })
@@ -668,18 +614,27 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
       warningMap.get(key)!.push({ type: w.warningType })
     })
 
-    // Grade map: normalizedNavn::normalizedClass -> grades[] (halvår 1 only)
-    const gradesByStudent = new Map<string, string[]>()
+    // Grade maps: T1 and T2
+    const gradesByStudentT1 = new Map<string, string[]>()
+    const gradesByStudentT2 = new Map<string, string[]>()
     data.grades.forEach(g => {
       const h = g.halvår.toString().trim()
-      if (h === '1' || h.toLowerCase().includes('1')) {
-        const resolvedClass = g.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, g.navn, g.subjectGroup)
-        if (!resolvedClass) return
-        const key = buildStudentClassKey(g.navn, resolvedClass)
-        if (!gradesByStudent.has(key)) gradesByStudent.set(key, [])
-        gradesByStudent.get(key)!.push(g.grade)
+      const isT1 = h === '1' || (h.toLowerCase().includes('1') && !h.toLowerCase().includes('2'))
+      const isT2 = h === '2' || (h.toLowerCase().includes('2') && !h.toLowerCase().includes('1'))
+      const resolvedClass = g.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, g.navn, g.subjectGroup)
+      if (!resolvedClass) return
+      const key = buildStudentClassKey(g.navn, resolvedClass)
+      if (isT1) {
+        if (!gradesByStudentT1.has(key)) gradesByStudentT1.set(key, [])
+        gradesByStudentT1.get(key)!.push(g.grade)
+      }
+      if (isT2) {
+        if (!gradesByStudentT2.has(key)) gradesByStudentT2.set(key, [])
+        gradesByStudentT2.get(key)!.push(g.grade)
       }
     })
+    // Use selected term's grade map for main stats
+    const gradesByStudent = termFilter === '1' ? gradesByStudentT1 : gradesByStudentT2
 
     // Intake points map: normalizedNavn::normalizedClass -> intakePoints
     const intakeByStudent = new Map<string, number | null>()
@@ -745,6 +700,20 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
           ? numericGrades.reduce((a, b) => a + b, 0) / numericGrades.length
           : null
 
+      // T1 average (reference column when T2 is selected)
+      let avgGradeT1: number | null = null
+      if (termFilter === '2') {
+        const numericT1: number[] = []
+        studentKeys.forEach(studentKey => {
+          const t1grades = gradesByStudentT1.get(studentKey) ?? []
+          t1grades.forEach(g => {
+            const num = parseInt(g)
+            if (!isNaN(num) && num >= 1 && num <= 6) numericT1.push(num)
+          })
+        })
+        avgGradeT1 = numericT1.length > 0 ? numericT1.reduce((a, b) => a + b, 0) / numericT1.length : null
+      }
+
       const negativeStudentsCount = ivStudentCount + grade1StudentCount - bothIvAnd1StudentCount
       const negativeStudentsPct = studentCount > 0 ? (negativeStudentsCount / studentCount) * 100 : 0
 
@@ -807,6 +776,7 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
         missingWarningStudentCount: missingWarningStudents.size,
         avgGrunnskolepoeng,
         avgGrade,
+        avgGradeT1,
       }
     }
 
@@ -874,10 +844,14 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
         allGradeValues.length > 0
           ? allGradeValues.reduce((a, b) => a + b, 0) / allGradeValues.length
           : null,
+      avgGradeT1: (() => {
+        const t1vals = perClass.flatMap(c => c.avgGradeT1 !== null ? [c.avgGradeT1] : [])
+        return t1vals.length > 0 ? t1vals.reduce((a, b) => a + b, 0) / t1vals.length : null
+      })(),
     }
 
     return { overall, perClass }
-  }, [data, threshold])
+  }, [data, threshold, termFilter])
 
   const levelStats = useMemo((): LevelStats[] => {
     const levels = ['1', '2', '3']
@@ -932,6 +906,10 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
             gradeValues.length > 0
               ? gradeValues.reduce((sum, v) => sum + v, 0) / gradeValues.length
               : null,
+          avgGradeT1: (() => {
+            const t1vals = classRows.flatMap(c => c.avgGradeT1 !== null ? [c.avgGradeT1] : [])
+            return t1vals.length > 0 ? t1vals.reduce((a, b) => a + b, 0) / t1vals.length : null
+          })(),
         }
       })
       .filter((row): row is LevelStats => row !== null)
@@ -983,6 +961,8 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
       if (tableSort.key === 'missingWarnings') return row.missingWarnings
       if (tableSort.key === 'avgGrunnskolepoeng') return row.avgGrunnskolepoeng
       if (tableSort.key === 'avgGrade') return row.avgGrade
+      if (tableSort.key === 'avgGradeT1') return row.avgGradeT1
+      if (tableSort.key === 'avgGradeDeltaT1') return (row.avgGrade !== null && row.avgGradeT1 !== null) ? row.avgGrade - row.avgGradeT1 : null
       return gradeDelta(row.avgGrade, row.avgGrunnskolepoeng)
     }
 
@@ -1033,6 +1013,7 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
         missingWarningStudentCount: 0,
         avgGrunnskolepoeng: null,
         avgGrade: null,
+        avgGradeT1: null,
       }
     }
 
@@ -1074,6 +1055,10 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
     const avgGrade = gradeValues.length > 0
       ? gradeValues.reduce((sum, v) => sum + v, 0) / gradeValues.length
       : null
+    const t1GradeValues = filteredPerClass.map(c => c.avgGradeT1).filter((v): v is number => v !== null)
+    const avgGradeT1 = t1GradeValues.length > 0
+      ? t1GradeValues.reduce((sum, v) => sum + v, 0) / t1GradeValues.length
+      : null
 
     return {
       className: 'Totalt',
@@ -1095,6 +1080,7 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
       missingWarningStudentCount: filteredPerClass.reduce((sum, c) => sum + c.missingWarningStudentCount, 0),
       avgGrunnskolepoeng,
       avgGrade,
+      avgGradeT1,
     }
   }, [filteredPerClass, data.absences])
 
@@ -1301,6 +1287,26 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
           >
             VG3
           </button>
+          <div className="ml-3 flex gap-1 rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+            <button
+              type="button"
+              onClick={() => setTermFilter('1')}
+              className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+                termFilter === '1' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              T1
+            </button>
+            <button
+              type="button"
+              onClick={() => setTermFilter('2')}
+              className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+                termFilter === '2' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              T2
+            </button>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-separate border-spacing-0">
@@ -1355,8 +1361,18 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
                 >
                   Inntakspoeng
                 </Th>
-                <Th right onClick={() => cycleTableSort('avgGrade')} sort={currentSort('avgGrade')}>Snitt vgs</Th>
-                <Th right onClick={() => cycleTableSort('avgGradeDelta')} sort={currentSort('avgGradeDelta')}>Delta</Th>
+                {termFilter === '2' && (
+                  <Th right onClick={() => cycleTableSort('avgGradeT1')} sort={currentSort('avgGradeT1')}>Snitt T1</Th>
+                )}
+                <Th right onClick={() => cycleTableSort('avgGrade')} sort={currentSort('avgGrade')}>{termFilter === '2' ? 'Snitt T2' : 'Snitt vgs'}</Th>
+                {termFilter === '2' ? (
+                  <>
+                    <Th right onClick={() => cycleTableSort('avgGradeDelta')} sort={currentSort('avgGradeDelta')}>Δ vs Innt.</Th>
+                    <Th right onClick={() => cycleTableSort('avgGradeDeltaT1')} sort={currentSort('avgGradeDeltaT1')}>Δ T2 vs T1</Th>
+                  </>
+                ) : (
+                  <Th right onClick={() => cycleTableSort('avgGradeDelta')} sort={currentSort('avgGradeDelta')}>Δ</Th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -1374,23 +1390,48 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
                     {c.missingWarnings ? `${c.missingWarnings} (${c.missingWarningStudentCount})` : '—'}
                   </Td>
                   <Td center className="border-l border-slate-200">{fmt(c.avgGrunnskolepoeng)}</Td>
+                  {termFilter === '2' && <Td center>{fmt(c.avgGradeT1)}</Td>}
                   <Td center>{fmt(c.avgGrade)}</Td>
-                  <Td
-                    center
-                    className={
-                      gradeDelta(c.avgGrade, c.avgGrunnskolepoeng) === null
-                        ? ''
-                        : gradeDelta(c.avgGrade, c.avgGrunnskolepoeng)! < 0
-                          ? 'bg-red-50 text-slate-800 font-semibold'
-                          : gradeDelta(c.avgGrade, c.avgGrunnskolepoeng)! > 0
-                            ? 'bg-emerald-50 text-slate-800 font-semibold'
-                            : ''
-                    }
-                  >
-                    {gradeDelta(c.avgGrade, c.avgGrunnskolepoeng) === null
-                      ? '—'
-                      : fmt(gradeDelta(c.avgGrade, c.avgGrunnskolepoeng), 2)}
-                  </Td>
+                  {termFilter === '2' ? (
+                    <>
+                      <Td
+                        center
+                        className={
+                          gradeDelta(c.avgGrade, c.avgGrunnskolepoeng) === null ? '' :
+                          gradeDelta(c.avgGrade, c.avgGrunnskolepoeng)! < 0 ? 'bg-red-50 text-slate-800 font-semibold' :
+                          gradeDelta(c.avgGrade, c.avgGrunnskolepoeng)! > 0 ? 'bg-emerald-50 text-slate-800 font-semibold' : ''
+                        }
+                      >
+                        {gradeDelta(c.avgGrade, c.avgGrunnskolepoeng) === null ? '—' : fmt(gradeDelta(c.avgGrade, c.avgGrunnskolepoeng), 2)}
+                      </Td>
+                      <Td
+                        center
+                        className={(() => {
+                          const d = c.avgGrade !== null && c.avgGradeT1 !== null ? c.avgGrade - c.avgGradeT1 : null
+                          return d === null ? '' : d < 0 ? 'bg-red-50 text-slate-800 font-semibold' : d > 0 ? 'bg-emerald-50 text-slate-800 font-semibold' : ''
+                        })()}
+                      >
+                        {c.avgGrade !== null && c.avgGradeT1 !== null ? fmt(c.avgGrade - c.avgGradeT1, 2) : '—'}
+                      </Td>
+                    </>
+                  ) : (
+                    <Td
+                      center
+                      className={
+                        gradeDelta(c.avgGrade, c.avgGrunnskolepoeng) === null
+                          ? ''
+                          : gradeDelta(c.avgGrade, c.avgGrunnskolepoeng)! < 0
+                            ? 'bg-red-50 text-slate-800 font-semibold'
+                            : gradeDelta(c.avgGrade, c.avgGrunnskolepoeng)! > 0
+                              ? 'bg-emerald-50 text-slate-800 font-semibold'
+                              : ''
+                      }
+                    >
+                      {gradeDelta(c.avgGrade, c.avgGrunnskolepoeng) === null
+                        ? '—'
+                        : fmt(gradeDelta(c.avgGrade, c.avgGrunnskolepoeng), 2)}
+                    </Td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -1414,23 +1455,54 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
                     : '—'}
                 </Td>
                 <Td center className="bg-slate-50 border-l border-slate-200">{fmt(filteredStats.avgGrunnskolepoeng)}</Td>
+                {termFilter === '2' && <Td center className="bg-slate-50">{fmt(filteredStats.avgGradeT1)}</Td>}
                 <Td center className="bg-slate-50">{fmt(filteredStats.avgGrade)}</Td>
-                <Td
-                  center
-                  className={
-                    gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng) === null
-                      ? 'bg-slate-50'
-                      : gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng)! < 0
-                        ? 'bg-red-50 text-slate-800'
-                        : gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng)! > 0
-                          ? 'bg-emerald-50 text-slate-800'
-                          : 'bg-slate-50'
-                  }
-                >
-                  {gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng) === null
-                    ? '—'
-                    : fmt(gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng), 2)}
-                </Td>
+                {termFilter === '2' ? (
+                  <>
+                    <Td
+                      center
+                      className={
+                        gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng) === null
+                          ? 'bg-slate-50'
+                          : gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng)! < 0
+                            ? 'bg-red-50 text-slate-800'
+                            : gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng)! > 0
+                              ? 'bg-emerald-50 text-slate-800'
+                              : 'bg-slate-50'
+                      }
+                    >
+                      {gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng) === null
+                        ? '—'
+                        : fmt(gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng), 2)}
+                    </Td>
+                    <Td
+                      center
+                      className={(() => {
+                        const d = filteredStats.avgGrade !== null && filteredStats.avgGradeT1 !== null ? filteredStats.avgGrade - filteredStats.avgGradeT1 : null
+                        return d === null ? 'bg-slate-50' : d < 0 ? 'bg-red-50 text-slate-800' : d > 0 ? 'bg-emerald-50 text-slate-800' : 'bg-slate-50'
+                      })()}
+                    >
+                      {filteredStats.avgGrade !== null && filteredStats.avgGradeT1 !== null ? fmt(filteredStats.avgGrade - filteredStats.avgGradeT1, 2) : '—'}
+                    </Td>
+                  </>
+                ) : (
+                  <Td
+                    center
+                    className={
+                      gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng) === null
+                        ? 'bg-slate-50'
+                        : gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng)! < 0
+                          ? 'bg-red-50 text-slate-800'
+                          : gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng)! > 0
+                            ? 'bg-emerald-50 text-slate-800'
+                            : 'bg-slate-50'
+                    }
+                  >
+                    {gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng) === null
+                      ? '—'
+                      : fmt(gradeDelta(filteredStats.avgGrade, filteredStats.avgGrunnskolepoeng), 2)}
+                  </Td>
+                )}
               </tr>
             </tfoot>
           </table>
