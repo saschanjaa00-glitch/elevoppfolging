@@ -4,6 +4,7 @@ import type { DataStore } from '../types'
 import {
   buildStudentClassKey,
   createAbsenceSubjectClassLookup,
+  createStudentInfoLookup,
   normalizeMatch,
   resolveClassFromSubjectLookup,
 } from '../studentInfoUtils'
@@ -23,6 +24,9 @@ interface SubjectStats {
   gradesCounts: Record<string, number>
   gradesCountsT1: Record<string, number>
   gradesCountsT2: Record<string, number>
+  genderGradesCounts: Record<'girl' | 'boy', Record<string, number>>
+  genderGradesCountsT1: Record<'girl' | 'boy', Record<string, number>>
+  genderGradesCountsT2: Record<'girl' | 'boy', Record<string, number>>
 }
 
 interface TeacherStats {
@@ -35,6 +39,9 @@ interface TeacherStats {
   gradesCounts: Record<string, number>
   gradesCountsT1: Record<string, number>
   gradesCountsT2: Record<string, number>
+  genderGradesCounts: Record<'girl' | 'boy', Record<string, number>>
+  genderGradesCountsT1: Record<'girl' | 'boy', Record<string, number>>
+  genderGradesCountsT2: Record<'girl' | 'boy', Record<string, number>>
   subjectStats: SubjectStats[]
 }
 
@@ -54,8 +61,47 @@ type SortKey =
   | 'grade6'
   | 'avgGrade'
   | 'avgDelta'
+  | 'genderDiff'
 type SortDirection = 'asc' | 'desc'
 type TermMode = 't1' | 't2' | 'compare'
+
+type StudentGender = 'girl' | 'boy'
+
+const GENDER_ORDER: StudentGender[] = ['girl', 'boy']
+
+const GENDER_LABELS: Record<StudentGender, string> = {
+  girl: 'Jenter',
+  boy: 'Gutter',
+}
+
+const emptyGenderCounts = (): Record<StudentGender, Record<string, number>> => ({
+  girl: {},
+  boy: {},
+})
+
+const averageFromGrades = (gradesCounts: Record<string, number>): number | null => {
+  const numericGrades = ['1', '2', '3', '4', '5', '6'] as const
+  let sum = 0
+  let count = 0
+
+  numericGrades.forEach(grade => {
+    const gradeCount = gradesCounts[grade] ?? 0
+    sum += Number(grade) * gradeCount
+    count += gradeCount
+  })
+
+  return count > 0 ? sum / count : null
+}
+
+const genderGap = (
+  girls: Record<string, number>,
+  boys: Record<string, number>
+): number | null => {
+  const girlAverage = averageFromGrades(girls)
+  const boyAverage = averageFromGrades(boys)
+  if (girlAverage === null || boyAverage === null) return null
+  return girlAverage - boyAverage
+}
 
 export default function InnsiktView({ data, threshold }: Props) {
   const [searchTerm, setSearchTerm] = useState<string>('')
@@ -63,9 +109,22 @@ export default function InnsiktView({ data, threshold }: Props) {
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [expandedTeacher, setExpandedTeacher] = useState<string | null>(null)
   const [termMode, setTermMode] = useState<TermMode>('t1')
+  const [visibleGenderAverages, setVisibleGenderAverages] = useState<Record<StudentGender, boolean>>({ girl: false, boy: false })
   const absenceSubjectClassLookup = useMemo(
     () => createAbsenceSubjectClassLookup(data.absences),
     [data.absences]
+  )
+  const studentInfoLookup = useMemo(
+    () => createStudentInfoLookup(data.studentInfo),
+    [data.studentInfo]
+  )
+  const visibleGenderColumns = useMemo(
+    () => GENDER_ORDER.filter(gender => visibleGenderAverages[gender]),
+    [visibleGenderAverages]
+  )
+  const hasGenderData = useMemo(
+    () => data.studentInfo.some(info => info.gender !== null),
+    [data.studentInfo]
   )
 
   const normalizedGrades = useMemo(() => {
@@ -86,6 +145,7 @@ export default function InnsiktView({ data, threshold }: Props) {
           gradeValue: grade.grade.toUpperCase().trim(),
           isT1,
           isT2,
+          gender: studentInfoLookup.get(buildStudentClassKey(grade.navn, resolvedClass))?.gender ?? null,
         }
       })
       .filter((grade): grade is {
@@ -96,8 +156,9 @@ export default function InnsiktView({ data, threshold }: Props) {
         gradeValue: string
         isT1: boolean
         isT2: boolean
+        gender: StudentGender | null
       } => Boolean(grade?.teacher && grade.subjectDisplay))
-  }, [data.grades, absenceSubjectClassLookup])
+  }, [data.grades, absenceSubjectClassLookup, studentInfoLookup])
 
   const normalizedWarnings = useMemo(() => {
     return data.warnings
@@ -166,6 +227,9 @@ export default function InnsiktView({ data, threshold }: Props) {
           gradesCounts: {},
           gradesCountsT1: {},
           gradesCountsT2: {},
+          genderGradesCounts: emptyGenderCounts(),
+          genderGradesCountsT1: emptyGenderCounts(),
+          genderGradesCountsT2: emptyGenderCounts(),
           subjectStats: [],
         })
       }
@@ -203,6 +267,9 @@ export default function InnsiktView({ data, threshold }: Props) {
           gradesCounts: {},
           gradesCountsT1: {},
           gradesCountsT2: {},
+          genderGradesCounts: emptyGenderCounts(),
+          genderGradesCountsT1: emptyGenderCounts(),
+          genderGradesCountsT2: emptyGenderCounts(),
         })
       }
 
@@ -215,6 +282,14 @@ export default function InnsiktView({ data, threshold }: Props) {
       } else if (grade.isT2) {
         stats.gradesCountsT2[gradeValue] = (stats.gradesCountsT2[gradeValue] ?? 0) + 1
       }
+      if (grade.gender) {
+        stats.genderGradesCounts[grade.gender][gradeValue] = (stats.genderGradesCounts[grade.gender][gradeValue] ?? 0) + 1
+        if (grade.isT1) {
+          stats.genderGradesCountsT1[grade.gender][gradeValue] = (stats.genderGradesCountsT1[grade.gender][gradeValue] ?? 0) + 1
+        } else if (grade.isT2) {
+          stats.genderGradesCountsT2[grade.gender][gradeValue] = (stats.genderGradesCountsT2[grade.gender][gradeValue] ?? 0) + 1
+        }
+      }
 
       const subjectStat = teacherSubjects.get(teacher)!.get(subject)!
       subjectStat.gradesCounts[gradeValue] = (subjectStat.gradesCounts[gradeValue] ?? 0) + 1
@@ -222,6 +297,14 @@ export default function InnsiktView({ data, threshold }: Props) {
         subjectStat.gradesCountsT1[gradeValue] = (subjectStat.gradesCountsT1[gradeValue] ?? 0) + 1
       } else if (grade.isT2) {
         subjectStat.gradesCountsT2[gradeValue] = (subjectStat.gradesCountsT2[gradeValue] ?? 0) + 1
+      }
+      if (grade.gender) {
+        subjectStat.genderGradesCounts[grade.gender][gradeValue] = (subjectStat.genderGradesCounts[grade.gender][gradeValue] ?? 0) + 1
+        if (grade.isT1) {
+          subjectStat.genderGradesCountsT1[grade.gender][gradeValue] = (subjectStat.genderGradesCountsT1[grade.gender][gradeValue] ?? 0) + 1
+        } else if (grade.isT2) {
+          subjectStat.genderGradesCountsT2[grade.gender][gradeValue] = (subjectStat.genderGradesCountsT2[grade.gender][gradeValue] ?? 0) + 1
+        }
       }
     })
 
@@ -329,16 +412,7 @@ export default function InnsiktView({ data, threshold }: Props) {
     grade6: '6',
   }
 
-  const avgGradeNum = (gradesCounts: Record<string, number>): number | null => {
-    const numericGrades = ['1', '2', '3', '4', '5', '6'] as const
-    let sum = 0, count = 0
-    numericGrades.forEach(g => {
-      const n = gradesCounts[g] ?? 0
-      sum += Number(g) * n
-      count += n
-    })
-    return count > 0 ? sum / count : null
-  }
+  const avgGradeNum = (gradesCounts: Record<string, number>): number | null => averageFromGrades(gradesCounts)
 
   const countsForMode = (
     t1: Record<string, number>,
@@ -357,6 +431,16 @@ export default function InnsiktView({ data, threshold }: Props) {
     return a2 - a1
   }
 
+  const genderAverageText = (counts: Record<string, number>): string => {
+    const average = avgGradeNum(counts)
+    return average === null ? '—' : average.toFixed(2).replace('.', ',')
+  }
+
+  const genderDiffText = (girls: Record<string, number>, boys: Record<string, number>): string => {
+    const diff = genderGap(girls, boys)
+    return diff === null ? '—' : `${diff > 0 ? '+' : ''}${diff.toFixed(2).replace('.', ',')}`
+  }
+
   const filteredAndSorted = useMemo(() => {
     let filtered = teacherStats.filter(t =>
       t.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -372,6 +456,12 @@ export default function InnsiktView({ data, threshold }: Props) {
       if (key === 'warningsG') return row.varselsByType['G'] ?? 0
       if (key === 'avgGrade') return avgGradeNum(gc) ?? -1
       if (key === 'avgDelta') return avgDelta(row.gradesCountsT1, row.gradesCountsT2) ?? -999
+      if (key === 'genderDiff') {
+        return genderGap(
+          countsForMode(row.genderGradesCountsT1.girl, row.genderGradesCountsT2.girl, row.genderGradesCounts.girl),
+          countsForMode(row.genderGradesCountsT1.boy, row.genderGradesCountsT2.boy, row.genderGradesCounts.boy)
+        ) ?? -999
+      }
       const gradeKey = sortGradeByKey[key]
       if (gradeKey) {
         if (total === 0) return 0
@@ -407,6 +497,12 @@ export default function InnsiktView({ data, threshold }: Props) {
       if (sortKey === 'warningsG') return s.varselsByType['G'] ?? 0
       if (sortKey === 'avgGrade') return avgGradeNum(gc) ?? -1
       if (sortKey === 'avgDelta') return avgDelta(s.gradesCountsT1, s.gradesCountsT2) ?? -999
+      if (sortKey === 'genderDiff') {
+        return genderGap(
+          countsForMode(s.genderGradesCountsT1.girl, s.genderGradesCountsT2.girl, s.genderGradesCounts.girl),
+          countsForMode(s.genderGradesCountsT1.boy, s.genderGradesCountsT2.boy, s.genderGradesCounts.boy)
+        ) ?? -999
+      }
       const gradeKey = sortGradeByKey[sortKey]
       if (gradeKey) return total === 0 ? 0 : ((gc[gradeKey] ?? 0) / total) * 100
       return 0
@@ -637,7 +733,7 @@ export default function InnsiktView({ data, threshold }: Props) {
 
   const showWarningColumns = termMode !== 'compare'
   const showDeltaColumn = termMode === 'compare'
-  const totalColumnCount = 1 + 1 + (showWarningColumns ? 4 : 0) + allGrades.length + 1 + (showDeltaColumn ? 1 : 0) + 1
+  const totalColumnCount = 1 + 1 + (showWarningColumns ? 4 : 0) + allGrades.length + visibleGenderColumns.length + 1 + (showDeltaColumn ? 1 : 0) + 1
 
   const exportToExcel = () => {
     void import('exceljs').then(async exceljs => {
@@ -818,6 +914,24 @@ export default function InnsiktView({ data, threshold }: Props) {
               Sammenlign
             </button>
           </div>
+          {hasGenderData && (
+            <div className="mb-3 flex flex-wrap gap-1 p-1 bg-slate-100 rounded-xl w-fit">
+              {GENDER_ORDER.map(gender => (
+                <button
+                  key={gender}
+                  type="button"
+                  onClick={() => setVisibleGenderAverages(current => ({ ...current, [gender]: !current[gender] }))}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    visibleGenderAverages[gender]
+                      ? 'bg-white text-sky-700 shadow-sm font-semibold'
+                      : 'text-slate-600 hover:text-slate-800'
+                  }`}
+                >
+                  {GENDER_LABELS[gender]}
+                </button>
+              ))}
+            </div>
+          )}
           <input
             type="text"
             placeholder="Søk etter lærer..."
@@ -924,6 +1038,35 @@ export default function InnsiktView({ data, threshold }: Props) {
                     </button>
                   </th>
                 ))}
+                {visibleGenderColumns.map(gender => (
+                  <th
+                    key={gender}
+                    className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleSort('genderDiff')}
+                      className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
+                    >
+                      <span>{GENDER_LABELS[gender]}</span>
+                      <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                        {getSortIndicator('genderDiff')}
+                      </span>
+                    </button>
+                  </th>
+                ))}
+                <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                  <button
+                    type="button"
+                    onClick={() => toggleSort('genderDiff')}
+                    className="inline-flex items-center gap-1 hover:text-slate-700 w-full justify-center"
+                  >
+                    <span>Diff</span>
+                    <span className="min-w-2 text-[10px] leading-none text-slate-400">
+                      {getSortIndicator('genderDiff')}
+                    </span>
+                  </button>
+                </th>
                 <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   <button
                     type="button"
@@ -1028,6 +1171,28 @@ export default function InnsiktView({ data, threshold }: Props) {
                         )}
                       </td>
                     ))}
+                    {visibleGenderColumns.map(gender => (
+                      <td key={gender} className="py-2 px-3 text-center text-slate-700 font-medium">
+                        <div className="leading-tight">
+                          <div>
+                            {genderAverageText(
+                              countsForMode(
+                                teacher.genderGradesCountsT1[gender],
+                                teacher.genderGradesCountsT2[gender],
+                                teacher.genderGradesCounts[gender]
+                              )
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-500">{GENDER_LABELS[gender]}</div>
+                        </div>
+                      </td>
+                    ))}
+                    <td className="py-2 px-3 text-center font-semibold text-slate-800 whitespace-nowrap">
+                      {genderDiffText(
+                        countsForMode(teacher.genderGradesCountsT1.girl, teacher.genderGradesCountsT2.girl, teacher.genderGradesCounts.girl),
+                        countsForMode(teacher.genderGradesCountsT1.boy, teacher.genderGradesCountsT2.boy, teacher.genderGradesCounts.boy)
+                      )}
+                    </td>
                     <td className={`${termMode === 'compare' ? 'text-xs' : ''} py-2 px-3 text-center font-semibold text-slate-800 ${
                       termMode === 'compare' && rowDelta !== null
                         ? rowDelta > 0
@@ -1122,6 +1287,28 @@ export default function InnsiktView({ data, threshold }: Props) {
                                 )}
                               </td>
                             ))}
+                            {visibleGenderColumns.map(gender => (
+                              <td key={gender} className="py-2 px-3 text-center text-slate-700 font-medium">
+                                <div className="leading-tight">
+                                  <div>
+                                    {genderAverageText(
+                                      countsForMode(
+                                        subject.genderGradesCountsT1[gender],
+                                        subject.genderGradesCountsT2[gender],
+                                        subject.genderGradesCounts[gender]
+                                      )
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] text-slate-500">{GENDER_LABELS[gender]}</div>
+                                </div>
+                              </td>
+                            ))}
+                            <td className="py-2 px-3 text-center font-semibold text-slate-800 whitespace-nowrap">
+                              {genderDiffText(
+                                countsForMode(subject.genderGradesCountsT1.girl, subject.genderGradesCountsT2.girl, subject.genderGradesCounts.girl),
+                                countsForMode(subject.genderGradesCountsT1.boy, subject.genderGradesCountsT2.boy, subject.genderGradesCounts.boy)
+                              )}
+                            </td>
                             <td className={`${termMode === 'compare' ? 'text-xs' : ''} py-2 px-3 text-center font-semibold text-slate-800 ${
                               termMode === 'compare' && sDelta !== null
                                 ? sDelta > 0

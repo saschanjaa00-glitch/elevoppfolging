@@ -4,6 +4,7 @@ import { Upload, X, AlertTriangle } from 'lucide-react'
 import type { DataStore, AbsenceRecord, WarningRecord, StudentInfoRecord, PresetRecord } from '../types'
 import { anonymizeData } from '../anonymizeNames'
 import { normalizeCellText } from '../securityUtils'
+import { inferGenderFromFodselsnummer } from '../studentInfoUtils'
 
 
 interface FileUploadProps {
@@ -365,6 +366,7 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
         const etternavn = getRowValue(row, ['etternavn', 'last name', 'lastname'])
         const navn = [fornavn, etternavn].filter(Boolean).join(' ').trim()
         const sidemalValue = getRowValue(row, ['fritak i sidemål', 'fritak i sidemal', 'sidemål', 'sidemal'])
+        const fodselsnummer = getRowValue(row, ['fødselsnummer', 'fodselsnummer', 'personnummer', 'fnr'])
 
         return {
           navn,
@@ -372,6 +374,7 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
           etternavn,
           class: getRowValue(row, ['klasse', 'klassegruppe', 'class']) || undefined,
           isAdult: getAdultStatus(row, [['fødselsdato'], ['fodselsdato'], ['birthdate'], ['dob']]),
+          gender: inferGenderFromFodselsnummer(fodselsnummer),
           programArea: getRowValue(row, ['programområde', 'programomrade', 'program area']),
           sidemalExemption: sidemalValue.toLowerCase().includes('assessment exemption'),
           intakePoints: getNumericField(row, ['inntakspoeng', 'intake points']),
@@ -633,7 +636,7 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
             <div>
               <p className="text-red-700 font-semibold text-sm">{error}</p>
               <p className="text-xs text-red-500 mt-1.5 leading-relaxed">
-                Kontroller at filene inneholder riktige kolonner: Fraværsfil: Navn, Klasse, Fagnavn, Faggruppe/Fagkode, H1+H2 % udok. fravær, H1+H2 timer udok. fravær, Lærer. Varselfil: Elevnavn/Navn, Klasse, Faggruppe, Type varsel, Sendt, Fødselsdato. Karakterfil: Elev, Klasse, Gruppe, Fagkode, Karakter, Faglærer, Halvår. Elevfil: Fornavn, Etternavn, Fødselsdato, Programområde, Fritak i sidemål, Inntakspoeng.
+                Kontroller at filene inneholder riktige kolonner: Fraværsfil: Navn, Klasse, Fagnavn, Faggruppe/Fagkode, H1+H2 % udok. fravær, H1+H2 timer udok. fravær, Lærer. Varselfil: Elevnavn/Navn, Klasse, Faggruppe, Type varsel, Sendt, Fødselsdato. Karakterfil: Elev, Klasse, Gruppe, Fagkode, Karakter, Faglærer, Halvår. Elevfil: Fornavn, Etternavn, Fødselsdato, Programområde, Fritak i sidemål, Inntakspoeng. Fødselsnummer brukes hvis det finnes for å beregne kjønn.
               </p>
             </div>
           </div>
@@ -646,7 +649,7 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
             { key: 'absence', label: 'Fravær', sub: 'Fraværsrapport', cols: ['Navn', 'Klasse', 'Fagnavn', 'Faggruppe', 'H1+H2 % udok. fravær', 'H1+H2 timer udok. fravær', 'Lærer', 'Kontaktlærer', 'Avbrudd i skoleåret'] },
             { key: 'warnings', label: 'Varsler', sub: 'Varseloversikt*', cols: ['Elevnavn', 'Klasse', 'Faggruppe', 'Type varsel', 'Sendt dato', 'Fødselsdato'] },
             { key: 'grades', label: 'Karakterer', sub: 'Karakterrapport', cols: ['Elev', 'Klassegruppe', 'Gruppe', 'Fagkode', 'Karakter', 'Faglærer', 'Halvår'] },
-            { key: 'studentInfo', label: 'Elevfil', sub: 'Elevliste', cols: ['Fornavn', 'Etternavn', 'Fødselsdato', 'Programområde', 'Fritak i sidemål', 'Inntakspoeng', 'Klasse'] },
+            { key: 'studentInfo', label: 'Elevfil', sub: 'Elevliste', cols: ['Fornavn', 'Etternavn', 'Fødselsdato', 'Programområde', 'Fritak i sidemål', 'Inntakspoeng', 'Klasse', 'Fødselsnummer (valgfri)'] },
             { key: 'preset', label: 'Preset-fil', sub: 'Valgfri', cols: ['Navn', 'Rolle', 'Klasser'] },
           ] as const).map(({ key, label, sub, cols }) => {
             const detected = detectedTypes.has(key)

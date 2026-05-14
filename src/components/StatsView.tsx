@@ -1,7 +1,7 @@
 import { useMemo, useState, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { Download, BarChart2 } from 'lucide-react'
-import type { DataStore } from '../types'
+import type { DataStore, StudentGender } from '../types'
 import {
   buildStudentClassKey,
   buildStudentSubjectKey,
@@ -20,6 +20,7 @@ interface ClassStats {
   className: string
   studentCount: number
   avgAbsence: number
+  avgAbsenceByGender: Partial<Record<StudentGender, number>>
   ivCount: number
   ivStudentCount: number
   grade1Count: number
@@ -37,6 +38,8 @@ interface ClassStats {
   avgGrunnskolepoeng: number | null
   avgGrade: number | null
   avgGradeT1: number | null
+  avgGradeByGender: Partial<Record<StudentGender, number>>
+  avgGradeT1ByGender: Partial<Record<StudentGender, number>>
 }
 
 type MetricKey =
@@ -56,6 +59,7 @@ interface LevelStats {
   classCount: number
   studentCount: number
   avgAbsence: number
+  avgAbsenceByGender: Partial<Record<StudentGender, number>>
   ivCount: number
   ivStudentCount: number
   grade1Count: number
@@ -73,6 +77,8 @@ interface LevelStats {
   avgGrunnskolepoeng: number | null
   avgGrade: number | null
   avgGradeT1: number | null
+  avgGradeByGender: Partial<Record<StudentGender, number>>
+  avgGradeT1ByGender: Partial<Record<StudentGender, number>>
 }
 
 type SortKey =
@@ -174,18 +180,145 @@ function gradeDelta(avgGrade: number | null, avgGrunnskolepoeng: number | null):
   return avgGrade - avgGrunnskolepoeng
 }
 
+const GENDER_ORDER: StudentGender[] = ['girl', 'boy']
+const GENDER_LABEL: Record<StudentGender, string> = {
+  girl: 'Jenter',
+  boy: 'Gutter',
+}
+const GENDER_TONE: Record<StudentGender, string> = {
+  girl: 'text-rose-700',
+  boy: 'text-sky-700',
+}
+
 export default function StatsView({ data, threshold: propThreshold }: Props) {
   const [selectedMetric, setSelectedMetric] = useState<MetricKey | null>(null)
   const [tableSort, setTableSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null)
   const [vgFilter, setVgFilter] = useState<string | null>(null)
   const [termFilter, setTermFilter] = useState<'1' | '2'>('1')
   const [localThreshold, setLocalThreshold] = useState<number>(propThreshold)
+  const [visibleGenderAverages, setVisibleGenderAverages] = useState<Record<StudentGender, boolean>>({ girl: false, boy: false })
   const threshold = localThreshold
   const summaryRef = useRef<HTMLDivElement>(null)
   const tableRef = useRef<HTMLDivElement>(null)
+  const visibleGenderKeys = useMemo(
+    () => GENDER_ORDER.filter(gender => visibleGenderAverages[gender]),
+    [visibleGenderAverages]
+  )
 
   const toggleMetric = (metric: MetricKey) => {
     setSelectedMetric(current => (current === metric ? null : metric))
+  }
+
+  const toggleGenderAverage = (gender: StudentGender) => {
+    setVisibleGenderAverages(current => ({
+      ...current,
+      [gender]: !current[gender],
+    }))
+  }
+
+  const renderAverageValue = (
+    value: number | null,
+    byGender: Partial<Record<StudentGender, number>>,
+    decimals = 2,
+    suffix = ''
+  ) => (
+    <div className="leading-tight">
+      <div>{value === null ? '—' : `${fmt(value, decimals)}${suffix}`}</div>
+      {visibleGenderKeys.map(gender => {
+        const genderValue = byGender[gender]
+        if (genderValue === undefined) return null
+        return (
+          <div key={gender} className={`text-[10px] font-medium ${GENDER_TONE[gender]}`}>
+            {GENDER_LABEL[gender]}: {fmt(genderValue, decimals)}{suffix}
+          </div>
+        )
+      })}
+    </div>
+  )
+
+  const absenceSubjectClassLookup = useMemo(
+    () => createAbsenceSubjectClassLookup(data.absences),
+    [data.absences]
+  )
+
+  const gradesByStudentT1 = useMemo(() => {
+    const result = new Map<string, string[]>()
+    data.grades.forEach(grade => {
+      const halvaar = grade.halvår.toString().trim().toLowerCase()
+      const isT1 = halvaar === '1' || (halvaar.includes('1') && !halvaar.includes('2'))
+      if (!isT1) return
+
+      const resolvedClass = grade.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, grade.navn, grade.subjectGroup)
+      if (!resolvedClass) return
+
+      const studentKey = buildStudentClassKey(grade.navn, resolvedClass)
+      if (!result.has(studentKey)) result.set(studentKey, [])
+      result.get(studentKey)!.push(grade.grade)
+    })
+    return result
+  }, [data.grades, absenceSubjectClassLookup])
+
+  const gradesByStudentT2 = useMemo(() => {
+    const result = new Map<string, string[]>()
+    data.grades.forEach(grade => {
+      const halvaar = grade.halvår.toString().trim().toLowerCase()
+      const isT2 = halvaar === '2' || (halvaar.includes('2') && !halvaar.includes('1'))
+      if (!isT2) return
+
+      const resolvedClass = grade.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, grade.navn, grade.subjectGroup)
+      if (!resolvedClass) return
+
+      const studentKey = buildStudentClassKey(grade.navn, resolvedClass)
+      if (!result.has(studentKey)) result.set(studentKey, [])
+      result.get(studentKey)!.push(grade.grade)
+    })
+    return result
+  }, [data.grades, absenceSubjectClassLookup])
+
+  const gradesByStudent = termFilter === '1' ? gradesByStudentT1 : gradesByStudentT2
+
+  const studentGenderByKey = useMemo(() => {
+    const result = new Map<string, StudentGender>()
+    data.studentInfo.forEach(student => {
+      if (!student.class || !student.gender) return
+      result.set(buildStudentClassKey(student.navn, student.class), student.gender)
+    })
+    return result
+  }, [data.studentInfo])
+
+  const averageByGenderFromAbsences = (absences: typeof data.absences): Partial<Record<StudentGender, number>> => {
+    const values: Record<StudentGender, number[]> = { girl: [], boy: [] }
+    absences.forEach(absence => {
+      const gender = studentGenderByKey.get(buildStudentClassKey(absence.navn, absence.class))
+      if (!gender) return
+      values[gender].push(absence.percentageAbsence)
+    })
+    return {
+      girl: values.girl.length > 0 ? values.girl.reduce((sum, value) => sum + value, 0) / values.girl.length : undefined,
+      boy: values.boy.length > 0 ? values.boy.reduce((sum, value) => sum + value, 0) / values.boy.length : undefined,
+    }
+  }
+
+  const averageByGenderFromGradeMap = (
+    studentKeys: Set<string>,
+    gradeMap: Map<string, string[]>
+  ): Partial<Record<StudentGender, number>> => {
+    const values: Record<StudentGender, number[]> = { girl: [], boy: [] }
+    studentKeys.forEach(studentKey => {
+      const gender = studentGenderByKey.get(studentKey)
+      if (!gender) return
+      const grades = gradeMap.get(studentKey) ?? []
+      grades.forEach(grade => {
+        const numeric = Number.parseInt(grade, 10)
+        if (!Number.isNaN(numeric) && numeric >= 1 && numeric <= 6) {
+          values[gender].push(numeric)
+        }
+      })
+    })
+    return {
+      girl: values.girl.length > 0 ? values.girl.reduce((sum, value) => sum + value, 0) / values.girl.length : undefined,
+      boy: values.boy.length > 0 ? values.boy.reduce((sum, value) => sum + value, 0) / values.boy.length : undefined,
+    }
   }
 
   const exportStatsPNG = async () => {
@@ -604,8 +737,6 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
   }
 
   const stats = useMemo(() => {
-    const absenceSubjectClassLookup = createAbsenceSubjectClassLookup(data.absences)
-
     // Warning map: normalizedNavn::normalizedSubjectGroup -> count by type
     const warningMap = new Map<string, { type: string }[]>()
     data.warnings.forEach(w => {
@@ -614,33 +745,12 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
       warningMap.get(key)!.push({ type: w.warningType })
     })
 
-    // Grade maps: T1 and T2
-    const gradesByStudentT1 = new Map<string, string[]>()
-    const gradesByStudentT2 = new Map<string, string[]>()
-    data.grades.forEach(g => {
-      const h = g.halvår.toString().trim()
-      const isT1 = h === '1' || (h.toLowerCase().includes('1') && !h.toLowerCase().includes('2'))
-      const isT2 = h === '2' || (h.toLowerCase().includes('2') && !h.toLowerCase().includes('1'))
-      const resolvedClass = g.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, g.navn, g.subjectGroup)
-      if (!resolvedClass) return
-      const key = buildStudentClassKey(g.navn, resolvedClass)
-      if (isT1) {
-        if (!gradesByStudentT1.has(key)) gradesByStudentT1.set(key, [])
-        gradesByStudentT1.get(key)!.push(g.grade)
-      }
-      if (isT2) {
-        if (!gradesByStudentT2.has(key)) gradesByStudentT2.set(key, [])
-        gradesByStudentT2.get(key)!.push(g.grade)
-      }
-    })
-    // Use selected term's grade map for main stats
-    const gradesByStudent = termFilter === '1' ? gradesByStudentT1 : gradesByStudentT2
-
     // Intake points map: normalizedNavn::normalizedClass -> intakePoints
     const intakeByStudent = new Map<string, number | null>()
     data.studentInfo.forEach(si => {
       if (!si.class) return
-      intakeByStudent.set(buildStudentClassKey(si.navn, si.class), si.intakePoints)
+      const studentKey = buildStudentClassKey(si.navn, si.class)
+      intakeByStudent.set(studentKey, si.intakePoints)
     })
 
     // All unique classes sorted
@@ -760,6 +870,7 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
         className,
         studentCount,
         avgAbsence,
+        avgAbsenceByGender: averageByGenderFromAbsences(absences),
         ivCount,
         ivStudentCount,
         grade1Count,
@@ -777,6 +888,8 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
         avgGrunnskolepoeng,
         avgGrade,
         avgGradeT1,
+        avgGradeByGender: averageByGenderFromGradeMap(studentKeys, gradesByStudent),
+        avgGradeT1ByGender: termFilter === '2' ? averageByGenderFromGradeMap(studentKeys, gradesByStudentT1) : {},
       }
     }
 
@@ -818,6 +931,7 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
         data.absences.length > 0
           ? data.absences.reduce((s, r) => s + r.percentageAbsence, 0) / data.absences.length
           : 0,
+      avgAbsenceByGender: averageByGenderFromAbsences(data.absences),
       ivCount: perClass.reduce((s, c) => s + c.ivCount, 0),
           ivStudentCount: overallIvStudentCount,
       grade1Count: perClass.reduce((s, c) => s + c.grade1Count, 0),
@@ -848,6 +962,10 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
         const t1vals = perClass.flatMap(c => c.avgGradeT1 !== null ? [c.avgGradeT1] : [])
         return t1vals.length > 0 ? t1vals.reduce((a, b) => a + b, 0) / t1vals.length : null
       })(),
+      avgGradeByGender: averageByGenderFromGradeMap(new Set(data.absences.map(r => buildStudentClassKey(r.navn, r.class))), gradesByStudent),
+      avgGradeT1ByGender: termFilter === '2'
+        ? averageByGenderFromGradeMap(new Set(data.absences.map(r => buildStudentClassKey(r.navn, r.class))), gradesByStudentT1)
+        : {},
     }
 
     return { overall, perClass }
@@ -884,6 +1002,7 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
           classCount: classRows.length,
           studentCount,
           avgAbsence,
+          avgAbsenceByGender: averageByGenderFromAbsences(levelAbsences),
           ivCount: classRows.reduce((sum, c) => sum + c.ivCount, 0),
           ivStudentCount,
           grade1Count: classRows.reduce((sum, c) => sum + c.grade1Count, 0),
@@ -910,6 +1029,10 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
             const t1vals = classRows.flatMap(c => c.avgGradeT1 !== null ? [c.avgGradeT1] : [])
             return t1vals.length > 0 ? t1vals.reduce((a, b) => a + b, 0) / t1vals.length : null
           })(),
+          avgGradeByGender: averageByGenderFromGradeMap(new Set(levelAbsences.map(row => buildStudentClassKey(row.navn, row.class))), gradesByStudent),
+          avgGradeT1ByGender: termFilter === '2'
+            ? averageByGenderFromGradeMap(new Set(levelAbsences.map(row => buildStudentClassKey(row.navn, row.class))), gradesByStudentT1)
+            : {},
         }
       })
       .filter((row): row is LevelStats => row !== null)
@@ -997,6 +1120,7 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
         className: 'Totalt',
         studentCount: 0,
         avgAbsence: 0,
+        avgAbsenceByGender: {},
         ivCount: 0,
         ivStudentCount: 0,
         grade1Count: 0,
@@ -1014,6 +1138,8 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
         avgGrunnskolepoeng: null,
         avgGrade: null,
         avgGradeT1: null,
+        avgGradeByGender: {},
+        avgGradeT1ByGender: {},
       }
     }
 
@@ -1064,6 +1190,7 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
       className: 'Totalt',
       studentCount: totalStudents,
       avgAbsence,
+      avgAbsenceByGender: averageByGenderFromAbsences(filteredAbsences),
       ivCount: totalIvCount,
       ivStudentCount: totalIvStudents,
       grade1Count: totalGrade1Count,
@@ -1081,8 +1208,12 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
       avgGrunnskolepoeng,
       avgGrade,
       avgGradeT1,
+      avgGradeByGender: averageByGenderFromGradeMap(new Set(filteredAbsences.map(row => buildStudentClassKey(row.navn, row.class))), gradesByStudent),
+      avgGradeT1ByGender: termFilter === '2'
+        ? averageByGenderFromGradeMap(new Set(filteredAbsences.map(row => buildStudentClassKey(row.navn, row.class))), gradesByStudentT1)
+        : {},
     }
-  }, [filteredPerClass, data.absences])
+  }, [filteredPerClass, data.absences, gradesByStudent, gradesByStudentT1, termFilter])
 
   return (
     <div className="space-y-6">
@@ -1100,7 +1231,24 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
           />
           <span className="text-sm text-slate-600">%</span>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
+          <span className="px-2 text-xs font-medium text-slate-500">Kjønnssnitt</span>
+          {GENDER_ORDER.map(gender => (
+            <button
+              key={gender}
+              type="button"
+              onClick={() => toggleGenderAverage(gender)}
+              className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+                visibleGenderAverages[gender]
+                  ? 'bg-sky-100 text-sky-800'
+                  : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              {GENDER_LABEL[gender]}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           onClick={() => void generateStatsPptx()}
@@ -1140,7 +1288,7 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
           />
           <StatCard
             label="Gj.snitt fravær"
-            value={`${fmt(filteredStats.avgAbsence, 1)}%`}
+            value={renderAverageValue(filteredStats.avgAbsence, filteredStats.avgAbsenceByGender, 1, '%')}
             active={selectedMetric === 'avgAbsence'}
             onClick={() => toggleMetric('avgAbsence')}
           />
@@ -1379,7 +1527,7 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
               {filteredPerClass.map(c => (
                 <tr key={c.className} className="border-b border-slate-100 hover:bg-sky-50/40">
                   <td className="py-2 px-3 font-medium text-slate-900">{c.className}</td>
-                  <Td center className="bg-slate-50 border-l border-slate-200">{fmt(c.avgAbsence, 1)}%</Td>
+                  <Td center className="bg-slate-50 border-l border-slate-200">{renderAverageValue(c.avgAbsence, c.avgAbsenceByGender, 1, '%')}</Td>
                   <Td center className="border-l border-slate-200">
                     {c.ivCount ? `${c.ivCount} (${c.ivStudentCount})` : '—'}
                   </Td>
@@ -1390,8 +1538,8 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
                     {c.missingWarnings ? `${c.missingWarnings} (${c.missingWarningStudentCount})` : '—'}
                   </Td>
                   <Td center className="border-l border-slate-200">{fmt(c.avgGrunnskolepoeng)}</Td>
-                  {termFilter === '2' && <Td center>{fmt(c.avgGradeT1)}</Td>}
-                  <Td center>{fmt(c.avgGrade)}</Td>
+                  {termFilter === '2' && <Td center>{renderAverageValue(c.avgGradeT1, c.avgGradeT1ByGender)}</Td>}
+                  <Td center>{renderAverageValue(c.avgGrade, c.avgGradeByGender)}</Td>
                   {termFilter === '2' ? (
                     <>
                       <Td
@@ -1438,7 +1586,7 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
             <tfoot>
               <tr className="border-t-2 border-slate-300 font-semibold">
                 <td className="py-2 px-3 text-slate-900 bg-slate-100">Totalt</td>
-                <Td center className="bg-slate-100 border-l border-slate-200">{fmt(filteredStats.avgAbsence, 1)}%</Td>
+                <Td center className="bg-slate-100 border-l border-slate-200">{renderAverageValue(filteredStats.avgAbsence, filteredStats.avgAbsenceByGender, 1, '%')}</Td>
                 <Td center className="bg-slate-50 border-l border-slate-200">
                   {filteredStats.ivCount ? `${filteredStats.ivCount} (${filteredStats.ivStudentCount})` : '—'}
                 </Td>
@@ -1455,8 +1603,8 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
                     : '—'}
                 </Td>
                 <Td center className="bg-slate-50 border-l border-slate-200">{fmt(filteredStats.avgGrunnskolepoeng)}</Td>
-                {termFilter === '2' && <Td center className="bg-slate-50">{fmt(filteredStats.avgGradeT1)}</Td>}
-                <Td center className="bg-slate-50">{fmt(filteredStats.avgGrade)}</Td>
+                {termFilter === '2' && <Td center className="bg-slate-50">{renderAverageValue(filteredStats.avgGradeT1, filteredStats.avgGradeT1ByGender)}</Td>}
+                <Td center className="bg-slate-50">{renderAverageValue(filteredStats.avgGrade, filteredStats.avgGradeByGender)}</Td>
                 {termFilter === '2' ? (
                   <>
                     <Td

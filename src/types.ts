@@ -26,12 +26,15 @@ export interface WarningRecord {
   isAdult: boolean
 }
 
+export type StudentGender = 'girl' | 'boy'
+
 export interface StudentInfoRecord {
   navn: string
   fornavn: string
   etternavn: string
   class?: string
   isAdult: boolean
+  gender: StudentGender | null
   programArea: string
   sidemalExemption: boolean
   intakePoints: number | null

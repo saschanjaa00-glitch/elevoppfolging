@@ -1,13 +1,21 @@
 import { useMemo, useRef, useState, type RefObject } from 'react'
 import * as XLSX from 'xlsx'
 import { ChevronDown, ChevronRight, Upload, X, Expand } from 'lucide-react'
-import type { GradeRecord } from '../types'
+import type { AbsenceRecord, GradeRecord, StudentGender, StudentInfoRecord } from '../types'
 import { getFagnavn } from '../fagkodeLookup'
+import {
+  buildStudentClassKey,
+  createAbsenceSubjectClassLookup,
+  createStudentInfoLookup,
+  resolveClassFromSubjectLookup,
+} from '../studentInfoUtils'
 
 type ViewMode = 'subject' | 'teacher'
 
 interface Props {
   baseGrades: GradeRecord[]
+  studentInfo: StudentInfoRecord[]
+  absences: AbsenceRecord[]
 }
 
 interface TrendRow {
@@ -30,9 +38,14 @@ interface GraphSeries {
   isMainLine?: boolean
   dashed?: boolean
   connectTo?: string
+  excludeFromRangeBand?: boolean
 }
 
 const TEACHER_SERIES_COLORS = ['#f97316', '#16a34a', '#a855f7', '#e11d48', '#14b8a6', '#f59e0b', '#7c3aed', '#65a30d']
+const GENDER_SERIES: Record<StudentGender, { label: string; color: string }> = {
+  girl: { label: 'Jenter', color: '#e11d48' },
+  boy: { label: 'Gutter', color: '#0284c7' },
+}
 
 const normalizeHeader = (header: string): string =>
   header
@@ -196,7 +209,7 @@ function TrendGraph({
   }
 
   // Per-label highest and lowest avg across non-main-line series (teacher overlays only)
-  const teacherSeriesPoints = seriesPoints.filter(s => !s.isMainLine)
+  const teacherSeriesPoints = seriesPoints.filter(s => !s.isMainLine && !s.excludeFromRangeBand)
   const perLabelExtremes = new Map<string, { maxAvg: number; minAvg: number }>()
   teacherSeriesPoints.forEach(s => {
     s.points.forEach(p => {
@@ -370,7 +383,7 @@ function TrendGraph({
   )
 }
 
-export default function KarakterutviklingPanel({ baseGrades }: Props) {
+export default function KarakterutviklingPanel({ baseGrades, studentInfo, absences }: Props) {
   const [uploadedGrades, setUploadedGrades] = useState<GradeRecord[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -385,6 +398,7 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
   const [teacherSubjectBreakdownByKey, setTeacherSubjectBreakdownByKey] = useState<Record<string, boolean>>({})
   const [tableSortKey, setTableSortKey] = useState<string | null>(null)
   const [tableSortDir, setTableSortDir] = useState<'asc' | 'desc'>('asc')
+  const [visibleGenderSeries, setVisibleGenderSeries] = useState<Record<StudentGender, boolean>>({ girl: false, boy: false })
   const [expandedGraph, setExpandedGraph] = useState<null | {
     title: string
     labels: string[]
@@ -395,9 +409,27 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
   const modalSvgRef = useRef<SVGSVGElement | null>(null)
 
   const allGrades = useMemo(() => [...baseGrades, ...uploadedGrades], [baseGrades, uploadedGrades])
+  const absenceSubjectClassLookup = useMemo(() => createAbsenceSubjectClassLookup(absences), [absences])
+  const studentInfoLookup = useMemo(() => createStudentInfoLookup(studentInfo), [studentInfo])
+
+  const allGradesWithGender = useMemo(() => {
+    return allGrades.map(grade => {
+      const resolvedClass = grade.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, grade.navn, grade.subjectGroup)
+      const studentKey = resolvedClass ? buildStudentClassKey(grade.navn, resolvedClass) : null
+      const gender = studentKey ? (studentInfoLookup.get(studentKey)?.gender ?? null) : null
+      return { ...grade, gender }
+    })
+  }, [allGrades, absenceSubjectClassLookup, studentInfoLookup])
+
+  const toggleGenderSeries = (gender: StudentGender) => {
+    setVisibleGenderSeries(current => ({
+      ...current,
+      [gender]: !current[gender],
+    }))
+  }
 
   const rows = useMemo(() => {
-    const source = allGrades.filter(g => g.skoleår)
+    const source = allGradesWithGender.filter(g => g.skoleår)
     const map = new Map<string, TrendRow>()
 
     source.forEach(g => {
@@ -439,10 +471,10 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
     })
 
     return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, 'nb-NO'))
-  }, [allGrades, viewMode])
+  }, [allGradesWithGender, viewMode])
 
   const teacherRowsBySubject = useMemo(() => {
-    const source = allGrades.filter(g => g.skoleår)
+    const source = allGradesWithGender.filter(g => g.skoleår)
     const subjectMap = new Map<string, Map<string, SubjectTeacherRow>>()
 
     source.forEach(g => {
@@ -497,10 +529,10 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
     })
 
     return sorted
-  }, [allGrades])
+  }, [allGradesWithGender])
 
   const subjectRowsByTeacher = useMemo(() => {
-    const source = allGrades.filter(g => g.skoleår)
+    const source = allGradesWithGender.filter(g => g.skoleår)
     const teacherMap = new Map<string, Map<string, TrendRow>>()
 
     source.forEach(g => {
@@ -539,7 +571,88 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
       sorted.set(teacher, Array.from(subjectMap.values()).sort((a, b) => a.label.localeCompare(b.label, 'nb-NO')))
     })
     return sorted
-  }, [allGrades])
+  }, [allGradesWithGender])
+
+  const genderRowsBySubject = useMemo(() => {
+    const subjectMap = new Map<string, Map<StudentGender, TrendRow>>()
+
+    allGradesWithGender.forEach(grade => {
+      if (!grade.skoleår || !grade.gender) return
+      const schoolYear = grade.skoleår.replace(/[^0-9A-Za-z]/g, '')
+      if (!schoolYear) return
+
+      const numeric = gradeToNumeric(grade.grade)
+      if (numeric === null) return
+
+      const subjectKey = grade.fagkode?.trim() || 'Ukjent fagkode'
+      if (!subjectMap.has(subjectKey)) subjectMap.set(subjectKey, new Map())
+      const byGender = subjectMap.get(subjectKey)!
+
+      if (!byGender.has(grade.gender)) {
+        byGender.set(grade.gender, {
+          key: `subject-gender::${subjectKey}::${grade.gender}`,
+          label: GENDER_SERIES[grade.gender].label,
+          yearly: {},
+          yearlyH1: {},
+          yearlyH2: {},
+          termSeries: {},
+        })
+      }
+
+      const row = byGender.get(grade.gender)!
+      addAggregate(row.yearly, schoolYear, numeric)
+
+      const term = normalizeHalvaar(grade.halvår)
+      if (term === 'H1') addAggregate(row.yearlyH1, schoolYear, numeric)
+      if (term === 'H2') addAggregate(row.yearlyH2, schoolYear, numeric)
+      if (term) addAggregate(row.termSeries, `${schoolYear} ${term}`, numeric)
+    })
+
+    return subjectMap
+  }, [allGradesWithGender])
+
+  const genderRowsByTeacher = useMemo(() => {
+    const teacherMap = new Map<string, Map<StudentGender, TrendRow>>()
+
+    allGradesWithGender.forEach(grade => {
+      if (!grade.skoleår || !grade.gender) return
+      const schoolYear = grade.skoleår.replace(/[^0-9A-Za-z]/g, '')
+      if (!schoolYear) return
+
+      const numeric = gradeToNumeric(grade.grade)
+      if (numeric === null) return
+
+      const teacher = grade.subjectTeacher?.trim() || 'Ukjent lærer'
+      if (!teacherMap.has(teacher)) teacherMap.set(teacher, new Map())
+      const byGender = teacherMap.get(teacher)!
+
+      if (!byGender.has(grade.gender)) {
+        byGender.set(grade.gender, {
+          key: `teacher-gender::${teacher}::${grade.gender}`,
+          label: GENDER_SERIES[grade.gender].label,
+          yearly: {},
+          yearlyH1: {},
+          yearlyH2: {},
+          termSeries: {},
+        })
+      }
+
+      const row = byGender.get(grade.gender)!
+      addAggregate(row.yearly, schoolYear, numeric)
+
+      const term = normalizeHalvaar(grade.halvår)
+      if (term === 'H1') addAggregate(row.yearlyH1, schoolYear, numeric)
+      if (term === 'H2') addAggregate(row.yearlyH2, schoolYear, numeric)
+      if (term) addAggregate(row.termSeries, `${schoolYear} ${term}`, numeric)
+    })
+
+    return teacherMap
+  }, [allGradesWithGender])
+
+  const hasGenderSeriesData = useMemo(
+    () => allGradesWithGender.some(grade => grade.gender !== null),
+    [allGradesWithGender]
+  )
 
   const schoolYears = useMemo(
     () => sortSchoolYears(Array.from(new Set(rows.flatMap(r => Object.keys(r.yearly))))),
@@ -942,6 +1055,25 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
           >
             Per lærer
           </button>
+          {hasGenderSeriesData && (
+            <div className="ml-2 flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
+              <span className="px-2 text-xs font-medium text-slate-500">Kjønnssnitt</span>
+              {(Object.keys(GENDER_SERIES) as StudentGender[]).map(gender => (
+                <button
+                  key={gender}
+                  type="button"
+                  onClick={() => toggleGenderSeries(gender)}
+                  className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+                    visibleGenderSeries[gender]
+                      ? 'bg-sky-100 text-sky-800'
+                      : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {GENDER_SERIES[gender].label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1107,8 +1239,28 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                 const getLinkedColor = (key: string) => linkedSubjectColors[key] ?? '#0284c7'
                 const teacherSubjectRows = viewMode === 'teacher' ? (subjectRowsByTeacher.get(row.label) ?? []) : []
                 const showSubjectBreakdown = viewMode === 'teacher' && !!teacherSubjectBreakdownByKey[row.key]
+                const genderRows = viewMode === 'subject' ? genderRowsBySubject.get(row.label) : genderRowsByTeacher.get(row.label)
+                const genderSeriesH2: GraphSeries[] = (Object.keys(GENDER_SERIES) as StudentGender[])
+                  .filter(gender => visibleGenderSeries[gender] && genderRows?.get(gender))
+                  .map(gender => ({
+                    name: `${GENDER_SERIES[gender].label} (snitt)`,
+                    values: genderRows!.get(gender)!.yearlyH2,
+                    color: GENDER_SERIES[gender].color,
+                    dashed: true,
+                    excludeFromRangeBand: true,
+                  }))
+                const genderTermSeries: GraphSeries[] = (Object.keys(GENDER_SERIES) as StudentGender[])
+                  .filter(gender => visibleGenderSeries[gender] && genderRows?.get(gender))
+                  .map(gender => ({
+                    name: `${GENDER_SERIES[gender].label} (snitt)`,
+                    values: genderRows!.get(gender)!.termSeries,
+                    color: GENDER_SERIES[gender].color,
+                    dashed: true,
+                    excludeFromRangeBand: true,
+                  }))
                 const h2Series: GraphSeries[] = [
                   { name: row.label, values: row.yearlyH2, color: '#0284c7', isMainLine: true },
+                  ...genderSeriesH2,
                   ...linkedRows.map((linkedRow) => ({
                     name: linkedRow.label,
                     values: linkedRow.yearlyH2,
@@ -1138,6 +1290,7 @@ export default function KarakterutviklingPanel({ baseGrades }: Props) {
                 ]
                 const termSeries: GraphSeries[] = [
                   { name: row.label, values: row.termSeries, color: '#0284c7', isMainLine: true },
+                  ...genderTermSeries,
                   ...linkedRows.map((linkedRow) => ({
                     name: linkedRow.label,
                     values: linkedRow.termSeries,

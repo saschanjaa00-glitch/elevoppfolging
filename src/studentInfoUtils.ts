@@ -1,4 +1,4 @@
-import type { AbsenceRecord, StudentInfoRecord } from './types'
+import type { AbsenceRecord, StudentGender, StudentInfoRecord } from './types'
 
 export const normalizeMatch = (value: string): string =>
   value
@@ -6,6 +6,16 @@ export const normalizeMatch = (value: string): string =>
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '')
+
+export const inferGenderFromFodselsnummer = (value: string): StudentGender | null => {
+  const digits = (value ?? '').replace(/\D/g, '')
+  if (digits.length < 9) return null
+
+  const ninthDigit = Number(digits[8])
+  if (!Number.isInteger(ninthDigit)) return null
+
+  return ninthDigit % 2 === 0 ? 'girl' : 'boy'
+}
 
 export const buildStudentClassKey = (navn: string, className?: string): string => {
   const normalizedName = normalizeMatch(navn)

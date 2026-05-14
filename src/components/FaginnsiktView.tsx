@@ -1,23 +1,37 @@
 import { useEffect, useMemo, useState, Fragment } from 'react'
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight } from 'lucide-react'
-import type { DataStore } from '../types'
+import type { DataStore, StudentGender } from '../types'
 import KarakterutviklingPanel from './KarakterutviklingPanel'
+import { fagkodeLookup } from '../fagkodeLookup'
 import {
   buildStudentClassKey,
   createAbsenceSubjectClassLookup,
+  createStudentInfoLookup,
   normalizeMatch,
   resolveClassFromSubjectLookup,
 } from '../studentInfoUtils'
 
-// Strip trailing group suffix like -1, -2 from subject codes (MAT1023-1 → MAT1023)
-const subjectMergeKey = (value: string): string => {
-  const tail = (value ?? '').trim().split('/').pop()?.trim() ?? ''
-  return normalizeMatch(tail.replace(/-[A-Za-z0-9]+$/, ''))
-}
-
 const subjectDisplayCode = (value: string): string => {
   const code = (value.split('/').pop() ?? value).trim()
   return code.replace(/-[A-Za-z0-9]+$/, '')
+}
+
+const subjectLabelFromCode = (subjectCode: string): string | null => {
+  const key = (subjectCode ?? '').trim().toUpperCase()
+  if (!key) return null
+  return fagkodeLookup[key] ?? null
+}
+
+const subjectAggregateKey = (
+  subjectGroup: string,
+  subjectNameByCode?: Map<string, string>
+): string => {
+  const code = subjectDisplayCode(subjectGroup)
+  const codeKey = normalizeMatch(code)
+  const subjectNameFromAbsence = subjectNameByCode?.get(codeKey)
+  const subjectNameFromLookup = subjectLabelFromCode(code)
+  const canonicalSubjectName = subjectNameFromAbsence ?? subjectNameFromLookup ?? code
+  return normalizeMatch(canonicalSubjectName)
 }
 
 interface Props {
@@ -35,6 +49,9 @@ interface TeacherInSubject {
   gradesCounts: Record<string, number>
   gradesCountsT1: Record<string, number>
   gradesCountsT2: Record<string, number>
+  genderGradesCounts: Record<StudentGender, Record<string, number>>
+  genderGradesCountsT1: Record<StudentGender, Record<string, number>>
+  genderGradesCountsT2: Record<StudentGender, Record<string, number>>
 }
 
 interface SubjectRow {
@@ -47,6 +64,9 @@ interface SubjectRow {
   gradesCounts: Record<string, number>
   gradesCountsT1: Record<string, number>
   gradesCountsT2: Record<string, number>
+  genderGradesCounts: Record<StudentGender, Record<string, number>>
+  genderGradesCountsT1: Record<StudentGender, Record<string, number>>
+  genderGradesCountsT2: Record<StudentGender, Record<string, number>>
   teachers: TeacherInSubject[]
 }
 
@@ -68,7 +88,16 @@ type SortKey =
   | 'grade6'
   | 'avgGrade'
   | 'avgDelta'
+  | 'genderDiff'
 type SortDirection = 'asc' | 'desc'
+
+type GenderKey = 'girl' | 'boy'
+
+const GENDER_ORDER: GenderKey[] = ['girl', 'boy']
+const GENDER_LABEL: Record<GenderKey, string> = {
+  girl: 'Jenter',
+  boy: 'Gutter',
+}
 
 const allGrades = ['IV', '1', '2', '3', '4', '5', '6'] as const
 const gradeSortKey: Record<(typeof allGrades)[number], SortKey> = {
@@ -102,6 +131,38 @@ const avgGradeNum = (gradesCounts: Record<string, number>): number | null => {
 const gradePercentLabel = (count: number, total: number): string =>
   `${total > 0 ? ((count / total) * 100).toFixed(0) : '0'}%`
 
+const truncateTitle = (value: string, maxLength = 25): string => {
+  if (value.length <= maxLength) return value
+  return `${value.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`
+}
+
+const emptyGenderCounts = (): Record<StudentGender, Record<string, number>> => ({
+  girl: {},
+  boy: {},
+})
+
+const averageFromGrades = (counts: Record<string, number>): number | null => {
+  const grades = ['1', '2', '3', '4', '5', '6'] as const
+  let sum = 0
+  let total = 0
+  grades.forEach(grade => {
+    const count = counts[grade] ?? 0
+    sum += Number(grade) * count
+    total += count
+  })
+  return total > 0 ? sum / total : null
+}
+
+const genderGap = (
+  girlCounts: Record<string, number>,
+  boyCounts: Record<string, number>
+): number | null => {
+  const girlAvg = averageFromGrades(girlCounts)
+  const boyAvg = averageFromGrades(boyCounts)
+  if (girlAvg === null || boyAvg === null) return null
+  return girlAvg - boyAvg
+}
+
 export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChange }: Props) {
   const [searchTerm, setSearchTerm] = useState('')
   const [activeSubtab, setActiveSubtab] = useState<'oversikt' | 'karakterutvikling'>(subtab)
@@ -111,6 +172,7 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
   const [expandedSubject, setExpandedSubject] = useState<string | null>(null)
   const [subjectForPdfPrompt, setSubjectForPdfPrompt] = useState<SubjectRow | null>(null)
   const [anonymizedTeacherNames, setAnonymizedTeacherNames] = useState<string[]>([])
+  const [visibleGenderAverages, setVisibleGenderAverages] = useState<Record<StudentGender, boolean>>({ girl: false, boy: false })
     useEffect(() => {
       setActiveSubtab(subtab)
     }, [subtab])
@@ -125,6 +187,40 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
     [data.absences]
   )
 
+  const studentInfoLookup = useMemo(
+    () => createStudentInfoLookup(data.studentInfo),
+    [data.studentInfo]
+  )
+
+  const toggleGenderAverage = (gender: StudentGender) => {
+    setVisibleGenderAverages(current => ({
+      ...current,
+      [gender]: !current[gender],
+    }))
+  }
+
+  const subjectNameByCode = useMemo(() => {
+    const nameCounts = new Map<string, Map<string, number>>()
+
+    data.absences.forEach(absence => {
+      const codeKey = normalizeMatch(subjectDisplayCode(absence.subjectGroup))
+      const subjectName = absence.subject?.trim() ?? ''
+      if (!codeKey || !subjectName) return
+
+      if (!nameCounts.has(codeKey)) nameCounts.set(codeKey, new Map())
+      const counts = nameCounts.get(codeKey)!
+      counts.set(subjectName, (counts.get(subjectName) ?? 0) + 1)
+    })
+
+    const result = new Map<string, string>()
+    nameCounts.forEach((counts, codeKey) => {
+      const best = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0]
+      if (best) result.set(codeKey, best)
+    })
+
+    return result
+  }, [data.absences])
+
   const normalizedGrades = useMemo(() => {
     return data.grades
       .map(grade => {
@@ -138,7 +234,8 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
 
         const teacher = grade.subjectTeacher?.trim() ?? ''
         const subjectDisplay = grade.subjectGroup?.trim() ?? ''
-        const subjectNorm = subjectMergeKey(subjectDisplay)
+        const subjectNorm = subjectAggregateKey(subjectDisplay, subjectNameByCode)
+        const gender = studentInfoLookup.get(buildStudentClassKey(grade.navn, resolvedClass))?.gender ?? null
         return {
           teacher,
           subjectDisplay,
@@ -148,6 +245,7 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
           gradeValue: grade.grade.toUpperCase().trim(),
           isT1,
           isT2,
+          gender,
         }
       })
       .filter((grade): grade is {
@@ -159,8 +257,14 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
         gradeValue: string
         isT1: boolean
         isT2: boolean
+          gender: StudentGender | null
       } => Boolean(grade?.teacher && grade.subjectDisplay))
-  }, [data.grades, absenceSubjectClassLookup])
+        }, [data.grades, absenceSubjectClassLookup, studentInfoLookup, subjectNameByCode])
+
+  const hasGenderData = useMemo(
+    () => normalizedGrades.some(grade => grade.gender !== null),
+    [normalizedGrades]
+  )
 
   const countsForMode = (
     t1: Record<string, number>,
@@ -204,7 +308,7 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
     const nameCounts = new Map<string, Map<string, number>>()
 
     data.absences.forEach(absence => {
-      const subjectNorm = subjectMergeKey(absence.subjectGroup)
+      const subjectNorm = subjectAggregateKey(absence.subjectGroup, subjectNameByCode)
       const subjectName = absence.subject?.trim() ?? ''
       if (!subjectNorm || !subjectName) return
 
@@ -220,7 +324,7 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
     })
 
     return result
-  }, [data.absences])
+  }, [data.absences, subjectNameByCode])
 
   const subjectRows = useMemo(() => {
     const subjectMap = new Map<string, SubjectRow>()
@@ -254,9 +358,11 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
 
       // Ensure subject row
       if (!subjectMap.has(subjectNorm)) {
+        const subjectNameFromAbsence = subjectNameByNorm.get(subjectNorm)
+        const subjectNameFromLookup = subjectLabelFromCode(subjectCode)
         subjectMap.set(subjectNorm, {
           subjectKey: subjectNorm,
-          subject: subjectNameByNorm.get(subjectNorm) ?? subjectCode,
+          subject: subjectNameFromAbsence ?? subjectNameFromLookup ?? subjectCode,
           studentCount: 0,
           totalVarsels: 0,
           missingWarnings: 0,
@@ -264,6 +370,9 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
           gradesCounts: {},
           gradesCountsT1: {},
           gradesCountsT2: {},
+          genderGradesCounts: emptyGenderCounts(),
+          genderGradesCountsT1: emptyGenderCounts(),
+          genderGradesCountsT2: emptyGenderCounts(),
           teachers: [],
         })
       }
@@ -279,6 +388,9 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
           gradesCounts: {},
           gradesCountsT1: {},
           gradesCountsT2: {},
+          genderGradesCounts: emptyGenderCounts(),
+          genderGradesCountsT1: emptyGenderCounts(),
+          genderGradesCountsT2: emptyGenderCounts(),
         })
       }
       // Ensure student sets
@@ -300,9 +412,19 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
       const row = subjectMap.get(subjectNorm)!
       if (isT1) row.gradesCountsT1[gradeValue] = (row.gradesCountsT1[gradeValue] ?? 0) + 1
       if (isT2) row.gradesCountsT2[gradeValue] = (row.gradesCountsT2[gradeValue] ?? 0) + 1
+      if (grade.gender) {
+        row.genderGradesCounts[grade.gender][gradeValue] = (row.genderGradesCounts[grade.gender][gradeValue] ?? 0) + 1
+        if (isT1) row.genderGradesCountsT1[grade.gender][gradeValue] = (row.genderGradesCountsT1[grade.gender][gradeValue] ?? 0) + 1
+        if (isT2) row.genderGradesCountsT2[grade.gender][gradeValue] = (row.genderGradesCountsT2[grade.gender][gradeValue] ?? 0) + 1
+      }
       const teacherStats = teacherDataBySubject.get(subjectNorm)!.get(teacher)!
       if (isT1) teacherStats.gradesCountsT1[gradeValue] = (teacherStats.gradesCountsT1[gradeValue] ?? 0) + 1
       if (isT2) teacherStats.gradesCountsT2[gradeValue] = (teacherStats.gradesCountsT2[gradeValue] ?? 0) + 1
+      if (grade.gender) {
+        teacherStats.genderGradesCounts[grade.gender][gradeValue] = (teacherStats.genderGradesCounts[grade.gender][gradeValue] ?? 0) + 1
+        if (isT1) teacherStats.genderGradesCountsT1[grade.gender][gradeValue] = (teacherStats.genderGradesCountsT1[grade.gender][gradeValue] ?? 0) + 1
+        if (isT2) teacherStats.genderGradesCountsT2[grade.gender][gradeValue] = (teacherStats.genderGradesCountsT2[grade.gender][gradeValue] ?? 0) + 1
+      }
     })
 
     // Set student counts
@@ -318,7 +440,7 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
     normalizedWarnings.forEach(warning => {
       const studentKey = warning.studentKey
       const subjectDisplay = warning.subjectDisplay
-      const subjectNorm = subjectMergeKey(subjectDisplay)
+      const subjectNorm = subjectAggregateKey(subjectDisplay, subjectNameByCode)
       const key = studentSubjectKey(studentKey, subjectDisplay)
       const label = warningLabel(warning.warningType)
 
@@ -352,7 +474,7 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
       checkedCombos.add(comboKey)
       if ((warningMap.get(comboKey) ?? 0) > 0) return
 
-      const subjectNorm = subjectMergeKey(a.subjectDisplay)
+      const subjectNorm = subjectAggregateKey(a.subjectDisplay, subjectNameByCode)
       const row = subjectMap.get(subjectNorm)
       if (row) row.missingWarnings += 1
 
@@ -369,14 +491,25 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
       const teacherMap = teacherDataBySubject.get(subjectNorm)
       row.teachers = teacherMap
         ? Array.from(teacherMap.values())
-          .map(t => ({ ...t, gradesCounts: countsForMode(t.gradesCountsT1, t.gradesCountsT2) }))
+          .map(t => ({
+            ...t,
+            gradesCounts: countsForMode(t.gradesCountsT1, t.gradesCountsT2),
+            genderGradesCounts: {
+              girl: countsForMode(t.genderGradesCountsT1.girl, t.genderGradesCountsT2.girl),
+              boy: countsForMode(t.genderGradesCountsT1.boy, t.genderGradesCountsT2.boy),
+            },
+          }))
           .sort((a, b) => a.name.localeCompare(b.name, 'nb-NO'))
         : []
       row.gradesCounts = countsForMode(row.gradesCountsT1, row.gradesCountsT2)
+      row.genderGradesCounts = {
+        girl: countsForMode(row.genderGradesCountsT1.girl, row.genderGradesCountsT2.girl),
+        boy: countsForMode(row.genderGradesCountsT1.boy, row.genderGradesCountsT2.boy),
+      }
     })
 
     return Array.from(subjectMap.values())
-  }, [normalizedGrades, normalizedWarnings, normalizedAbsences, subjectNameByNorm, termMode])
+  }, [normalizedGrades, normalizedWarnings, normalizedAbsences, subjectNameByNorm, termMode, subjectNameByCode])
 
   const filteredAndSorted = useMemo(() => {
     const filtered = subjectRows.filter(r =>
@@ -391,6 +524,7 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
       if (key === 'warningsG') return row.varselsByType['G'] ?? 0
       if (key === 'avgGrade') return avgGradeNum(row.gradesCounts) ?? -1
       if (key === 'avgDelta') return avgDelta(row.gradesCountsT1, row.gradesCountsT2) ?? -999
+      if (key === 'genderDiff') return genderGap(row.genderGradesCounts.girl, row.genderGradesCounts.boy) ?? -999
       const gradeKey = sortGradeByKey[key]
       if (gradeKey) {
         const total = totalGrades(row.gradesCounts)
@@ -613,6 +747,7 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
       if (sortKey === 'warningsG') return t.varselsByType['G'] ?? 0
       if (sortKey === 'avgGrade') return avgGradeNum(t.gradesCounts) ?? -1
       if (sortKey === 'avgDelta') return avgDelta(t.gradesCountsT1, t.gradesCountsT2) ?? -999
+      if (sortKey === 'genderDiff') return genderGap(t.genderGradesCounts.girl, t.genderGradesCounts.boy) ?? -999
       const gradeKey = sortGradeByKey[sortKey]
       if (gradeKey) {
         const total = totalGrades(t.gradesCounts)
@@ -646,7 +781,8 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
 
   const showWarningColumns = termMode !== 'compare'
   const showDeltaColumn = termMode === 'compare'
-  const totalColumnCount = 1 + 1 + (showWarningColumns ? 4 : 0) + allGrades.length + 1 + (showDeltaColumn ? 1 : 0) + 1
+  const visibleGenderColumnCount = (visibleGenderAverages.girl ? 1 : 0) + (visibleGenderAverages.boy ? 1 : 0)
+  const totalColumnCount = 1 + 1 + (showWarningColumns ? 4 : 0) + allGrades.length + 1 + visibleGenderColumnCount + 1 + (showDeltaColumn ? 1 : 0) + 1
 
   const exportToExcel = () => {
     void import('exceljs').then(async exceljs => {
@@ -854,6 +990,25 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
             >
               Sammenlign
             </button>
+            {hasGenderData && (
+              <div className="ml-2 flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
+                <span className="px-2 text-xs font-medium text-slate-500">Kjønnssnitt</span>
+                {(GENDER_ORDER).map(gender => (
+                  <button
+                    key={gender}
+                    type="button"
+                    onClick={() => toggleGenderAverage(gender)}
+                    className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+                      visibleGenderAverages[gender]
+                        ? 'bg-sky-100 text-sky-800'
+                        : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {GENDER_LABEL[gender]}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <input
             type="text"
@@ -891,6 +1046,9 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
                   <SortTh key={grade} label={grade} sk={gradeSortKey[grade]} className="text-center" />
                 ))}
                 <SortTh label="Snitt" sk="avgGrade" className="text-center" />
+                {visibleGenderAverages.girl && <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Jenter</th>}
+                {visibleGenderAverages.boy && <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Gutter</th>}
+                <SortTh label="Diff (J vs G)" sk="genderDiff" className="text-center" />
                 {showDeltaColumn && <SortTh label="Endring" sk="avgDelta" className="text-center" />}
                 <th className="sticky top-0 z-10 bg-white py-3 px-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                   PDF
@@ -921,7 +1079,7 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
                         ) : (
                           <ChevronRight className="w-4 h-4 flex-shrink-0" />
                         )}
-                        <span>{row.subject}</span>
+                        <span title={row.subject}>{truncateTitle(row.subject, 25)}</span>
                       </div>
                     </td>
                     <td className="py-2 px-3 text-center text-slate-700">{row.studentCount}</td>
@@ -984,6 +1142,19 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
                       ) : (
                         <>{avgGradeNum(row.gradesCounts)?.toFixed(2).replace('.', ',') ?? '—'}</>
                       )}
+                    </td>
+                    {visibleGenderAverages.girl && (
+                      <td className="py-2 px-3 text-center text-slate-700 font-medium whitespace-nowrap">
+                        {avgGradeNum(row.genderGradesCounts.girl)?.toFixed(2).replace('.', ',') ?? '—'}
+                      </td>
+                    )}
+                    {visibleGenderAverages.boy && (
+                      <td className="py-2 px-3 text-center text-slate-700 font-medium whitespace-nowrap">
+                        {avgGradeNum(row.genderGradesCounts.boy)?.toFixed(2).replace('.', ',') ?? '—'}
+                      </td>
+                    )}
+                    <td className={`py-2 px-3 text-center font-semibold whitespace-nowrap ${genderGap(row.genderGradesCounts.girl, row.genderGradesCounts.boy) === null ? 'text-slate-400' : genderGap(row.genderGradesCounts.girl, row.genderGradesCounts.boy)! > 0 ? 'text-emerald-700' : genderGap(row.genderGradesCounts.girl, row.genderGradesCounts.boy)! < 0 ? 'text-red-700' : 'text-slate-700'}`}>
+                      {genderGap(row.genderGradesCounts.girl, row.genderGradesCounts.boy) === null ? '—' : `${genderGap(row.genderGradesCounts.girl, row.genderGradesCounts.boy)! > 0 ? '+' : ''}${genderGap(row.genderGradesCounts.girl, row.genderGradesCounts.boy)!.toFixed(2).replace('.', ',')}`}
                     </td>
                     {showDeltaColumn && (
                       <td className={`${termMode === 'compare' ? 'text-xs' : ''} py-2 px-3 text-center font-semibold text-slate-700 whitespace-nowrap`}>
@@ -1081,6 +1252,19 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
                                 <>{avgGradeNum(teacher.gradesCounts)?.toFixed(2).replace('.', ',') ?? '—'}</>
                               )}
                             </td>
+                            {visibleGenderAverages.girl && (
+                              <td className="py-2 px-3 text-center text-slate-700 font-medium whitespace-nowrap">
+                                {avgGradeNum(teacher.genderGradesCounts.girl)?.toFixed(2).replace('.', ',') ?? '—'}
+                              </td>
+                            )}
+                            {visibleGenderAverages.boy && (
+                              <td className="py-2 px-3 text-center text-slate-700 font-medium whitespace-nowrap">
+                                {avgGradeNum(teacher.genderGradesCounts.boy)?.toFixed(2).replace('.', ',') ?? '—'}
+                              </td>
+                            )}
+                            <td className={`py-2 px-3 text-center font-semibold whitespace-nowrap ${genderGap(teacher.genderGradesCounts.girl, teacher.genderGradesCounts.boy) === null ? 'text-slate-400' : genderGap(teacher.genderGradesCounts.girl, teacher.genderGradesCounts.boy)! > 0 ? 'text-emerald-700' : genderGap(teacher.genderGradesCounts.girl, teacher.genderGradesCounts.boy)! < 0 ? 'text-red-700' : 'text-slate-700'}`}>
+                              {genderGap(teacher.genderGradesCounts.girl, teacher.genderGradesCounts.boy) === null ? '—' : `${genderGap(teacher.genderGradesCounts.girl, teacher.genderGradesCounts.boy)! > 0 ? '+' : ''}${genderGap(teacher.genderGradesCounts.girl, teacher.genderGradesCounts.boy)!.toFixed(2).replace('.', ',')}`}
+                            </td>
                             {showDeltaColumn && (
                               <td className={`${termMode === 'compare' ? 'text-xs' : ''} py-2 px-3 text-center font-semibold text-slate-700 whitespace-nowrap`}>
                                 {teacherDelta === null
@@ -1120,7 +1304,7 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
         </div>
       </div>
       ) : (
-        <KarakterutviklingPanel baseGrades={data.grades} />
+        <KarakterutviklingPanel baseGrades={data.grades} studentInfo={data.studentInfo} absences={data.absences} />
       )}
 
       {subjectForPdfPrompt && (
