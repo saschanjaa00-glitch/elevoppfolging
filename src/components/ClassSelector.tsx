@@ -7,6 +7,7 @@ interface ClassSelectorProps {
   onClassChange: (classNames: string[]) => void
   onPrintClassLists?: () => void
   onExportOppfolgingsark?: () => void
+  onExportKlasseradsskjema?: () => void
 }
 
 function ClassSelector({
@@ -15,6 +16,7 @@ function ClassSelector({
   onClassChange,
   onPrintClassLists,
   onExportOppfolgingsark,
+  onExportKlasseradsskjema,
 }: ClassSelectorProps) {
   const classes = useMemo(
     () => Array.from(new Set(data.absences.map(a => a.class))).sort(),
@@ -112,7 +114,7 @@ function ClassSelector({
         ))}
       </div>
 
-      {(onPrintClassLists || onExportOppfolgingsark) && (
+      {(onPrintClassLists || onExportOppfolgingsark || onExportKlasseradsskjema) && (
         <div className="mt-4 space-y-2 border-t border-slate-100 pt-4">
           {onPrintClassLists && (
             <button
@@ -140,6 +142,20 @@ function ClassSelector({
               }`}
             >
               Oppfølgingsark for valgte klasser
+            </button>
+          )}
+          {onExportKlasseradsskjema && (
+            <button
+              type="button"
+              onClick={onExportKlasseradsskjema}
+              disabled={selectedClasses.length === 0}
+              className={`w-full px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                selectedClasses.length > 0
+                  ? 'bg-sky-700 text-white hover:bg-sky-800 shadow-sm'
+                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+              }`}
+            >
+              Klasselærerråd for valgte klasser
             </button>
           )}
         </div>

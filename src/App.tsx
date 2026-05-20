@@ -80,6 +80,7 @@ function App() {
   const [warnedOnVurdering, setWarnedOnVurdering] = useState<boolean>(false)
   const [vurderingFromDate, setVurderingFromDate] = useState<string>('')
   const [oversiktModalOpen, setOversiktModalOpen] = useState<boolean>(false)
+  const [klasseradSeasonModalOpen, setKlasseradSeasonModalOpen] = useState<boolean>(false)
   const [lowGradeFilter, setLowGradeFilter] = useState<string[]>(['IV', '1', '2'])
   const [gradeHalvaar, setGradeHalvaar] = useState<'H1' | 'H2' | 'begge'>('begge')
   const [filterLogic, setFilterLogic] = useState<'og' | 'eller'>('eller')
@@ -347,6 +348,15 @@ function App() {
     return ownerForClass(className, mapping)
   }
 
+  const ownersForClassByRole = (className: string, role: string): string[] => {
+    const mapping = presetRoleMappings[role]
+    if (!mapping) return []
+    return Object.entries(mapping)
+      .filter(([, classes]) => classes.includes(className))
+      .map(([name]) => name)
+      .sort((a, b) => a.localeCompare(b, 'nb-NO'))
+  }
+
   const groupWarnings = (warnings: Array<{ warningType: string; sentDate: string }>) => {
     const order = (label: string) => (label === 'Fravær' ? 0 : label === 'Grunnlag' ? 1 : 2)
     const grouped = new Map<string, string[]>()
@@ -591,6 +601,552 @@ function App() {
     const a = document.createElement('a')
     a.href = url
     a.download = `oppfolgingsark_${selectedClasses.join('-')}_${todayDdMmYyyy()}.docx`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExportKlasseradsskjema = async (season: 'host' | 'var') => {
+    if (selectedClasses.length === 0) return
+
+    const {
+      AlignmentType,
+      BorderStyle,
+      Document,
+      HeadingLevel,
+      HeightRule,
+      Packer,
+      PageOrientation,
+      Paragraph,
+      ShadingType,
+      Table,
+      TableCell,
+      TableRow,
+      TextRun,
+      VerticalAlign,
+      WidthType,
+    } = await import('docx')
+
+    const orderedClasses = [...selectedClasses].sort((a, b) =>
+      a.localeCompare(b, 'nb-NO', { numeric: true })
+    )
+    const seasonLabel = season === 'host' ? 'HØST' : 'VÅR'
+    const seasonYear = new Date().getFullYear()
+    const seasonSuffix = `${seasonLabel} ${seasonYear}`
+    const showGradeColumns = data.grades.length > 0
+
+    const getNamePartsForSort = (className: string, navn: string) => {
+      const info = findStudentInfoInLookup(studentInfoLookup, navn, className)
+      const lastNameFromInfo = info?.etternavn?.trim() ?? ''
+      const firstNameFromInfo = info?.fornavn?.trim() ?? ''
+      if (lastNameFromInfo || firstNameFromInfo) {
+        return {
+          lastName: lastNameFromInfo || navn.trim(),
+          firstName: firstNameFromInfo || '',
+        }
+      }
+
+      const parts = navn.trim().split(/\s+/).filter(Boolean)
+      if (parts.length === 0) return { lastName: '', firstName: '' }
+      if (parts.length === 1) return { lastName: parts[0], firstName: '' }
+      return {
+        lastName: parts[parts.length - 1],
+        firstName: parts.slice(0, -1).join(' '),
+      }
+    }
+
+    const compareByLastName = (className: string, aName: string, bName: string) => {
+      const a = getNamePartsForSort(className, aName)
+      const b = getNamePartsForSort(className, bName)
+      const lastNameCompare = a.lastName.localeCompare(b.lastName, 'nb-NO')
+      if (lastNameCompare !== 0) return lastNameCompare
+      const firstNameCompare = a.firstName.localeCompare(b.firstName, 'nb-NO')
+      if (firstNameCompare !== 0) return firstNameCompare
+      return aName.localeCompare(bName, 'nb-NO')
+    }
+
+    const formatNameLastFirst = (className: string, navn: string) => {
+      const parts = getNamePartsForSort(className, navn)
+      if (!parts.lastName && !parts.firstName) return navn
+      if (!parts.firstName) return parts.lastName
+      return `${parts.lastName}, ${parts.firstName}`
+    }
+
+    const warningCountByStudent = new Map<string, number>()
+    data.warnings.forEach(warning => {
+      const key = `${warning.class}::${normalizeMatch(warning.navn)}`
+      warningCountByStudent.set(key, (warningCountByStudent.get(key) ?? 0) + 1)
+    })
+
+    const getClassKontaktlaerer = (className: string): string => {
+      const classRecords = data.absences.filter(record => record.class === className)
+      if (classRecords.length === 0) return 'Ukjent'
+
+      const explicitCounts = new Map<string, number>()
+      classRecords.forEach(record => {
+        const explicit = record.kontaktlaerer?.trim()
+        if (!explicit) return
+        explicitCounts.set(explicit, (explicitCounts.get(explicit) ?? 0) + 1)
+      })
+
+      if (explicitCounts.size > 0) {
+        return Array.from(explicitCounts.entries()).sort((a, b) => b[1] - a[1])[0][0]
+      }
+
+      const teacherCounts = new Map<string, number>()
+      classRecords.forEach(record => {
+        const teacher = record.teacher?.trim()
+        if (!teacher) return
+        teacherCounts.set(teacher, (teacherCounts.get(teacher) ?? 0) + 1)
+      })
+
+      return teacherCounts.size > 0
+        ? Array.from(teacherCounts.entries()).sort((a, b) => b[1] - a[1])[0][0]
+        : 'Ukjent'
+    }
+
+    const createWritableBox = (title: string, lines = 4) =>
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 1, color: '94A3B8' },
+                  bottom: { style: BorderStyle.SINGLE, size: 1, color: '94A3B8' },
+                  left: { style: BorderStyle.SINGLE, size: 1, color: '94A3B8' },
+                  right: { style: BorderStyle.SINGLE, size: 1, color: '94A3B8' },
+                },
+                children: [
+                  new Paragraph({
+                    spacing: { after: 120 },
+                    children: [new TextRun({ text: title, bold: true, size: 20 })],
+                  }),
+                  ...Array.from({ length: lines + 2 }).map(
+                    () =>
+                      new Paragraph({
+                        spacing: { before: 120, after: 120 },
+                        children: [new TextRun({ text: ' ' })],
+                      })
+                  ),
+                ],
+              }),
+            ],
+          }),
+        ],
+      })
+
+    const children: Array<any> = []
+
+    orderedClasses.forEach((className, classIndex) => {
+      const classStudents = Array.from(
+        new Map(
+          data.absences
+            .filter(record => record.class === className)
+            .map(record => [
+              `${className}::${normalizeMatch(record.navn)}`,
+              { navn: record.navn, displayNavn: formatNameLastFirst(className, record.navn) },
+            ])
+        ).values()
+      ).sort((a, b) => compareByLastName(className, a.navn, b.navn))
+
+      const kontaktlaerer = getClassKontaktlaerer(className)
+      const radgiver = ownerForClassByRole(className, 'Rådgiver')
+      const trinnlederNames = ownersForClassByRole(className, 'Trinnleder')
+      const fallbackTrinnlederNames = ownersForClassByRole(className, 'Avdelingsleder')
+      const trinnleder = (trinnlederNames.length > 0 ? trinnlederNames : fallbackTrinnlederNames).join(', ') || 'Ukjent'
+
+      children.push(
+        new Paragraph({
+          text: `Klasselærerråd - ${seasonSuffix}`,
+          heading: HeadingLevel.HEADING_1,
+          pageBreakBefore: classIndex > 0,
+          spacing: { after: 160 },
+        }),
+        new Paragraph({
+          spacing: { after: 80 },
+          children: [new TextRun({ text: `Klasse: ${className}`, bold: true, size: 24 })],
+        }),
+        new Paragraph({ text: `Kontaktlærer: ${kontaktlaerer}   |   Rådgiver: ${radgiver}   |   Trinnleder: ${trinnleder}`, spacing: { after: 180 } }),
+        createWritableBox('Kort vurdering av klassemiljøet', 4),
+        ...(season === 'var'
+          ? [
+              new Paragraph({ spacing: { before: 120, after: 120 }, text: '' }),
+              createWritableBox('Hvis det var satt inn tiltak i høst, gi en kort evaluering av hvordan dette har fungert', 3),
+            ]
+          : []),
+        new Paragraph({ spacing: { before: 120, after: 120 }, text: '' }),
+        createWritableBox('Er det påkrevd med særlige tiltak for å videreutvikle klassemiljøet?', 2),
+        new Paragraph({ spacing: { before: 120, after: 120 }, text: '' }),
+        createWritableBox('Elever som vurderes å ikke ha et tilfredsstillende utbytte av opplæringen', 2),
+        new Paragraph({ spacing: { before: 120, after: 120 }, text: '' }),
+        createWritableBox('Elever som kanskje ikke opplever å ha et trygt og godt skolemiljø', 2),
+        new Paragraph({ spacing: { before: 240 }, text: '' }),
+        new Paragraph({ text: 'Sted: ____________________________', spacing: { after: 80 } }),
+        new Paragraph({ text: 'Dato: ____________________________' }),
+
+        new Paragraph({
+          text: `Klasselærerråd - Klasseoversikt - ${seasonSuffix}`,
+          heading: HeadingLevel.HEADING_2,
+          pageBreakBefore: true,
+          spacing: { after: 120 },
+        }),
+        new Paragraph({ text: `Klasse: ${className}`, spacing: { after: 40 } }),
+        new Paragraph({ text: `Kontaktlærer: ${kontaktlaerer}   |   Rådgiver: ${radgiver}   |   Trinnleder: ${trinnleder}`, spacing: { after: 80 } }),
+      )
+
+      const summaryChunks: Array<Array<{ navn: string; displayNavn: string }>> = []
+      for (let i = 0; i < classStudents.length; i += 38) {
+        summaryChunks.push(classStudents.slice(i, i + 38))
+      }
+
+      summaryChunks.forEach((summaryChunk, summaryChunkIndex) => {
+        if (summaryChunkIndex > 0) {
+          children.push(
+            new Paragraph({
+              text: `Klasselærerråd - Klasseoversikt (forts.) - ${seasonSuffix}`,
+              heading: HeadingLevel.HEADING_2,
+              pageBreakBefore: true,
+              spacing: { after: 120 },
+            }),
+            new Paragraph({ text: `Klasse: ${className}`, spacing: { after: 40 } }),
+            new Paragraph({ text: `Kontaktlærer: ${kontaktlaerer}   |   Rådgiver: ${radgiver}   |   Trinnleder: ${trinnleder}`, spacing: { after: 80 } }),
+          )
+        }
+
+        const nrColumnWidth = showGradeColumns ? 8 : 10
+        const studentColumnWidth = showGradeColumns ? 34 : 50
+        const absenceColumnWidth = showGradeColumns ? 16 : 20
+        const gradeColumnWidth = 8
+        const warningColumnWidth = showGradeColumns ? 18 : 20
+
+        const summaryHeaderCells: Array<any> = [
+          new TableCell({
+            width: { size: nrColumnWidth, type: WidthType.PERCENTAGE },
+            verticalAlign: VerticalAlign.CENTER,
+            children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Nr', bold: true, size: 18 })] })],
+          }),
+          new TableCell({
+            width: { size: studentColumnWidth, type: WidthType.PERCENTAGE },
+            verticalAlign: VerticalAlign.CENTER,
+            children: [new Paragraph({ children: [new TextRun({ text: 'Elev', bold: true, size: 18 })] })],
+          }),
+          new TableCell({
+            width: { size: absenceColumnWidth, type: WidthType.PERCENTAGE },
+            verticalAlign: VerticalAlign.CENTER,
+            children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Snitt fravær %', bold: true, size: 18 })] })],
+          }),
+        ]
+
+        if (showGradeColumns) {
+          summaryHeaderCells.push(
+            new TableCell({
+              width: { size: gradeColumnWidth, type: WidthType.PERCENTAGE },
+              verticalAlign: VerticalAlign.CENTER,
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'IV', bold: true, size: 18 })] })],
+            }),
+            new TableCell({
+              width: { size: gradeColumnWidth, type: WidthType.PERCENTAGE },
+              verticalAlign: VerticalAlign.CENTER,
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: '1', bold: true, size: 18 })] })],
+            }),
+            new TableCell({
+              width: { size: gradeColumnWidth, type: WidthType.PERCENTAGE },
+              verticalAlign: VerticalAlign.CENTER,
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: '2', bold: true, size: 18 })] })],
+            })
+          )
+        }
+
+        summaryHeaderCells.push(
+          new TableCell({
+            width: { size: warningColumnWidth, type: WidthType.PERCENTAGE },
+            verticalAlign: VerticalAlign.CENTER,
+            children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Varsler', bold: true, size: 18 })] })],
+          })
+        )
+
+        const summaryTableRows: Array<any> = [
+          new TableRow({
+            height: { value: 360, rule: HeightRule.EXACT },
+            children: summaryHeaderCells,
+          }),
+        ]
+
+        summaryChunk.forEach((student, idx) => {
+          const studentData = getStudentSheetData(className, student.navn)
+          const grades = studentData.subjects.flatMap(subject => [subject.grade, subject.gradeT2]).filter(Boolean) as string[]
+          const hasIv = grades.some(grade => grade.toUpperCase() === 'IV')
+          const has1 = grades.some(grade => grade === '1')
+          const has2 = grades.some(grade => grade === '2')
+          const averageAbsence = studentData.subjects.length > 0
+            ? studentData.subjects.reduce((sum, subject) => sum + subject.percentageAbsence, 0) / studentData.subjects.length
+            : null
+          const warningKey = `${className}::${normalizeMatch(student.navn)}`
+          const warningCount = warningCountByStudent.get(warningKey) ?? 0
+          const rowNumber = summaryChunkIndex * 38 + idx + 1
+          const absenceFill = averageAbsence !== null
+            ? averageAbsence > 8
+              ? 'CBD5E1'
+              : averageAbsence > 5
+                ? 'E2E8F0'
+                : null
+            : null
+          const warningFill = warningCount >= 1 ? 'E2E8F0' : null
+
+          summaryTableRows.push(
+            new TableRow({
+              height: { value: 280, rule: HeightRule.EXACT },
+              children: [
+                new TableCell({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: String(rowNumber), size: 18 })] })] }),
+                new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: student.displayNavn, size: 18 })] })] }),
+                new TableCell({
+                  shading: absenceFill
+                    ? { type: ShadingType.CLEAR, color: 'auto', fill: absenceFill }
+                    : undefined,
+                  children: [
+                    new Paragraph({
+                      alignment: AlignmentType.CENTER,
+                      children: [
+                        new TextRun({
+                          text: averageAbsence === null ? '' : averageAbsence.toFixed(1),
+                          size: 18,
+                          bold: (averageAbsence ?? 0) > 10,
+                        }),
+                      ],
+                    }),
+                  ],
+                }),
+                ...(showGradeColumns
+                  ? [
+                      new TableCell({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: hasIv ? 'X' : '', size: 18, bold: hasIv })] })] }),
+                      new TableCell({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: has1 ? 'X' : '', size: 18, bold: has1 })] })] }),
+                      new TableCell({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: has2 ? 'X' : '', size: 18, bold: has2 })] })] }),
+                    ]
+                  : []),
+                new TableCell({
+                  shading: warningFill
+                    ? { type: ShadingType.CLEAR, color: 'auto', fill: warningFill }
+                    : undefined,
+                  children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: String(warningCount), size: 18 })] })],
+                }),
+              ],
+            })
+          )
+        })
+
+        children.push(
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: summaryTableRows,
+          })
+        )
+      })
+
+      const studentChunks: Array<Array<{ navn: string; displayNavn: string }>> = []
+      for (let i = 0; i < classStudents.length; i += 10) {
+        studentChunks.push(classStudents.slice(i, i + 10))
+      }
+
+      studentChunks.forEach((chunk, chunkIndex) => {
+        const toInitials = (teacherName: string): string =>
+          teacherName
+            .split(/\s+/)
+            .filter(Boolean)
+            .map(part => part[0]?.toUpperCase() ?? '')
+            .join('')
+
+        const compactTeacherLabel = (teacherText: string): string => {
+          const parts = teacherText
+            .split(',')
+            .map(part => part.trim())
+            .filter(Boolean)
+          if (parts.length === 0) return ''
+          const first = toInitials(parts[0])
+          if (!first) return ''
+          return parts.length > 1 ? `${first} m.fl.` : first
+        }
+
+        const truncateSubjectLabel = (label: string): string => {
+          if (label.length <= 18) return label
+          const words = label.trim().split(/\s+/)
+          const lastWord = words.length > 1 ? words[words.length - 1] : ''
+          const suffix = lastWord && /\d/.test(lastWord) ? lastWord : ''
+          if (suffix) {
+            const keep = Math.max(8, 18 - suffix.length - 3)
+            return `${label.slice(0, keep).trim()}...${suffix}`
+          }
+          return `${label.slice(0, 15).trim()}...`
+        }
+
+        children.push(
+          new Paragraph({
+            text: `Klasselærerråd - Elevoverblikk (${chunkIndex + 1}/${studentChunks.length}) - ${seasonSuffix}`,
+            heading: HeadingLevel.HEADING_2,
+            pageBreakBefore: true,
+            spacing: { after: 120 },
+          }),
+          new Paragraph({ text: `Klasse: ${className}`, spacing: { after: 40 } }),
+            new Paragraph({ text: `Kontaktlærer: ${kontaktlaerer}   |   Rådgiver: ${radgiver}   |   Trinnleder: ${trinnleder}`, spacing: { after: 120 } }),
+        )
+
+        const detailRows: Array<any> = [
+          new TableRow({
+            children: [
+              new TableCell({
+                width: { size: 8, type: WidthType.PERCENTAGE },
+                children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Nr.', bold: true, size: 18 })] })],
+              }),
+              new TableCell({
+                width: { size: 20, type: WidthType.PERCENTAGE },
+                children: [new Paragraph({ children: [new TextRun({ text: 'Elev', bold: true, size: 18 })] })],
+              }),
+              new TableCell({
+                width: { size: 72, type: WidthType.PERCENTAGE },
+                children: [new Paragraph({ children: [new TextRun({ text: 'Notater', bold: true, size: 18 })] })],
+              }),
+            ],
+          }),
+        ]
+
+        chunk.forEach((student, studentIndex) => {
+          const studentData = getStudentSheetData(className, student.navn)
+          const subjectParagraphs: Array<any> = []
+          const rowNumber = chunkIndex * 10 + studentIndex + 1
+
+          const includedSubjects = studentData.subjects.filter(subject => {
+            const isLowGrade = [subject.grade, subject.gradeT2]
+              .filter(Boolean)
+              .some(grade => {
+                const normalized = String(grade).toUpperCase()
+                return normalized === 'IV' || normalized === '1' || normalized === '2'
+              })
+            return isLowGrade || subject.percentageAbsence > 8
+          })
+
+          includedSubjects.forEach(subject => {
+            const isHighAbsence = subject.percentageAbsence > 8
+            const resolvedTeacher = resolveTeacher(subject.subject, subject.teacher)
+            const teacherLabel = compactTeacherLabel(resolvedTeacher)
+            const shortSubject = truncateSubjectLabel(subject.subject)
+            const subjectPrefix = `${shortSubject}${teacherLabel ? ` (${teacherLabel})` : ''}: `
+            const lineRuns: Array<any> = [
+              new TextRun({ text: subjectPrefix, size: 17 }),
+              new TextRun({
+                text: `${subject.percentageAbsence.toFixed(1)}%`,
+                underline: isHighAbsence ? {} : undefined,
+                size: 17,
+              }),
+            ]
+
+            if (subject.grade) {
+              lineRuns.push(new TextRun({ text: ' | T1 ', size: 17 }))
+              lineRuns.push(new TextRun({ text: subject.grade, bold: true, size: 17 }))
+            }
+
+            if (subject.gradeT2) {
+              lineRuns.push(new TextRun({ text: ' | T2 ', size: 17 }))
+              lineRuns.push(new TextRun({ text: subject.gradeT2, bold: true, size: 17 }))
+            }
+
+            subjectParagraphs.push(
+              new Paragraph({
+                spacing: { after: 20 },
+                children: lineRuns,
+              })
+            )
+          })
+
+          if (subjectParagraphs.length === 0) {
+            subjectParagraphs.push(new Paragraph({ text: '' }))
+          }
+
+          detailRows.push(
+            new TableRow({
+              children: [
+                new TableCell({
+                  verticalAlign: VerticalAlign.TOP,
+                  children: [
+                    new Paragraph({
+                      alignment: AlignmentType.CENTER,
+                      spacing: { before: 60, after: 60 },
+                      children: [new TextRun({ text: String(rowNumber), size: 18 })],
+                    }),
+                  ],
+                }),
+                new TableCell({
+                  verticalAlign: VerticalAlign.TOP,
+                  children: [
+                    new Paragraph({
+                      spacing: { before: 60, after: 60 },
+                      children: [new TextRun({ text: student.displayNavn, bold: true, size: 18 })],
+                    }),
+                  ],
+                }),
+                new TableCell({
+                  verticalAlign: VerticalAlign.TOP,
+                  children: [
+                    ...subjectParagraphs,
+                    new Paragraph({ text: ' ' }),
+                    new Paragraph({ text: ' ' }),
+                    new Paragraph({ text: ' ' }),
+                  ],
+                }),
+              ],
+            })
+          )
+        })
+
+        children.push(
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: detailRows,
+          })
+        )
+      })
+    })
+
+    const doc = new Document({
+      styles: {
+        default: {
+          document: {
+            run: {
+              font: 'Calibri',
+              size: 20,
+            },
+            paragraph: {
+              spacing: { after: 60 },
+            },
+          },
+        },
+      },
+      sections: [
+        {
+          properties: {
+            page: {
+              size: {
+                width: 11906,
+                height: 16838,
+                orientation: PageOrientation.PORTRAIT,
+              },
+              margin: {
+                top: 720,
+                right: 720,
+                bottom: 720,
+                left: 720,
+              },
+            },
+          },
+          children,
+        },
+      ],
+    })
+
+    const blob = await Packer.toBlob(doc)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `klasseradsskjema_${selectedClasses.join('-')}_${todayDdMmYyyy()}.docx`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -873,7 +1429,36 @@ function App() {
                     onClassChange={setSelectedClasses}
                     onPrintClassLists={handlePrintClassLists}
                     onExportOppfolgingsark={handleExportClassOppfolgingsark}
+                    onExportKlasseradsskjema={() => setKlasseradSeasonModalOpen(true)}
                   />
+
+                  {klasseradSeasonModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setKlasseradSeasonModalOpen(false)}>
+                      <div className="bg-white rounded-xl shadow-xl p-6 w-80 flex flex-col gap-3" onClick={e => e.stopPropagation()}>
+                        <h2 className="text-base font-semibold text-slate-900">Velg termin</h2>
+                        <p className="text-sm text-slate-600">Velg hvilken mal som skal brukes for Klasselærerråd.</p>
+                        <button
+                          className="w-full px-4 py-2 bg-sky-600 text-white text-sm font-medium rounded-lg hover:bg-sky-700 transition-colors"
+                          onClick={() => {
+                            setKlasseradSeasonModalOpen(false)
+                            void handleExportKlasseradsskjema('host')
+                          }}
+                        >
+                          Høst
+                        </button>
+                        <button
+                          className="w-full px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
+                          onClick={() => {
+                            setKlasseradSeasonModalOpen(false)
+                            void handleExportKlasseradsskjema('var')
+                          }}
+                        >
+                          Vår
+                        </button>
+                        <button className="text-xs text-slate-400 hover:text-slate-600 mt-1" onClick={() => setKlasseradSeasonModalOpen(false)}>Avbryt</button>
+                      </div>
+                    </div>
+                  )}
                 </aside>
 
                   <section className="lg:col-span-3 space-y-6">
