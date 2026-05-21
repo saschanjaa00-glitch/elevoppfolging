@@ -960,76 +960,70 @@ function App() {
         )
       })
 
-      const studentChunks: Array<Array<{ navn: string; displayNavn: string }>> = []
-      for (let i = 0; i < classStudents.length; i += 10) {
-        studentChunks.push(classStudents.slice(i, i + 10))
+      const toInitials = (teacherName: string): string =>
+        teacherName
+          .split(/\s+/)
+          .filter(Boolean)
+          .map(part => part[0]?.toUpperCase() ?? '')
+          .join('')
+
+      const compactTeacherLabel = (teacherText: string): string => {
+        const parts = teacherText
+          .split(',')
+          .map(part => part.trim())
+          .filter(Boolean)
+        if (parts.length === 0) return ''
+        const first = toInitials(parts[0])
+        if (!first) return ''
+        return parts.length > 1 ? `${first} m.fl.` : first
       }
 
-      studentChunks.forEach((chunk, chunkIndex) => {
-        const toInitials = (teacherName: string): string =>
-          teacherName
-            .split(/\s+/)
-            .filter(Boolean)
-            .map(part => part[0]?.toUpperCase() ?? '')
-            .join('')
-
-        const compactTeacherLabel = (teacherText: string): string => {
-          const parts = teacherText
-            .split(',')
-            .map(part => part.trim())
-            .filter(Boolean)
-          if (parts.length === 0) return ''
-          const first = toInitials(parts[0])
-          if (!first) return ''
-          return parts.length > 1 ? `${first} m.fl.` : first
+      const truncateSubjectLabel = (label: string): string => {
+        if (label.length <= 18) return label
+        const words = label.trim().split(/\s+/)
+        const lastWord = words.length > 1 ? words[words.length - 1] : ''
+        const suffix = lastWord && /\d/.test(lastWord) ? lastWord : ''
+        if (suffix) {
+          const keep = Math.max(8, 18 - suffix.length - 3)
+          return `${label.slice(0, keep).trim()}...${suffix}`
         }
+        return `${label.slice(0, 15).trim()}...`
+      }
 
-        const truncateSubjectLabel = (label: string): string => {
-          if (label.length <= 18) return label
-          const words = label.trim().split(/\s+/)
-          const lastWord = words.length > 1 ? words[words.length - 1] : ''
-          const suffix = lastWord && /\d/.test(lastWord) ? lastWord : ''
-          if (suffix) {
-            const keep = Math.max(8, 18 - suffix.length - 3)
-            return `${label.slice(0, keep).trim()}...${suffix}`
-          }
-          return `${label.slice(0, 15).trim()}...`
-        }
+      children.push(
+        new Paragraph({
+          text: `Klasselærerråd - Elevoverblikk - ${seasonSuffix}`,
+          heading: HeadingLevel.HEADING_2,
+          pageBreakBefore: true,
+          spacing: { after: 120 },
+        }),
+        new Paragraph({ text: `Klasse: ${className}`, spacing: { after: 40 } }),
+        new Paragraph({ text: `Kontaktlærer: ${kontaktlaerer}   |   Rådgiver: ${radgiver}   |   Trinnleder: ${trinnleder}`, spacing: { after: 120 } }),
+      )
 
-        children.push(
-          new Paragraph({
-            text: `Klasselærerråd - Elevoverblikk (${chunkIndex + 1}/${studentChunks.length}) - ${seasonSuffix}`,
-            heading: HeadingLevel.HEADING_2,
-            pageBreakBefore: true,
-            spacing: { after: 120 },
-          }),
-          new Paragraph({ text: `Klasse: ${className}`, spacing: { after: 40 } }),
-            new Paragraph({ text: `Kontaktlærer: ${kontaktlaerer}   |   Rådgiver: ${radgiver}   |   Trinnleder: ${trinnleder}`, spacing: { after: 120 } }),
-        )
+      const detailRows: Array<any> = [
+        new TableRow({
+          children: [
+            new TableCell({
+              width: { size: 8, type: WidthType.PERCENTAGE },
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Nr.', bold: true, size: 18 })] })],
+            }),
+            new TableCell({
+              width: { size: 20, type: WidthType.PERCENTAGE },
+              children: [new Paragraph({ children: [new TextRun({ text: 'Elev', bold: true, size: 18 })] })],
+            }),
+            new TableCell({
+              width: { size: 72, type: WidthType.PERCENTAGE },
+              children: [new Paragraph({ children: [new TextRun({ text: 'Notater', bold: true, size: 18 })] })],
+            }),
+          ],
+        }),
+      ]
 
-        const detailRows: Array<any> = [
-          new TableRow({
-            children: [
-              new TableCell({
-                width: { size: 8, type: WidthType.PERCENTAGE },
-                children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Nr.', bold: true, size: 18 })] })],
-              }),
-              new TableCell({
-                width: { size: 20, type: WidthType.PERCENTAGE },
-                children: [new Paragraph({ children: [new TextRun({ text: 'Elev', bold: true, size: 18 })] })],
-              }),
-              new TableCell({
-                width: { size: 72, type: WidthType.PERCENTAGE },
-                children: [new Paragraph({ children: [new TextRun({ text: 'Notater', bold: true, size: 18 })] })],
-              }),
-            ],
-          }),
-        ]
-
-        chunk.forEach((student, studentIndex) => {
+      classStudents.forEach((student, studentIndex) => {
           const studentData = getStudentSheetData(className, student.navn)
           const subjectParagraphs: Array<any> = []
-          const rowNumber = chunkIndex * 10 + studentIndex + 1
+          const rowNumber = studentIndex + 1
 
           const includedSubjects = studentData.subjects.filter(subject => {
             const isLowGrade = [subject.grade, subject.gradeT2]
@@ -1092,9 +1086,13 @@ function App() {
 
           detailRows.push(
             new TableRow({
+              cantSplit: true,
               children: [
                 new TableCell({
                   verticalAlign: VerticalAlign.TOP,
+                  shading: studentData.studentInfo?.isAdult
+                    ? { type: ShadingType.CLEAR, color: 'auto', fill: 'F8F8F8' }
+                    : undefined,
                   children: [
                     new Paragraph({
                       alignment: AlignmentType.CENTER,
@@ -1105,15 +1103,29 @@ function App() {
                 }),
                 new TableCell({
                   verticalAlign: VerticalAlign.TOP,
+                  shading: studentData.studentInfo?.isAdult
+                    ? { type: ShadingType.CLEAR, color: 'auto', fill: 'F8F8F8' }
+                    : undefined,
                   children: [
                     new Paragraph({
                       spacing: { before: 60, after: 60 },
                       children: [new TextRun({ text: student.displayNavn, bold: true, size: 18 })],
                     }),
+                    ...(studentData.studentInfo?.isAdult
+                      ? [
+                          new Paragraph({
+                            spacing: { after: 60 },
+                            children: [new TextRun({ text: '(18+)', bold: true, size: 16 })],
+                          }),
+                        ]
+                      : []),
                   ],
                 }),
                 new TableCell({
                   verticalAlign: VerticalAlign.TOP,
+                  shading: studentData.studentInfo?.isAdult
+                    ? { type: ShadingType.CLEAR, color: 'auto', fill: 'F8F8F8' }
+                    : undefined,
                   children: [
                     ...subjectParagraphs,
                     new Paragraph({ text: ' ' }),
@@ -1124,15 +1136,14 @@ function App() {
               ],
             })
           )
-        })
-
-        children.push(
-          new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            rows: detailRows,
-          })
-        )
       })
+
+      children.push(
+        new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: detailRows,
+        })
+      )
     })
 
     const doc = new Document({
