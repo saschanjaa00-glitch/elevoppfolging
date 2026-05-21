@@ -157,6 +157,10 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
       Custprops?: { CreatedDate?: unknown; createdate?: unknown }
     }
 
+    if (file.lastModified > 0) {
+      return toIsoDate(new Date(file.lastModified))
+    }
+
     const metadataCandidates: unknown[] = [
       workbookAny.Props?.CreatedDate,
       workbookAny.Props?.createdate,
@@ -167,10 +171,6 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
     for (const candidate of metadataCandidates) {
       const parsed = parseDateCandidate(candidate)
       if (parsed) return toIsoDate(parsed)
-    }
-
-    if (file.lastModified > 0) {
-      return toIsoDate(new Date(file.lastModified))
     }
 
     return undefined

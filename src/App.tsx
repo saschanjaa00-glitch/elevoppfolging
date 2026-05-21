@@ -677,6 +677,14 @@ function App() {
       warningCountByStudent.set(key, (warningCountByStudent.get(key) ?? 0) + 1)
     })
 
+    const isFraværWarning = (warningType: string): boolean =>
+      warningType.toLowerCase().includes('frav')
+
+    const isManglendeVurderingWarning = (warningType: string): boolean => {
+      const lowered = warningType.toLowerCase()
+      return lowered.includes('vurdering') || lowered.includes('grunnlag')
+    }
+
     const getClassKontaktlaerer = (className: string): string => {
       const classRecords = data.absences.filter(record => record.class === className)
       if (classRecords.length === 0) return 'Ukjent'
@@ -862,7 +870,7 @@ function App() {
           new TableCell({
             width: { size: warningColumnWidth, type: WidthType.PERCENTAGE },
             verticalAlign: VerticalAlign.CENTER,
-            children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Varsler', bold: true, size: 18 })] })],
+            children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Varsler (F + G)', bold: true, size: 18 })] })],
           })
         )
 
@@ -882,8 +890,15 @@ function App() {
           const averageAbsence = studentData.subjects.length > 0
             ? studentData.subjects.reduce((sum, subject) => sum + subject.percentageAbsence, 0) / studentData.subjects.length
             : null
-          const warningKey = `${className}::${normalizeMatch(student.navn)}`
-          const warningCount = warningCountByStudent.get(warningKey) ?? 0
+          const studentWarnings = data.warnings.filter(w =>
+            w.class === className && normalizeMatch(w.navn) === normalizeMatch(student.navn)
+          )
+          const fravaerWarningCount = studentWarnings.filter(w => isFraværWarning(w.warningType)).length
+          const manglendeVurderingWarningCount = studentWarnings.filter(w => isManglendeVurderingWarning(w.warningType)).length
+          const warningCount = fravaerWarningCount + manglendeVurderingWarningCount
+          const warningDisplayText = warningCount > 0
+            ? `${warningCount} (${fravaerWarningCount} + ${manglendeVurderingWarningCount})`
+            : ''
           const rowNumber = summaryChunkIndex * 38 + idx + 1
           const absenceFill = averageAbsence !== null
             ? averageAbsence > 8
@@ -892,7 +907,9 @@ function App() {
                 ? 'E2E8F0'
                 : null
             : null
-          const warningFill = warningCount >= 1 ? 'E2E8F0' : null
+          const warningFill = warningCount >= 1
+            ? (manglendeVurderingWarningCount > 0 ? 'B5C4D9' : 'E2E8F0')
+            : null
 
           summaryTableRows.push(
             new TableRow({
@@ -928,7 +945,7 @@ function App() {
                   shading: warningFill
                     ? { type: ShadingType.CLEAR, color: 'auto', fill: warningFill }
                     : undefined,
-                  children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: String(warningCount), size: 18 })] })],
+                  children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: warningDisplayText, size: 18 })] })],
                 }),
               ],
             })
@@ -1021,7 +1038,8 @@ function App() {
                 const normalized = String(grade).toUpperCase()
                 return normalized === 'IV' || normalized === '1' || normalized === '2'
               })
-            return isLowGrade || subject.percentageAbsence > 8
+            const hasManglendeVurderingWarning = subject.warnings.some(w => isManglendeVurderingWarning(w.warningType))
+            return isLowGrade || subject.percentageAbsence > 8 || hasManglendeVurderingWarning
           })
 
           includedSubjects.forEach(subject => {
@@ -1030,6 +1048,13 @@ function App() {
             const teacherLabel = compactTeacherLabel(resolvedTeacher)
             const shortSubject = truncateSubjectLabel(subject.subject)
             const subjectPrefix = `${shortSubject}${teacherLabel ? ` (${teacherLabel})` : ''}: `
+            const missingVgDates = [...subject.warnings]
+              .filter(w => isManglendeVurderingWarning(w.warningType))
+              .sort((a, b) => compareDateStrings(a.sentDate, b.sentDate))
+              .map(w => formatDateDdMmYyyy(w.sentDate))
+            const missingVgText = missingVgDates.length > 0
+              ? ` | Manglende v.g. - ${missingVgDates.join(', ')}`
+              : ''
             const lineRuns: Array<any> = [
               new TextRun({ text: subjectPrefix, size: 17 }),
               new TextRun({
@@ -1047,6 +1072,10 @@ function App() {
             if (subject.gradeT2) {
               lineRuns.push(new TextRun({ text: ' | T2 ', size: 17 }))
               lineRuns.push(new TextRun({ text: subject.gradeT2, bold: true, size: 17 }))
+            }
+
+            if (missingVgText) {
+              lineRuns.push(new TextRun({ text: missingVgText, size: 17 }))
             }
 
             subjectParagraphs.push(

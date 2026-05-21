@@ -1046,7 +1046,6 @@ export default function StudentList({
       if (!m) return null
       const d = new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10))
       if (isNaN(d.getTime())) return null
-      d.setDate(d.getDate() - 1)
       const day = String(d.getDate()).padStart(2, '0')
       const month = String(d.getMonth() + 1).padStart(2, '0')
       const year = d.getFullYear()
@@ -1092,14 +1091,14 @@ export default function StudentList({
         new Paragraph({
           children: [
             new TextRun({
-              text: `Vi har gjort en rutinesjekk på manglende varselbrev${perDateText}. Følgende fag har manglende varsler. Fint hvis du sender ut for de som har gått over ${thresholdText} fravær.`,
+              text: `Vi har gjennomført en rutinesjekk av manglende varselbrev${perDateText}. Følgende fag/elever mangler varsler. Vi ber om at det sendes varsel til elever med fravær over ${thresholdText}.`,
             }),
           ],
         }),
         new Paragraph({
           children: [
             new TextRun({
-              text: 'I noen tilfeller kan det være etter avtale at dette ikke er gjort, sjekk med trinnleder hva som bør gjøres.',
+              text: 'I enkelte tilfeller kan det være etter avtale at varsel ikke er sendt. Sjekk med elevens trinnleder for å avklare hva som skal gjøres.',
             }),
           ],
         }),
@@ -1108,7 +1107,7 @@ export default function StudentList({
             new Paragraph({
               children: [
                 new TextRun({
-                  text: 'Vi informerer også her om det er sendt noe på manglende vurderingsgrunnlag, dette er bare informasjon, du som faglærer vurderer om det trengs varsel på vurderingsgrunnlag.',
+                  text: 'Vi informerer også om eventuelle utsendte varsler på manglende vurderingsgrunnlag. Dette er kun til orientering. Det er faglærer som vurderer om det er behov for å sende varsel om manglende vurderingsgrunnlag.',
                 }),
               ],
             }),
