@@ -36,6 +36,9 @@ interface StudentListProps {
   fullRapport: boolean
   fullRapportInclude2: boolean
   noFilter: boolean
+  warningCountFilterEnabled: boolean
+  warningCountThreshold: number
+  sortByWarningCountDesc: boolean
   presets?: PresetRecord[]
   oversiktModalOpen?: boolean
   onOversiktModalClose?: () => void
@@ -73,6 +76,9 @@ const exportTimestamp = (): string => {
 const buildSingleStudentExportName = (className: string, extension: 'pdf' | 'docx'): string =>
   `oppfolgingsark_klasse-${sanitizeFilenamePart(className)}_${exportTimestamp()}.${extension}`
 
+const getStudentWarningCount = (student: StudentAbsenceSummary): number =>
+  student.subjects.reduce((count, subject) => count + subject.warnings.length, 0)
+
 export default function StudentList({
   data,
   selectedClasses,
@@ -89,6 +95,9 @@ export default function StudentList({
   fullRapport,
   fullRapportInclude2,
   noFilter,
+  warningCountFilterEnabled,
+  warningCountThreshold,
+  sortByWarningCountDesc,
   presets = [],
   oversiktModalOpen = false,
   onOversiktModalClose,
@@ -535,6 +544,21 @@ export default function StudentList({
       filtered.push({ ...studentWithTeacherFilteredSubjects, subjects })
     })
 
+    if (warningCountFilterEnabled) {
+      const minimumWarningCount = Math.max(0, Math.floor(warningCountThreshold))
+      return filtered
+        .filter(student => getStudentWarningCount(student) >= minimumWarningCount)
+        .sort((a, b) => {
+          if (sortByWarningCountDesc) {
+            const warningDiff = getStudentWarningCount(b) - getStudentWarningCount(a)
+            if (warningDiff !== 0) return warningDiff
+          }
+          const classCompare = a.className.localeCompare(b.className, 'nb-NO', { numeric: true })
+          if (classCompare !== 0) return classCompare
+          return a.navn.localeCompare(b.navn, 'nb-NO')
+        })
+    }
+
     return filtered.sort((a, b) => {
       const classCompare = a.className.localeCompare(b.className, 'nb-NO', { numeric: true })
       if (classCompare !== 0) return classCompare
@@ -550,6 +574,9 @@ export default function StudentList({
     kontaktlaererByStudentKey,
     kontaktlaererSearch,
     faglaererSearch,
+    warningCountFilterEnabled,
+    warningCountThreshold,
+    sortByWarningCountDesc,
   ])
 
   const getKontaktlaererForStudent = (student: StudentAbsenceSummary) => {
@@ -2114,6 +2141,13 @@ export default function StudentList({
           </div>
         </div>
       </div>
+
+      {warningCountFilterEnabled && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 no-print">
+          Viser elever med minst {Math.max(0, Math.floor(warningCountThreshold))} varsler sendt.
+          {sortByWarningCountDesc && ' Sortert med flest varsler først.'}
+        </div>
+      )}
 
       <div className="space-y-3">
         {atRiskStudents.map(student => {

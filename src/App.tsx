@@ -84,6 +84,9 @@ function App() {
   const [lowGradeFilter, setLowGradeFilter] = useState<string[]>(['IV', '1', '2'])
   const [gradeHalvaar, setGradeHalvaar] = useState<'H1' | 'H2' | 'begge'>('begge')
   const [filterLogic, setFilterLogic] = useState<'og' | 'eller'>('eller')
+  const [warningCountFilterEnabled, setWarningCountFilterEnabled] = useState<boolean>(false)
+  const [warningCountThreshold, setWarningCountThreshold] = useState<number>(3)
+  const [sortByWarningCountDesc, setSortByWarningCountDesc] = useState<boolean>(false)
   const [fullRapport, setFullRapport] = useState<boolean>(false)
   const [fullRapportInclude2, setFullRapportInclude2] = useState<boolean>(false)
   const [idleRemainingMs, setIdleRemainingMs] = useState<number>(IDLE_TIMEOUT_MS)
@@ -116,6 +119,9 @@ function App() {
     setFaginnsiktSubtab('oversikt')
     setAllowInsightsWithoutAbsence(false)
     setGradeHalvaar('H1')
+    setWarningCountFilterEnabled(false)
+    setWarningCountThreshold(3)
+    setSortByWarningCountDesc(false)
     idleDeadlineRef.current = null
   }
 
@@ -1702,6 +1708,46 @@ function App() {
                           ))}
                         </div>
                       </div>
+
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium text-slate-900">
+                          Varsler per elev
+                        </label>
+                        <div className="flex items-center gap-3 text-sm whitespace-nowrap overflow-x-auto">
+                          <label className={`inline-flex h-10 items-center gap-2 px-1 ${warningCountFilterEnabled ? 'text-slate-700' : 'text-slate-400'}`}>
+                            <input
+                              type="checkbox"
+                              checked={warningCountFilterEnabled}
+                              onChange={e => {
+                                const next = e.currentTarget.checked
+                                setWarningCountFilterEnabled(next)
+                                if (!next) setSortByWarningCountDesc(false)
+                              }}
+                              className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                            />
+                            Minst
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={warningCountThreshold}
+                            onChange={e => setWarningCountThreshold(Math.max(0, Number.isFinite(e.currentTarget.valueAsNumber) ? e.currentTarget.valueAsNumber : 0))}
+                            disabled={!warningCountFilterEnabled}
+                            className="h-10 w-20 rounded-md border border-slate-300 bg-white px-2 text-slate-900 disabled:bg-slate-100 disabled:text-slate-400"
+                          />
+                          <span className="inline-flex h-10 items-center text-slate-600">varsler</span>
+                          <label className={`inline-flex h-10 items-center gap-2 px-1 ${warningCountFilterEnabled ? 'text-slate-700' : 'text-slate-400'}`}>
+                            <input
+                              type="checkbox"
+                              checked={sortByWarningCountDesc}
+                              onChange={e => setSortByWarningCountDesc(e.currentTarget.checked)}
+                              disabled={!warningCountFilterEnabled}
+                              className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                            />
+                            Sorter flest først
+                          </label>
+                        </div>
+                      </div>
                     </div>
 
                     {/* Secondary actions */}
@@ -1816,6 +1862,9 @@ function App() {
                       fullRapport={isNameSearchActive ? false : fullRapport}
                       fullRapportInclude2={isNameSearchActive ? false : fullRapportInclude2}
                       noFilter={isNameSearchActive ? true : noFilter}
+                      warningCountFilterEnabled={warningCountFilterEnabled}
+                      warningCountThreshold={warningCountThreshold}
+                      sortByWarningCountDesc={sortByWarningCountDesc}
                       presets={presets}
                       oversiktModalOpen={oversiktModalOpen}
                       onOversiktModalClose={() => setOversiktModalOpen(false)}
