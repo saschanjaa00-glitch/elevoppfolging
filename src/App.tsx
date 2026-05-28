@@ -87,6 +87,8 @@ function App() {
   const [warningCountFilterEnabled, setWarningCountFilterEnabled] = useState<boolean>(false)
   const [warningCountThreshold, setWarningCountThreshold] = useState<number>(3)
   const [sortByWarningCountDesc, setSortByWarningCountDesc] = useState<boolean>(false)
+  const [includeFravaerWarnings, setIncludeFravaerWarnings] = useState<boolean>(true)
+  const [includeGrunnlagWarnings, setIncludeGrunnlagWarnings] = useState<boolean>(true)
   const [fullRapport, setFullRapport] = useState<boolean>(false)
   const [fullRapportInclude2, setFullRapportInclude2] = useState<boolean>(false)
   const [idleRemainingMs, setIdleRemainingMs] = useState<number>(IDLE_TIMEOUT_MS)
@@ -122,6 +124,8 @@ function App() {
     setWarningCountFilterEnabled(false)
     setWarningCountThreshold(3)
     setSortByWarningCountDesc(false)
+    setIncludeFravaerWarnings(true)
+    setIncludeGrunnlagWarnings(true)
     idleDeadlineRef.current = null
   }
 
@@ -1739,6 +1743,26 @@ function App() {
                           <label className={`inline-flex h-10 items-center gap-2 px-1 ${warningCountFilterEnabled ? 'text-slate-700' : 'text-slate-400'}`}>
                             <input
                               type="checkbox"
+                              checked={includeFravaerWarnings}
+                              onChange={e => setIncludeFravaerWarnings(e.currentTarget.checked)}
+                              disabled={!warningCountFilterEnabled}
+                              className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                            />
+                            Fravær
+                          </label>
+                          <label className={`inline-flex h-10 items-center gap-2 px-1 ${warningCountFilterEnabled ? 'text-slate-700' : 'text-slate-400'}`}>
+                            <input
+                              type="checkbox"
+                              checked={includeGrunnlagWarnings}
+                              onChange={e => setIncludeGrunnlagWarnings(e.currentTarget.checked)}
+                              disabled={!warningCountFilterEnabled}
+                              className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                            />
+                            Grunnlag
+                          </label>
+                          <label className={`inline-flex h-10 items-center gap-2 px-1 ${warningCountFilterEnabled ? 'text-slate-700' : 'text-slate-400'}`}>
+                            <input
+                              type="checkbox"
                               checked={sortByWarningCountDesc}
                               onChange={e => setSortByWarningCountDesc(e.currentTarget.checked)}
                               disabled={!warningCountFilterEnabled}
@@ -1865,6 +1889,8 @@ function App() {
                       warningCountFilterEnabled={warningCountFilterEnabled}
                       warningCountThreshold={warningCountThreshold}
                       sortByWarningCountDesc={sortByWarningCountDesc}
+                      includeFravaerWarnings={includeFravaerWarnings}
+                      includeGrunnlagWarnings={includeGrunnlagWarnings}
                       presets={presets}
                       oversiktModalOpen={oversiktModalOpen}
                       onOversiktModalClose={() => setOversiktModalOpen(false)}

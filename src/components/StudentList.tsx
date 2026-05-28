@@ -39,6 +39,8 @@ interface StudentListProps {
   warningCountFilterEnabled: boolean
   warningCountThreshold: number
   sortByWarningCountDesc: boolean
+  includeFravaerWarnings: boolean
+  includeGrunnlagWarnings: boolean
   presets?: PresetRecord[]
   oversiktModalOpen?: boolean
   onOversiktModalClose?: () => void
@@ -76,8 +78,35 @@ const exportTimestamp = (): string => {
 const buildSingleStudentExportName = (className: string, extension: 'pdf' | 'docx'): string =>
   `oppfolgingsark_klasse-${sanitizeFilenamePart(className)}_${exportTimestamp()}.${extension}`
 
-const getStudentWarningCount = (student: StudentAbsenceSummary): number =>
-  student.subjects.reduce((count, subject) => count + subject.warnings.length, 0)
+const isFravaerWarning = (warningType: string): boolean =>
+  warningType.toLowerCase().includes('frav')
+
+const isGrunnlagWarning = (warningType: string): boolean => {
+  const normalized = warningType.toLowerCase()
+  return normalized.includes('vurdering') || normalized.includes('grunnlag')
+}
+
+const shouldCountWarningType = (
+  warningType: string,
+  includeFravaerWarnings: boolean,
+  includeGrunnlagWarnings: boolean
+): boolean => {
+  if (includeFravaerWarnings && isFravaerWarning(warningType)) return true
+  if (includeGrunnlagWarnings && isGrunnlagWarning(warningType)) return true
+  return false
+}
+
+const getStudentWarningCount = (
+  student: StudentAbsenceSummary,
+  includeFravaerWarnings: boolean,
+  includeGrunnlagWarnings: boolean
+): number =>
+  student.subjects.reduce(
+    (count, subject) => count + subject.warnings.filter(warning =>
+      shouldCountWarningType(warning.warningType, includeFravaerWarnings, includeGrunnlagWarnings)
+    ).length,
+    0
+  )
 
 export default function StudentList({
   data,
@@ -98,6 +127,8 @@ export default function StudentList({
   warningCountFilterEnabled,
   warningCountThreshold,
   sortByWarningCountDesc,
+  includeFravaerWarnings,
+  includeGrunnlagWarnings,
   presets = [],
   oversiktModalOpen = false,
   onOversiktModalClose,
@@ -547,10 +578,12 @@ export default function StudentList({
     if (warningCountFilterEnabled) {
       const minimumWarningCount = Math.max(0, Math.floor(warningCountThreshold))
       return filtered
-        .filter(student => getStudentWarningCount(student) >= minimumWarningCount)
+        .filter(student => getStudentWarningCount(student, includeFravaerWarnings, includeGrunnlagWarnings) >= minimumWarningCount)
         .sort((a, b) => {
           if (sortByWarningCountDesc) {
-            const warningDiff = getStudentWarningCount(b) - getStudentWarningCount(a)
+            const warningDiff =
+              getStudentWarningCount(b, includeFravaerWarnings, includeGrunnlagWarnings) -
+              getStudentWarningCount(a, includeFravaerWarnings, includeGrunnlagWarnings)
             if (warningDiff !== 0) return warningDiff
           }
           const classCompare = a.className.localeCompare(b.className, 'nb-NO', { numeric: true })
@@ -577,6 +610,8 @@ export default function StudentList({
     warningCountFilterEnabled,
     warningCountThreshold,
     sortByWarningCountDesc,
+    includeFravaerWarnings,
+    includeGrunnlagWarnings,
   ])
 
   const getKontaktlaererForStudent = (student: StudentAbsenceSummary) => {
@@ -2145,6 +2180,13 @@ export default function StudentList({
       {warningCountFilterEnabled && (
         <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 no-print">
           Viser elever med minst {Math.max(0, Math.floor(warningCountThreshold))} varsler sendt.
+          {' '}
+          Typer:
+          {' '}
+          {[
+            includeFravaerWarnings ? 'Fravær' : null,
+            includeGrunnlagWarnings ? 'Grunnlag' : null,
+          ].filter(Boolean).join(', ') || 'Ingen valgt'}.
           {sortByWarningCountDesc && ' Sortert med flest varsler først.'}
         </div>
       )}
