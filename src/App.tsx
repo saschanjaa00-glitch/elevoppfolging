@@ -26,11 +26,13 @@ import './index.css'
 const loadStatsView = () => import('./components/StatsView')
 const loadInnsiktView = () => import('./components/InnsiktView')
 const loadFaginnsiktView = () => import('./components/FaginnsiktView')
+const loadHoyestSnittView = () => import('./components/HoyestSnittView')
 const StatsView = lazy(loadStatsView)
 const InnsiktView = lazy(loadInnsiktView)
 const FaginnsiktView = lazy(loadFaginnsiktView)
+const HoyestSnittView = lazy(loadHoyestSnittView)
 
-type AppTab = 'elever' | 'statistikk' | 'faginnsikt' | 'innsikt'
+type AppTab = 'elever' | 'statistikk' | 'faginnsikt' | 'innsikt' | 'hoyestsnitt'
 type FaginnsiktSubtab = 'oversikt' | 'karakterutvikling'
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000
@@ -40,18 +42,27 @@ const TAB_PREFETCH_ORDER: Record<AppTab, Array<{ key: string; load: () => Promis
     { key: 'statistikk', load: loadStatsView },
     { key: 'faginnsikt', load: loadFaginnsiktView },
     { key: 'innsikt', load: loadInnsiktView },
+    { key: 'hoyestsnitt', load: loadHoyestSnittView },
   ],
   statistikk: [
     { key: 'faginnsikt', load: loadFaginnsiktView },
     { key: 'innsikt', load: loadInnsiktView },
+    { key: 'hoyestsnitt', load: loadHoyestSnittView },
   ],
   faginnsikt: [
     { key: 'statistikk', load: loadStatsView },
     { key: 'innsikt', load: loadInnsiktView },
+    { key: 'hoyestsnitt', load: loadHoyestSnittView },
   ],
   innsikt: [
     { key: 'statistikk', load: loadStatsView },
     { key: 'faginnsikt', load: loadFaginnsiktView },
+    { key: 'hoyestsnitt', load: loadHoyestSnittView },
+  ],
+  hoyestsnitt: [
+    { key: 'statistikk', load: loadStatsView },
+    { key: 'faginnsikt', load: loadFaginnsiktView },
+    { key: 'innsikt', load: loadInnsiktView },
   ],
 }
 
@@ -143,6 +154,14 @@ function App() {
 
   const hasAbsenceData = data.absences.length > 0
   const hasData = hasAbsenceData || allowInsightsWithoutAbsence
+  const hasT2Grades = useMemo(
+    () =>
+      data.grades.some(g => {
+        const halvar = g.halvår?.toString().trim().toLowerCase() ?? ''
+        return halvar === '2' || halvar.includes('2')
+      }),
+    [data.grades]
+  )
   const isNameSearchActive = studentSearch.trim().length > 0
   const filtersDisabled = isNameSearchActive || noFilter
   const prefetchedChunks = useRef<Set<string>>(new Set())
@@ -1411,6 +1430,18 @@ function App() {
                 Lærerinnsikt
               </button>
               )}
+              {hasT2Grades && (
+              <button
+                onClick={() => setActiveTab('hoyestsnitt')}
+                className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
+                  activeTab === 'hoyestsnitt'
+                    ? 'text-sky-700 border-sky-600'
+                    : 'text-slate-500 border-transparent hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                Snitt
+              </button>
+              )}
 
               <div className="ml-auto flex items-center gap-2 pb-0.5">
                 {hasAbsenceData && (
@@ -1447,6 +1478,11 @@ function App() {
             {activeTab === 'innsikt' && (
               <Suspense fallback={<div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 text-slate-600">Laster laererinnsikt...</div>}>
                 <InnsiktView data={data} threshold={thresholdEnabled ? absenceThreshold : 0} />
+              </Suspense>
+            )}
+            {activeTab === 'hoyestsnitt' && (
+              <Suspense fallback={<div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 text-slate-600">Laster høyest snitt...</div>}>
+                <HoyestSnittView data={data} />
               </Suspense>
             )}
             {activeTab === 'elever' && (
