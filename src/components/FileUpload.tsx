@@ -287,7 +287,7 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
     const isTermType = (t: string) => {
       if (!t) return true // no assessment type column — keep as before
       const n = t.toLowerCase()
-      return n.includes('halvår') || n.includes('halvar') || n.includes('standpunkt') || n.includes('termin')
+      return n.includes('halvår') || n.includes('halvar') || n.includes('standpunkt') || n.includes('termin') || n.includes('eksam')
     }
 
     return {

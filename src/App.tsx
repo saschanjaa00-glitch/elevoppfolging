@@ -18,6 +18,7 @@ import { nb } from 'date-fns/locale/nb'
 import 'react-datepicker/dist/react-datepicker.css'
 registerLocale('nb', nb)
 import FileUpload from './components/FileUpload'
+import ErrorBoundary from './components/ErrorBoundary'
 import ClassSelector from './components/ClassSelector'
 import StudentList from './components/StudentList'
 import type { DataStore, PresetRecord } from './types'
@@ -27,12 +28,14 @@ const loadStatsView = () => import('./components/StatsView')
 const loadInnsiktView = () => import('./components/InnsiktView')
 const loadFaginnsiktView = () => import('./components/FaginnsiktView')
 const loadHoyestSnittView = () => import('./components/HoyestSnittView')
+const loadIkkeBestattView = () => import('./components/IkkeBestattView')
 const StatsView = lazy(loadStatsView)
 const InnsiktView = lazy(loadInnsiktView)
 const FaginnsiktView = lazy(loadFaginnsiktView)
 const HoyestSnittView = lazy(loadHoyestSnittView)
+const IkkeBestattView = lazy(loadIkkeBestattView)
 
-type AppTab = 'elever' | 'statistikk' | 'faginnsikt' | 'innsikt' | 'hoyestsnitt'
+type AppTab = 'elever' | 'statistikk' | 'faginnsikt' | 'innsikt' | 'hoyestsnitt' | 'ikkeBestatt'
 type FaginnsiktSubtab = 'oversikt' | 'karakterutvikling'
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000
@@ -43,26 +46,37 @@ const TAB_PREFETCH_ORDER: Record<AppTab, Array<{ key: string; load: () => Promis
     { key: 'faginnsikt', load: loadFaginnsiktView },
     { key: 'innsikt', load: loadInnsiktView },
     { key: 'hoyestsnitt', load: loadHoyestSnittView },
+    { key: 'ikkeBestatt', load: loadIkkeBestattView },
   ],
   statistikk: [
     { key: 'faginnsikt', load: loadFaginnsiktView },
     { key: 'innsikt', load: loadInnsiktView },
     { key: 'hoyestsnitt', load: loadHoyestSnittView },
+    { key: 'ikkeBestatt', load: loadIkkeBestattView },
   ],
   faginnsikt: [
     { key: 'statistikk', load: loadStatsView },
     { key: 'innsikt', load: loadInnsiktView },
     { key: 'hoyestsnitt', load: loadHoyestSnittView },
+    { key: 'ikkeBestatt', load: loadIkkeBestattView },
   ],
   innsikt: [
     { key: 'statistikk', load: loadStatsView },
     { key: 'faginnsikt', load: loadFaginnsiktView },
     { key: 'hoyestsnitt', load: loadHoyestSnittView },
+    { key: 'ikkeBestatt', load: loadIkkeBestattView },
   ],
   hoyestsnitt: [
     { key: 'statistikk', load: loadStatsView },
     { key: 'faginnsikt', load: loadFaginnsiktView },
     { key: 'innsikt', load: loadInnsiktView },
+    { key: 'ikkeBestatt', load: loadIkkeBestattView },
+  ],
+  ikkeBestatt: [
+    { key: 'statistikk', load: loadStatsView },
+    { key: 'faginnsikt', load: loadFaginnsiktView },
+    { key: 'innsikt', load: loadInnsiktView },
+    { key: 'hoyestsnitt', load: loadHoyestSnittView },
   ],
 }
 
@@ -280,7 +294,7 @@ function App() {
       cancelIdleCallback?: (handle: number) => void
     }
 
-    const pending = TAB_PREFETCH_ORDER[activeTab].filter(({ key }) => !prefetchedChunks.current.has(key))
+    const pending = (TAB_PREFETCH_ORDER[activeTab] ?? []).filter(({ key }) => !prefetchedChunks.current.has(key))
     if (pending.length === 0) return
 
     let timeoutId: number | null = null
@@ -1442,6 +1456,18 @@ function App() {
                 Snitt
               </button>
               )}
+              {hasData && (
+              <button
+                onClick={() => setActiveTab('ikkeBestatt')}
+                className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
+                  activeTab === 'ikkeBestatt'
+                    ? 'text-sky-700 border-sky-600'
+                    : 'text-slate-500 border-transparent hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                Ikke bestått
+              </button>
+              )}
 
               <div className="ml-auto flex items-center gap-2 pb-0.5">
                 {hasAbsenceData && (
@@ -1484,6 +1510,13 @@ function App() {
               <Suspense fallback={<div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 text-slate-600">Laster høyest snitt...</div>}>
                 <HoyestSnittView data={data} />
               </Suspense>
+            )}
+            {activeTab === 'ikkeBestatt' && (
+              <ErrorBoundary>
+              <Suspense fallback={<div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 text-slate-600">Laster Ikke bestått...</div>}>
+                <IkkeBestattView data={data} />
+              </Suspense>
+              </ErrorBoundary>
             )}
             {activeTab === 'elever' && (
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
