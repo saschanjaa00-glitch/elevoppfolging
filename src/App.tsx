@@ -29,13 +29,15 @@ const loadInnsiktView = () => import('./components/InnsiktView')
 const loadFaginnsiktView = () => import('./components/FaginnsiktView')
 const loadHoyestSnittView = () => import('./components/HoyestSnittView')
 const loadIkkeBestattView = () => import('./components/IkkeBestattView')
+const loadEksamenView = () => import('./components/EksamenView')
 const StatsView = lazy(loadStatsView)
 const InnsiktView = lazy(loadInnsiktView)
 const FaginnsiktView = lazy(loadFaginnsiktView)
 const HoyestSnittView = lazy(loadHoyestSnittView)
 const IkkeBestattView = lazy(loadIkkeBestattView)
+const EksamenView = lazy(loadEksamenView)
 
-type AppTab = 'elever' | 'statistikk' | 'faginnsikt' | 'innsikt' | 'hoyestsnitt' | 'ikkeBestatt'
+type AppTab = 'elever' | 'statistikk' | 'faginnsikt' | 'innsikt' | 'hoyestsnitt' | 'ikkeBestatt' | 'eksamen'
 type FaginnsiktSubtab = 'oversikt' | 'karakterutvikling'
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000
@@ -47,36 +49,49 @@ const TAB_PREFETCH_ORDER: Record<AppTab, Array<{ key: string; load: () => Promis
     { key: 'innsikt', load: loadInnsiktView },
     { key: 'hoyestsnitt', load: loadHoyestSnittView },
     { key: 'ikkeBestatt', load: loadIkkeBestattView },
+    { key: 'eksamen', load: loadEksamenView },
   ],
   statistikk: [
     { key: 'faginnsikt', load: loadFaginnsiktView },
     { key: 'innsikt', load: loadInnsiktView },
     { key: 'hoyestsnitt', load: loadHoyestSnittView },
     { key: 'ikkeBestatt', load: loadIkkeBestattView },
+    { key: 'eksamen', load: loadEksamenView },
   ],
   faginnsikt: [
     { key: 'statistikk', load: loadStatsView },
     { key: 'innsikt', load: loadInnsiktView },
     { key: 'hoyestsnitt', load: loadHoyestSnittView },
     { key: 'ikkeBestatt', load: loadIkkeBestattView },
+    { key: 'eksamen', load: loadEksamenView },
   ],
   innsikt: [
     { key: 'statistikk', load: loadStatsView },
     { key: 'faginnsikt', load: loadFaginnsiktView },
     { key: 'hoyestsnitt', load: loadHoyestSnittView },
     { key: 'ikkeBestatt', load: loadIkkeBestattView },
+    { key: 'eksamen', load: loadEksamenView },
   ],
   hoyestsnitt: [
     { key: 'statistikk', load: loadStatsView },
     { key: 'faginnsikt', load: loadFaginnsiktView },
     { key: 'innsikt', load: loadInnsiktView },
     { key: 'ikkeBestatt', load: loadIkkeBestattView },
+    { key: 'eksamen', load: loadEksamenView },
   ],
   ikkeBestatt: [
     { key: 'statistikk', load: loadStatsView },
     { key: 'faginnsikt', load: loadFaginnsiktView },
     { key: 'innsikt', load: loadInnsiktView },
     { key: 'hoyestsnitt', load: loadHoyestSnittView },
+    { key: 'eksamen', load: loadEksamenView },
+  ],
+  eksamen: [
+    { key: 'statistikk', load: loadStatsView },
+    { key: 'faginnsikt', load: loadFaginnsiktView },
+    { key: 'innsikt', load: loadInnsiktView },
+    { key: 'hoyestsnitt', load: loadHoyestSnittView },
+    { key: 'ikkeBestatt', load: loadIkkeBestattView },
   ],
 }
 
@@ -1468,6 +1483,18 @@ function App() {
                 Ikke bestått
               </button>
               )}
+              {hasData && (
+              <button
+                onClick={() => setActiveTab('eksamen')}
+                className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
+                  activeTab === 'eksamen'
+                    ? 'text-sky-700 border-sky-600'
+                    : 'text-slate-500 border-transparent hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                Eksamen
+              </button>
+              )}
 
               <div className="ml-auto flex items-center gap-2 pb-0.5">
                 {hasAbsenceData && (
@@ -1515,6 +1542,13 @@ function App() {
               <ErrorBoundary>
               <Suspense fallback={<div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 text-slate-600">Laster Ikke bestått...</div>}>
                 <IkkeBestattView data={data} />
+              </Suspense>
+              </ErrorBoundary>
+            )}
+            {activeTab === 'eksamen' && (
+              <ErrorBoundary>
+              <Suspense fallback={<div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 text-slate-600">Laster Eksamen...</div>}>
+                <EksamenView data={data} />
               </Suspense>
               </ErrorBoundary>
             )}

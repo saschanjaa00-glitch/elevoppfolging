@@ -4,14 +4,13 @@ import type { DataStore } from '../types'
 import { normalizeSubjectGroupKey } from '../studentInfoUtils'
 import { fagkodeLookup } from '../fagkodeLookup'
 
-interface IkkeBestattViewProps {
+interface EksamenViewProps {
   data: DataStore
 }
 
-interface IkkeBestattRow {
+interface EksamenRow {
   navn: string
   klasse?: string
-  telefon?: string
   subjectGroup: string
   subject: string
   grade: string
@@ -19,15 +18,12 @@ interface IkkeBestattRow {
   imDoc?: 'dok' | 'udok' | null
 }
 
-const FAIL_GRADES = new Set(['1', 'IV', 'IM'])
-
-type SortKey = 'navn' | 'klasse' | 'telefon' | 'subject' | 'standpunkt' | 'grade'
+type SortKey = 'navn' | 'klasse' | 'subject' | 'standpunkt' | 'grade'
 type SortDir = 'asc' | 'desc'
 
 const COLUMNS: Array<{ key: SortKey; label: string }> = [
   { key: 'navn', label: 'Elev' },
   { key: 'klasse', label: 'Klasse' },
-  { key: 'telefon', label: 'Telefon' },
   { key: 'subject', label: 'Fag' },
   { key: 'standpunkt', label: 'Standpunkt' },
   { key: 'grade', label: 'Eksamen / T2' },
@@ -45,24 +41,21 @@ const compareByColumn = (key: SortKey, a: string, b: string): number => {
   return a.localeCompare(b, 'nb')
 }
 
-// A student who failed standpunkt with a "1" but passed the exam/2. termin.
-// IV/IM in standpunkt is NOT redeemed by a passing exam, so only "1" counts.
-const isPassedAfter = (r: IkkeBestattRow): boolean =>
-  Boolean(r.standpunkt === '1' && r.grade && !FAIL_GRADES.has(r.grade))
+// Compare exam grade vs. standpunkt. Returns the direction of change, or null
+// when a comparison isn't possible (missing/unknown standpunkt or exam grade).
+type GradeChange = 'up' | 'down' | 'same'
+const gradeChange = (r: EksamenRow): GradeChange | null => {
+  const s = GRADE_ORDER.indexOf((r.standpunkt || '').toUpperCase())
+  const e = GRADE_ORDER.indexOf((r.grade || '').toUpperCase())
+  if (s === -1 || e === -1) return null
+  if (e > s) return 'up'
+  if (e < s) return 'down'
+  return 'same'
+}
 
 // Display value for the exam grade, e.g. "IM (udok)".
-const formatExamGrade = (r: IkkeBestattRow): string =>
+const formatExamGrade = (r: EksamenRow): string =>
   r.grade === 'IM' && r.imDoc ? `IM (${r.imDoc})` : r.grade
-
-// Truncate long subject names for display.
-const truncate = (s: string, max: number): string => (s.length > max ? `${s.slice(0, max - 1)}…` : s)
-
-// Strip a leading +47 country code and format as "xx xx xx xx".
-const normalizePhone = (raw: string): string => {
-  const digits = (raw ?? '').trim().replace(/^\+47[\s-]*/, '').replace(/\D/g, '')
-  if (digits.length === 8) return digits.replace(/(\d{2})(?=\d)/g, '$1 ').trim()
-  return digits
-}
 
 // Derive the trinn (VG1/VG2/VG3) from the leading digit of a class name, e.g. "2STB" -> '2'.
 const classLevel = (klasse?: string): '1' | '2' | '3' | null => {
@@ -140,17 +133,16 @@ const detectImDoc = (raw: string): 'dok' | 'udok' | null => {
   return null
 }
 
-export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
-  const [rows, setRows] = useState<IkkeBestattRow[]>([])
+export default function EksamenView({ data }: EksamenViewProps) {
+  const [rows, setRows] = useState<EksamenRow[]>([])
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [fileName, setFileName] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('navn')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
-  const [hideBestatt, setHideBestatt] = useState(false)
-  const [showOnlyIM, setShowOnlyIM] = useState(false)
-  const [hideImDok, setHideImDok] = useState(false)
-  const [hideImUdok, setHideImUdok] = useState(false)
+  const [showOpp, setShowOpp] = useState(true)
+  const [showNed, setShowNed] = useState(true)
+  const [showLikt, setShowLikt] = useState(true)
   const [showVg, setShowVg] = useState<{ '1': boolean; '2': boolean; '3': boolean }>({
     '1': true,
     '2': true,
@@ -181,17 +173,19 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
 
   const visibleRows = useMemo(() => {
     let result = sortedRows
-    if (hideBestatt) result = result.filter(r => !isPassedAfter(r))
-    if (showOnlyIM) result = result.filter(r => r.grade === 'IM')
-    if (hideImDok) result = result.filter(r => !(r.grade === 'IM' && r.imDoc === 'dok'))
-    if (hideImUdok) result = result.filter(r => !(r.grade === 'IM' && r.imDoc === 'udok'))
+    result = result.filter(r => {
+      const change = gradeChange(r) ?? 'same'
+      if (change === 'up') return showOpp
+      if (change === 'down') return showNed
+      return showLikt
+    })
     result = result.filter(r => {
       const lvl = classLevel(r.klasse)
       if (lvl === null) return showNus
       return showVg[lvl]
     })
     return result
-  }, [sortedRows, hideBestatt, showOnlyIM, hideImDok, hideImUdok, showVg, showNus])
+  }, [sortedRows, showOpp, showNed, showLikt, showVg, showNus])
 
   // Total unique students per trinn across the whole school (from the roster).
   const totalStudentsByLevel = useMemo(() => {
@@ -228,13 +222,13 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
   const exportExcel = () => {
     if (visibleRows.length === 0) return
     const aoa = [
-      ['Elev', 'Klasse', 'Telefon', 'Fag', 'Standpunkt', 'Eksamen / T2'],
-      ...visibleRows.map(r => [r.navn, r.klasse || 'NUS', r.telefon || '', r.subject || r.subjectGroup, r.standpunkt || '', formatExamGrade(r)]),
+      ['Elev', 'Klasse', 'Fag', 'Standpunkt', 'Eksamen / T2'],
+      ...visibleRows.map(r => [r.navn, r.klasse || 'NUS', r.subject || r.subjectGroup, r.standpunkt || '', formatExamGrade(r)]),
     ]
     const ws = XLSX.utils.aoa_to_sheet(aoa)
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Ikke bestått')
-    XLSX.writeFile(wb, 'ikke-bestatt.xlsx')
+    XLSX.utils.book_append_sheet(wb, ws, 'Eksamen')
+    XLSX.writeFile(wb, 'eksamen.xlsx')
   }
 
   const exportPdf = async () => {
@@ -247,15 +241,14 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
     const marginTop = 36
     const marginBottom = 30
     const rowHeight = 20
-    const headers = ['#', 'Elev', 'Klasse', 'Telefon', 'Fag', 'Standpunkt', 'Eksamen / T2']
-    const widths = [24, 120, 55, 80, 120, 70, 70]
+    const headers = ['#', 'Elev', 'Klasse', 'Fag', 'Standpunkt', 'Eksamen / T2']
+    const widths = [24, 150, 60, 165, 70, 70]
     let y = marginTop
 
-    const fillFor = (r: IkkeBestattRow): [number, number, number] | null => {
-      if (r.standpunkt === 'IV') return [241, 245, 249]
-      if (r.grade === 'IM' && r.imDoc === 'dok') return [224, 242, 254]
-      if (isPassedAfter(r)) return [220, 252, 231]
-      if (FAIL_GRADES.has(r.grade)) return [254, 226, 226]
+    const fillFor = (r: EksamenRow): [number, number, number] | null => {
+      const change = gradeChange(r)
+      if (change === 'up') return [220, 252, 231]
+      if (change === 'down') return [254, 226, 226]
       return null
     }
 
@@ -280,7 +273,7 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(14)
     doc.setTextColor(15, 23, 42)
-    doc.text('Ikke bestått', marginX, y)
+    doc.text('Eksamen', marginX, y)
     y += 16
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(9)
@@ -322,7 +315,6 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
         isNewGroup ? `${nameOrdinal.get(r.navn)}.` : '',
         r.navn,
         r.klasse || 'NUS',
-        r.telefon || '',
         r.subject || r.subjectGroup,
         r.standpunkt || '-',
         formatExamGrade(r),
@@ -340,13 +332,13 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
     doc.setLineWidth(0.5)
     doc.line(marginX, y, pageWidth - marginX, y)
 
-    doc.save('ikke-bestatt.pdf')
+    doc.save('eksamen.pdf')
   }
 
   const exportNavneliste = () => {
     if (visibleRows.length === 0) return
     const order: string[] = []
-    const groups = new Map<string, IkkeBestattRow[]>()
+    const groups = new Map<string, EksamenRow[]>()
     visibleRows.forEach(r => {
       if (!groups.has(r.navn)) {
         groups.set(r.navn, [])
@@ -358,9 +350,9 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
     void import('docx').then(async ({ Document, Packer, Paragraph, TextRun }) => {
       const children: Paragraph[] = []
       order.forEach((navn, index) => {
+        if (index > 0) children.push(new Paragraph({ children: [] }))
         children.push(
           new Paragraph({
-            spacing: { before: index > 0 ? 200 : 0, after: 40 },
             children: [new TextRun({ text: navn, bold: true })],
           }),
         )
@@ -450,7 +442,7 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
       const wb = XLSX.read(buffer)
       const sheet = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]) as Record<string, any>[]
 
-      const parsed: IkkeBestattRow[] = []
+      const parsed: EksamenRow[] = []
       for (const r of sheet) {
         const fornavn = getRowValue(r, ['fornavn', 'first name', 'firstname'])
         const etternavn = getRowValue(r, ['etternavn', 'last name', 'lastname'])
@@ -459,7 +451,6 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
           getRowValue(r, ['navn', 'elev', 'student', 'navn_elev', 'elevnavn'])
 
         const klasse = getRowValue(r, ['klasse', 'class', 'klassegruppe'])
-        const telefon = normalizePhone(getRowValue(r, ['telefon', 'phone', 'mobil', 'mobile', 'tlf', 'mobiltelefon']))
         const fagkode = getRowValue(r, ['fagkode', 'code'])
         const faggruppe = getRowValue(r, ['faggruppe', 'gruppe', 'subjectgroup'])
         const subjectGroup = faggruppe || fagkode
@@ -488,7 +479,6 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
         parsed.push({
           navn,
           klasse: resolvedClass,
-          telefon,
           subjectGroup,
           subject: subjectName,
           grade: gradeNorm,
@@ -497,18 +487,10 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
         })
       }
 
-      // Show students who failed (1/IV/IM) in exam/2. termin, or whose result changed vs. standpunkt.
-      const rowsToShow = parsed.filter(p => {
-        if (FAIL_GRADES.has(p.grade)) return true
-        if (p.standpunkt && FAIL_GRADES.has(p.standpunkt) && p.grade && !FAIL_GRADES.has(p.grade) && Number(p.grade) >= 2) return true
-        if (p.standpunkt && !FAIL_GRADES.has(p.standpunkt) && p.grade && FAIL_GRADES.has(p.grade)) return true
-        return false
-      })
-
       setFileName(file.name)
-      setRows(rowsToShow)
-      if (rowsToShow.length === 0) {
-        setError('Ingen elever med ikke bestått ble funnet i filen.')
+      setRows(parsed)
+      if (parsed.length === 0) {
+        setError('Ingen eksamenskarakterer ble funnet i filen.')
       }
     } catch {
       setError('Feil ved lesing av fil')
@@ -524,11 +506,11 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
 
   return (
     <div className="card p-6">
-      <h3 className="text-lg font-semibold mb-2">Ikke bestått (eksamen/2. termin)</h3>
+      <h3 className="text-lg font-semibold mb-2">Eksamen</h3>
       <p className="text-sm text-slate-600 mb-4">
         Last opp eksamensregistreringer-filen (Fornavn, Etternavn, Fagkode, Fagnavn og Karakter trengs som minimum).
-        Systemet kobler eleven via for- og etternavn og faget via fagkode/fagnavn, og viser elever med karakterene
-        IM, IV eller 1.
+        Systemet kobler eleven via for- og etternavn og faget via fagkode/fagnavn, og viser alle eksamenskarakterer
+        sammenlignet med standpunkt.
       </p>
 
       <div
@@ -575,38 +557,29 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
             <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
               <input
                 type="checkbox"
-                checked={hideBestatt}
-                onChange={e => setHideBestatt(e.currentTarget.checked)}
+                checked={showOpp}
+                onChange={e => setShowOpp(e.currentTarget.checked)}
                 className="rounded border-slate-300"
               />
-              Skjul bestått
+              Opp
             </label>
             <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
               <input
                 type="checkbox"
-                checked={showOnlyIM}
-                onChange={e => setShowOnlyIM(e.currentTarget.checked)}
+                checked={showNed}
+                onChange={e => setShowNed(e.currentTarget.checked)}
                 className="rounded border-slate-300"
               />
-              Vis kun IM
+              Ned
             </label>
             <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
               <input
                 type="checkbox"
-                checked={hideImDok}
-                onChange={e => setHideImDok(e.currentTarget.checked)}
+                checked={showLikt}
+                onChange={e => setShowLikt(e.currentTarget.checked)}
                 className="rounded border-slate-300"
               />
-              Skjul IM (dok)
-            </label>
-            <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={hideImUdok}
-                onChange={e => setHideImUdok(e.currentTarget.checked)}
-                className="rounded border-slate-300"
-              />
-              Skjul IM (udok)
+              Likt
             </label>
             <div className="inline-flex items-center gap-3 text-sm text-slate-600">
               <span className="text-slate-500">Trinn:</span>
@@ -683,19 +656,13 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
             </thead>
             <tbody>
               {visibleRows.map((r, i) => {
-                const isFailed = FAIL_GRADES.has(r.grade)
-                const isDokIM = r.grade === 'IM' && r.imDoc === 'dok'
-                const passedAfter = isPassedAfter(r)
-                const isIvStandpunkt = r.standpunkt === 'IV'
-                const rowClass = isIvStandpunkt
-                  ? 'bg-slate-100 border-l-4 border-slate-300'
-                  : isDokIM
-                    ? 'bg-sky-50 border-l-4 border-sky-300'
-                    : passedAfter
-                      ? 'bg-emerald-50 border-l-4 border-emerald-300'
-                      : isFailed
-                        ? 'bg-rose-50 border-l-4 border-rose-300'
-                        : ''
+                const change = gradeChange(r)
+                const rowClass =
+                  change === 'up'
+                    ? 'bg-emerald-50 border-l-4 border-emerald-300'
+                    : change === 'down'
+                      ? 'bg-rose-50 border-l-4 border-rose-300'
+                      : ''
                 const isNewGroup = i === 0 || visibleRows[i - 1].navn !== r.navn
                 const groupBorder = isNewGroup ? 'border-t-2 border-t-slate-300' : ''
                 return (
@@ -703,8 +670,7 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
                     <td className="py-2 pr-4 text-slate-400">{isNewGroup ? `${nameOrdinal.get(r.navn)}.` : ''}</td>
                     <td className="py-2 pr-4 font-medium">{r.navn}</td>
                     <td className="py-2 pr-4">{r.klasse || 'NUS'}</td>
-                    <td className="py-2 pr-4">{r.telefon || '-'}</td>
-                    <td className="py-2 pr-4">{truncate(r.subject || r.subjectGroup, 25)}</td>
+                    <td className="py-2 pr-4">{r.subject || r.subjectGroup}</td>
                     <td className="py-2 pr-4">{r.standpunkt || '-'}</td>
                     <td className="py-2 pr-4">{formatExamGrade(r)}</td>
                   </tr>
