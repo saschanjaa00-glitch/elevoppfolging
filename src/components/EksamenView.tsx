@@ -10,6 +10,7 @@ import {
   truncate,
   classLevel,
   fieldMatchesQuery,
+  numericGrade,
 } from '../examData'
 
 interface EksamenViewProps {
@@ -61,6 +62,173 @@ const gradeDelta = (r: ParsedExamRow): number | null => {
 
 const formatDelta = (d: number | null): string => (d === null ? '' : d > 0 ? `+${d}` : String(d))
 
+// ---- Aggregation (Fag / Lærere subtabs) ----
+type SubTab = 'elever' | 'fag' | 'laerere'
+
+interface AggRow {
+  key: string
+  label: string
+  count: number
+  avgStandpunkt: number | null
+  avgEksamen: number | null
+  diff: number | null
+}
+
+interface AggColumn {
+  key: string
+  label: string
+  display: (r: AggRow) => string
+  sortValue: (r: AggRow) => number | string
+  cellClass?: (r: AggRow) => string
+}
+
+const formatAvg = (n: number | null): string => (n === null ? '–' : n.toFixed(2).replace('.', ','))
+const formatSigned = (n: number | null): string =>
+  n === null ? '–' : `${n > 0 ? '+' : ''}${n.toFixed(2).replace('.', ',')}`
+
+// Group exam rows and average standpunkt vs. exam over rows where both grades
+// are numeric (1-6). diff = avg exam - avg standpunkt.
+const aggregate = (
+  rows: ParsedExamRow[],
+  keyOf: (r: ParsedExamRow) => string,
+  labelOf: (r: ParsedExamRow) => string,
+): AggRow[] => {
+  const groups = new Map<string, ParsedExamRow[]>()
+  rows.forEach(r => {
+    const k = keyOf(r)
+    if (!k) return
+    const arr = groups.get(k)
+    if (arr) arr.push(r)
+    else groups.set(k, [r])
+  })
+  const out: AggRow[] = []
+  groups.forEach((rs, k) => {
+    const paired = rs.filter(r => numericGrade(r.grade) !== null && numericGrade(r.standpunkt) !== null)
+    const n = paired.length
+    const avgS = n ? paired.reduce((s, r) => s + (numericGrade(r.standpunkt) ?? 0), 0) / n : null
+    const avgE = n ? paired.reduce((s, r) => s + (numericGrade(r.grade) ?? 0), 0) / n : null
+    out.push({
+      key: k,
+      label: labelOf(rs[0]),
+      count: n,
+      avgStandpunkt: avgS,
+      avgEksamen: avgE,
+      diff: avgS !== null && avgE !== null ? avgE - avgS : null,
+    })
+  })
+  return out
+}
+
+const diffClass = (r: AggRow): string =>
+  r.diff === null ? '' : r.diff > 0 ? 'text-emerald-700 font-medium' : r.diff < 0 ? 'text-rose-700 font-medium' : ''
+
+const makeAggColumns = (firstLabel: string): AggColumn[] => [
+  { key: 'label', label: firstLabel, display: r => r.label, sortValue: r => r.label },
+  { key: 'antall', label: 'Antall', display: r => String(r.count), sortValue: r => r.count },
+  { key: 'standpunkt', label: 'Snitt standpunkt', display: r => formatAvg(r.avgStandpunkt), sortValue: r => r.avgStandpunkt ?? -1 },
+  { key: 'eksamen', label: 'Snitt eksamen', display: r => formatAvg(r.avgEksamen), sortValue: r => r.avgEksamen ?? -1 },
+  { key: 'endring', label: 'Endring', display: r => formatSigned(r.diff), sortValue: r => r.diff ?? Number.NEGATIVE_INFINITY, cellClass: diffClass },
+]
+
+const FAG_COLUMNS = makeAggColumns('Fag')
+const LAERER_COLUMNS = makeAggColumns('Lærer')
+
+function AggTable({ rows, columns, exportName }: { rows: AggRow[]; columns: AggColumn[]; exportName: string }) {
+  const [sortKey, setSortKey] = useState<string>(columns[0].key)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [filters, setFilters] = useState<Record<string, string>>({})
+  const setFilter = (k: string, v: string) => setFilters(p => ({ ...p, [k]: v }))
+  const toggleSort = (k: string) => {
+    if (k === sortKey) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    else {
+      setSortKey(k)
+      setSortDir('asc')
+    }
+  }
+
+  const visible = useMemo(() => {
+    const col = columns.find(c => c.key === sortKey) ?? columns[0]
+    const filtered = rows.filter(r => columns.every(c => fieldMatchesQuery(c.display(r), filters[c.key] ?? '')))
+    return [...filtered].sort((a, b) => {
+      const av = col.sortValue(a)
+      const bv = col.sortValue(b)
+      const cmp = typeof av === 'number' && typeof bv === 'number' ? av - bv : String(av).localeCompare(String(bv), 'nb')
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+  }, [rows, columns, filters, sortKey, sortDir])
+
+  const exportExcel = () => {
+    if (visible.length === 0) return
+    const aoa = [columns.map(c => c.label), ...visible.map(r => columns.map(c => c.display(r)))]
+    const ws = XLSX.utils.aoa_to_sheet(aoa)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, exportName)
+    XLSX.writeFile(wb, `${exportName.toLowerCase()}.xlsx`)
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="mb-3 flex items-center gap-4">
+        <div className="text-sm text-slate-600">
+          <span className="font-medium text-slate-700">{visible.length}</span> rader
+        </div>
+        <div className="ml-auto">
+          <button
+            type="button"
+            onClick={exportExcel}
+            className="px-3 py-1.5 text-sm font-medium rounded-md bg-sky-600 text-white hover:bg-sky-700"
+          >
+            Eksporter til Excel
+          </button>
+        </div>
+      </div>
+      <table className="min-w-full text-sm">
+        <thead>
+          <tr className="text-left text-xs text-slate-500">
+            {columns.map(col => {
+              const active = sortKey === col.key
+              return (
+                <th key={col.key} className="py-2 pr-4">
+                  <button
+                    type="button"
+                    onClick={() => toggleSort(col.key)}
+                    className={`inline-flex items-center gap-1 font-medium hover:text-slate-700 ${active ? 'text-slate-700' : ''}`}
+                  >
+                    {col.label}
+                    <span className="text-[10px]">{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+                  </button>
+                </th>
+              )
+            })}
+          </tr>
+          <tr>
+            {columns.map(col => (
+              <th key={col.key} className="py-1 pr-4">
+                <input
+                  type="search"
+                  value={filters[col.key] ?? ''}
+                  onChange={e => setFilter(col.key, e.currentTarget.value)}
+                  placeholder="Filtrer…"
+                  className="w-full min-w-[4.5rem] rounded border border-slate-300 px-2 py-1 text-xs font-normal text-slate-700 focus:border-sky-500 focus:outline-none"
+                />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {visible.map((r, i) => (
+            <tr key={r.key} className={i % 2 ? 'bg-slate-50/60' : ''}>
+              {columns.map(col => (
+                <td key={col.key} className={`py-2 pr-4 ${col.cellClass?.(r) ?? ''}`}>{col.display(r)}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export default function EksamenView({ data, rows, fileName, onParsed }: EksamenViewProps) {
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
@@ -75,6 +243,7 @@ export default function EksamenView({ data, rows, fileName, onParsed }: EksamenV
     '3': true,
   })
   const [showNus, setShowNus] = useState(true)
+  const [subTab, setSubTab] = useState<SubTab>('elever')
   const [filters, setFilters] = useState<Record<SortKey, string>>({
     navn: '',
     klasse: '',
@@ -168,6 +337,17 @@ export default function EksamenView({ data, rows, fileName, onParsed }: EksamenV
     })
     return m
   }, [visibleRows])
+
+  // Aggregations for the Fag and Lærere subtabs, over all exam rows.
+  const examRows = useMemo(() => (rows ?? []).filter(r => !r.noExam), [rows])
+  const fagAgg = useMemo(
+    () => aggregate(examRows, r => r.subject || r.subjectGroup, r => r.subject || r.subjectGroup),
+    [examRows],
+  )
+  const laerereAgg = useMemo(
+    () => aggregate(examRows, r => r.teacher ?? '', r => r.teacher ?? ''),
+    [examRows],
+  )
 
   const exportExcel = () => {
     if (visibleRows.length === 0) return
@@ -393,7 +573,33 @@ export default function EksamenView({ data, rows, fileName, onParsed }: EksamenV
       )}
 
       {totalGrades > 0 && (
-        <div className="overflow-x-auto">
+        <div>
+          <div className="mb-4 flex gap-1 border-b border-slate-200">
+            {([
+              ['elever', 'Elever'],
+              ['fag', 'Fag'],
+              ['laerere', 'Lærere'],
+            ] as Array<[SubTab, string]>).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setSubTab(key)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  subTab === key
+                    ? 'text-sky-700 border-sky-600'
+                    : 'text-slate-500 border-transparent hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {subTab === 'fag' && <AggTable rows={fagAgg} columns={FAG_COLUMNS} exportName="Fag" />}
+          {subTab === 'laerere' && <AggTable rows={laerereAgg} columns={LAERER_COLUMNS} exportName="Lærere" />}
+
+          {subTab === 'elever' && (
+          <div className="overflow-x-auto">
           <div className="mb-3 text-sm text-slate-600">
             <span className="font-medium text-slate-700">{visibleRows.length}</span> av{' '}
             <span className="font-medium text-slate-700">{totalGrades}</span> karakterer
@@ -544,6 +750,8 @@ export default function EksamenView({ data, rows, fileName, onParsed }: EksamenV
               })}
             </tbody>
           </table>
+        </div>
+          )}
         </div>
       )}
     </div>

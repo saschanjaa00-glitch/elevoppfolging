@@ -11,6 +11,7 @@ export interface ParsedExamRow {
   subject: string
   grade: string
   standpunkt: string
+  teacher?: string
   imDoc?: 'dok' | 'udok' | null
   // True when the student failed standpunkt but has no exam in this subject.
   noExam?: boolean
@@ -21,6 +22,12 @@ export const GRADE_ORDER = ['IM', 'IV', '1', '2', '3', '4', '5', '6']
 export const gradeRank = (g: string): number => {
   const i = GRADE_ORDER.indexOf((g || '').toUpperCase())
   return i === -1 ? GRADE_ORDER.length : i
+}
+
+// Numeric value of a passing grade (1-6), or null for IV/IM/empty/unknown.
+export const numericGrade = (g: string): number | null => {
+  const v = (g || '').trim()
+  return /^[1-6]$/.test(v) ? Number(v) : null
 }
 
 // Display value for the exam grade, e.g. "IM (udok)". Rows without an exam show "-".
@@ -186,6 +193,33 @@ export async function parseExamFile(file: File, data: DataStore): Promise<Parsed
   const resolveClass = (navn: string, subjectGroup: string): string | undefined =>
     classMap.get(buildNameSubjectKey(navn, subjectGroup)) ?? classMap.get(orderInvariantNameKey(navn))
 
+  // Resolve a student's subject teacher from grades (subjectTeacher) and
+  // absences (teacher), keyed by name+subject (code and base subject name).
+  const teacherMap = new Map<string, string>()
+  const addTeacher = (navn: string, subjectGroup: string, subjectName: string, teacher?: string) => {
+    const t = (teacher ?? '').trim()
+    if (!t) return
+    const codeKey = buildNameSubjectKey(navn, subjectGroup)
+    if (!teacherMap.has(codeKey)) teacherMap.set(codeKey, t)
+    const nk = subjectNameKey(subjectName)
+    if (nk) {
+      const k = `${orderInvariantNameKey(navn)}::${nk}`
+      if (!teacherMap.has(k)) teacherMap.set(k, t)
+    }
+  }
+  data.grades.forEach(g => {
+    const subName = fagkodeLookup[subjectCodeOf(g.fagkode, g.subjectGroup)] || g.subjectGroup || g.fagkode
+    addTeacher(g.navn, g.subjectGroup || g.fagkode, subName, g.subjectTeacher)
+  })
+  data.absences.forEach(a => addTeacher(a.navn, a.subjectGroup, a.subject, a.teacher))
+  const resolveTeacherFor = (navn: string, subjectGroup: string, subjectName: string): string | undefined => {
+    const byGroup = teacherMap.get(buildNameSubjectKey(navn, subjectGroup))
+    if (byGroup) return byGroup
+    const nk = subjectNameKey(subjectName)
+    if (!nk) return undefined
+    return teacherMap.get(`${orderInvariantNameKey(navn)}::${nk}`)
+  }
+
   const parsed: ParsedExamRow[] = []
   for (const r of sheet) {
     const fornavn = getRowValue(r, ['fornavn', 'first name', 'firstname'])
@@ -229,6 +263,7 @@ export async function parseExamFile(file: File, data: DataStore): Promise<Parsed
       subject: subjectName,
       grade: gradeNorm,
       standpunkt,
+      teacher: resolveTeacherFor(navn, subjectGroup, subjectName),
       imDoc: gradeNorm === 'IM' ? detectImDoc(grade) : null,
     })
   }
