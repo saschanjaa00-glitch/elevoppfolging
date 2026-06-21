@@ -22,6 +22,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import ClassSelector from './components/ClassSelector'
 import StudentList from './components/StudentList'
 import type { DataStore, PresetRecord } from './types'
+import type { ParsedExamRow } from './examData'
 import './index.css'
 
 const loadStatsView = () => import('./components/StatsView')
@@ -109,6 +110,12 @@ function App() {
   const [thresholdEnabled, setThresholdEnabled] = useState<boolean>(true)
   const [noFilter, setNoFilter] = useState<boolean>(false)
   const [activeTab, setActiveTab] = useState<AppTab>('elever')
+  const [examRows, setExamRows] = useState<ParsedExamRow[] | null>(null)
+  const [examFileName, setExamFileName] = useState<string | null>(null)
+  const handleExamParsed = (parsed: ParsedExamRow[], name: string) => {
+    setExamRows(parsed)
+    setExamFileName(name)
+  }
   const [faginnsiktSubtab, setFaginnsiktSubtab] = useState<FaginnsiktSubtab>('oversikt')
   const [allowInsightsWithoutAbsence, setAllowInsightsWithoutAbsence] = useState(false)
   const [studentSearch, setStudentSearch] = useState<string>('')
@@ -149,6 +156,8 @@ function App() {
     setData({ absences: [], warnings: [], grades: [], studentInfo: [] })
     setSelectedClasses([])
     setActiveTab('elever')
+    setExamRows(null)
+    setExamFileName(null)
     setStudentSearch('')
     setStudentSearchInput('')
     setKontaktlaererSearch('')
@@ -1541,14 +1550,14 @@ function App() {
             {activeTab === 'ikkeBestatt' && (
               <ErrorBoundary>
               <Suspense fallback={<div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 text-slate-600">Laster Ikke bestått...</div>}>
-                <IkkeBestattView data={data} />
+                <IkkeBestattView data={data} rows={examRows} fileName={examFileName} onParsed={handleExamParsed} />
               </Suspense>
               </ErrorBoundary>
             )}
             {activeTab === 'eksamen' && (
               <ErrorBoundary>
               <Suspense fallback={<div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 text-slate-600">Laster Eksamen...</div>}>
-                <EksamenView data={data} />
+                <EksamenView data={data} rows={examRows} fileName={examFileName} onParsed={handleExamParsed} />
               </Suspense>
               </ErrorBoundary>
             )}

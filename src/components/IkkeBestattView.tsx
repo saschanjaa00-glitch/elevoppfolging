@@ -1,22 +1,21 @@
 import { useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import type { DataStore } from '../types'
-import { normalizeSubjectGroupKey } from '../studentInfoUtils'
-import { fagkodeLookup } from '../fagkodeLookup'
+import {
+  type ParsedExamRow,
+  parseExamFile,
+  gradeRank,
+  formatExamGrade,
+  truncate,
+  classLevel,
+  orderInvariantNameKey,
+} from '../examData'
 
 interface IkkeBestattViewProps {
   data: DataStore
-}
-
-interface IkkeBestattRow {
-  navn: string
-  klasse?: string
-  telefon?: string
-  subjectGroup: string
-  subject: string
-  grade: string
-  standpunkt: string
-  imDoc?: 'dok' | 'udok' | null
+  rows: ParsedExamRow[] | null
+  fileName: string | null
+  onParsed: (rows: ParsedExamRow[], fileName: string) => void
 }
 
 const FAIL_GRADES = new Set(['1', 'IV', 'IM'])
@@ -33,13 +32,6 @@ const COLUMNS: Array<{ key: SortKey; label: string }> = [
   { key: 'grade', label: 'Eksamen / T2' },
 ]
 
-// Worst-to-best ordering so failing grades sort first in ascending order.
-const GRADE_ORDER = ['IM', 'IV', '1', '2', '3', '4', '5', '6']
-const gradeRank = (g: string): number => {
-  const i = GRADE_ORDER.indexOf((g || '').toUpperCase())
-  return i === -1 ? GRADE_ORDER.length : i
-}
-
 const compareByColumn = (key: SortKey, a: string, b: string): number => {
   if (key === 'grade' || key === 'standpunkt') return gradeRank(a) - gradeRank(b)
   return a.localeCompare(b, 'nb')
@@ -47,104 +39,22 @@ const compareByColumn = (key: SortKey, a: string, b: string): number => {
 
 // A student who failed standpunkt with a "1" but passed the exam/2. termin.
 // IV/IM in standpunkt is NOT redeemed by a passing exam, so only "1" counts.
-const isPassedAfter = (r: IkkeBestattRow): boolean =>
+const isPassedAfter = (r: ParsedExamRow): boolean =>
   Boolean(r.standpunkt === '1' && r.grade && !FAIL_GRADES.has(r.grade))
 
-// Display value for the exam grade, e.g. "IM (udok)".
-const formatExamGrade = (r: IkkeBestattRow): string =>
-  r.grade === 'IM' && r.imDoc ? `IM (${r.imDoc})` : r.grade
-
-// Truncate long subject names for display.
-const truncate = (s: string, max: number): string => (s.length > max ? `${s.slice(0, max - 1)}…` : s)
-
-// Strip a leading +47 country code and format as "xx xx xx xx".
-const normalizePhone = (raw: string): string => {
-  const digits = (raw ?? '').trim().replace(/^\+47[\s-]*/, '').replace(/\D/g, '')
-  if (digits.length === 8) return digits.replace(/(\d{2})(?=\d)/g, '$1 ').trim()
-  return digits
+// Students who failed (1/IV/IM) in exam/2. termin, or whose result changed vs. standpunkt.
+const isIkkeBestatt = (p: ParsedExamRow): boolean => {
+  // Failed standpunkt with no exam in the subject.
+  if (p.noExam) return Boolean(p.standpunkt && FAIL_GRADES.has(p.standpunkt))
+  if (FAIL_GRADES.has(p.grade)) return true
+  if (p.standpunkt && FAIL_GRADES.has(p.standpunkt) && p.grade && !FAIL_GRADES.has(p.grade) && Number(p.grade) >= 2) return true
+  if (p.standpunkt && !FAIL_GRADES.has(p.standpunkt) && p.grade && FAIL_GRADES.has(p.grade)) return true
+  return false
 }
 
-// Derive the trinn (VG1/VG2/VG3) from the leading digit of a class name, e.g. "2STB" -> '2'.
-const classLevel = (klasse?: string): '1' | '2' | '3' | null => {
-  const m = (klasse ?? '').trim().match(/^(\d)/)
-  return m && (m[1] === '1' || m[1] === '2' || m[1] === '3') ? (m[1] as '1' | '2' | '3') : null
-}
-
-const normalizeHeader = (h: string) =>
-  h
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[^a-z0-9]+/g, '')
-
-const getRowValue = (row: Record<string, any>, aliases: string[]) => {
-  const headers = Object.keys(row)
-  const normalizedAliases = aliases.map(a => normalizeHeader(a))
-  const header = headers.find(h => normalizedAliases.includes(normalizeHeader(h)))
-  return header ? String(row[header] ?? '').trim() : ''
-}
-
-// Order-independent name key so "Ola Nordmann" and "Nordmann Ola" match.
-const orderInvariantNameKey = (navn: string): string =>
-  (navn ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean)
-    .sort()
-    .join('')
-
-const buildNameSubjectKey = (navn: string, subjectGroup: string): string =>
-  `${orderInvariantNameKey(navn)}::${normalizeSubjectGroupKey(subjectGroup)}`
-
-// Pull the bare fagkode out of a record's fagkode / faggruppe field.
-const subjectCodeOf = (fagkode: string, subjectGroup: string): string => {
-  const fk = (fagkode || '').toUpperCase().trim()
-  if (fk) return fk
-  return (subjectGroup || '').toUpperCase().split('/').pop()?.trim() ?? ''
-}
-
-const resolveSubjectName = (subject: string, fagkode: string, subjectGroup: string): string => {
-  if (subject) return subject
-  return fagkodeLookup[subjectCodeOf(fagkode, subjectGroup)] || subjectGroup
-}
-
-// Base subject key that ignores oral/written qualifiers so e.g. "Spansk II"
-// (standpunkt) matches "Spansk II, muntlig" (oral exam, different fagkode).
-const subjectNameKey = (name: string): string =>
-  (name || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\b(muntlig|skriftlig|praktisk)\b/g, '')
-    .replace(/[^a-z0-9]+/g, '')
-
-// Canonicalise a grade value. Handles decorated values such as
-// "IM (dokumentert fravær)", "IV", "1 (klage)" -> "IM" / "IV" / "1".
-const canonicalGrade = (raw: string): string => {
-  const up = (raw ?? '').toString().toUpperCase().trim()
-  if (!up) return ''
-  if (/\bIM\b/.test(up) || up.startsWith('IM')) return 'IM'
-  if (/\bIV\b/.test(up) || up.startsWith('IV')) return 'IV'
-  const digit = up.match(/[1-6]/)
-  return digit ? digit[0] : up
-}
-
-// For an IM grade, detect whether the absence is documented (dok) or not (udok).
-// udok covers "udokumentert" as well as "ikke dokumentert fravær".
-const detectImDoc = (raw: string): 'dok' | 'udok' | null => {
-  const low = (raw ?? '').toString().toLowerCase()
-  const compact = low.replace(/[^a-z]/g, '')
-  if (low.includes('udok') || compact.includes('ikkedok')) return 'udok'
-  if (compact.includes('dok')) return 'dok'
-  return null
-}
-
-export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
-  const [rows, setRows] = useState<IkkeBestattRow[]>([])
+export default function IkkeBestattView({ data, rows, fileName, onParsed }: IkkeBestattViewProps) {
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
-  const [fileName, setFileName] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('navn')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [hideBestatt, setHideBestatt] = useState(false)
@@ -167,8 +77,11 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
     }
   }
 
+  // Only the students who didn't pass (or whose grade changed) are shown here.
+  const failingRows = useMemo(() => (rows ?? []).filter(isIkkeBestatt), [rows])
+
   const sortedRows = useMemo(() => {
-    const copy = [...rows]
+    const copy = [...failingRows]
     copy.sort((a, b) => {
       const primary = compareByColumn(sortKey, String(a[sortKey] ?? ''), String(b[sortKey] ?? ''))
       const directed = sortDir === 'asc' ? primary : -primary
@@ -177,7 +90,7 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
       return String(a.navn).localeCompare(String(b.navn), 'nb')
     })
     return copy
-  }, [rows, sortKey, sortDir])
+  }, [failingRows, sortKey, sortDir])
 
   const visibleRows = useMemo(() => {
     let result = sortedRows
@@ -251,11 +164,11 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
     const widths = [24, 120, 55, 80, 120, 70, 70]
     let y = marginTop
 
-    const fillFor = (r: IkkeBestattRow): [number, number, number] | null => {
+    const fillFor = (r: ParsedExamRow): [number, number, number] | null => {
       if (r.standpunkt === 'IV') return [241, 245, 249]
       if (r.grade === 'IM' && r.imDoc === 'dok') return [224, 242, 254]
       if (isPassedAfter(r)) return [220, 252, 231]
-      if (FAIL_GRADES.has(r.grade)) return [254, 226, 226]
+      if (FAIL_GRADES.has(r.grade) || (r.noExam && FAIL_GRADES.has(r.standpunkt))) return [254, 226, 226]
       return null
     }
 
@@ -346,7 +259,7 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
   const exportNavneliste = () => {
     if (visibleRows.length === 0) return
     const order: string[] = []
-    const groups = new Map<string, IkkeBestattRow[]>()
+    const groups = new Map<string, ParsedExamRow[]>()
     visibleRows.forEach(r => {
       if (!groups.has(r.navn)) {
         groups.set(r.navn, [])
@@ -356,7 +269,7 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
     })
 
     void import('docx').then(async ({ Document, Packer, Paragraph, TextRun }) => {
-      const children: Paragraph[] = []
+      const children: InstanceType<typeof Paragraph>[] = []
       order.forEach((navn, index) => {
         children.push(
           new Paragraph({
@@ -391,123 +304,13 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
   // Standpunkt (1. termin) grade per student+subject, name-order independent.
   // Indexed both by fagkode and by base subject name, so an oral exam with a
   // different fagkode still resolves the matching standpunkt grade.
-  const standpunktMap = useMemo(() => {
-    const byCode = new Map<string, string>()
-    const byName = new Map<string, string>()
-    data.grades.forEach(g => {
-      const assessment = (g.assessmentType ?? '').toString().toLowerCase()
-      const halv = (g.halvår ?? '').toString().toLowerCase()
-      const isStandpunkt = assessment.includes('standpunkt') || halv.includes('1') || assessment.includes('termin')
-      if (!isStandpunkt) return
-      const nameKey = orderInvariantNameKey(g.navn)
-      if (!nameKey) return
-      const grade = canonicalGrade(g.grade ?? '')
-      const codeKey = buildNameSubjectKey(g.navn, g.subjectGroup || g.fagkode)
-      if (codeKey && !byCode.has(codeKey)) byCode.set(codeKey, grade)
-      const subName = fagkodeLookup[subjectCodeOf(g.fagkode, g.subjectGroup)] || ''
-      const nKey = subjectNameKey(subName)
-      if (nKey) {
-        const k = `${nameKey}::${nKey}`
-        if (!byName.has(k)) byName.set(k, grade)
-      }
-    })
-    return { byCode, byName }
-  }, [data.grades])
-
-  const resolveStandpunkt = (navn: string, fagkode: string, subjectGroup: string, subjectName: string): string => {
-    const byCode = standpunktMap.byCode.get(buildNameSubjectKey(navn, subjectGroup))
-    if (byCode) return byCode
-    const nKey = subjectNameKey(subjectName)
-    if (!nKey) return ''
-    return standpunktMap.byName.get(`${orderInvariantNameKey(navn)}::${nKey}`) ?? ''
-  }
-
-  // Resolve a student's class from absences/grades, by name (and subject when available).
-  const classByNameSubject = useMemo(() => {
-    const m = new Map<string, string>()
-    const add = (navn: string, subjectGroup: string, className?: string) => {
-      const cls = className?.trim()
-      if (!cls) return
-      const subjectKey = buildNameSubjectKey(navn, subjectGroup)
-      if (!m.has(subjectKey)) m.set(subjectKey, cls)
-      const nameKey = orderInvariantNameKey(navn)
-      if (nameKey && !m.has(nameKey)) m.set(nameKey, cls)
-    }
-    data.absences.forEach(a => add(a.navn, a.subjectGroup, a.class))
-    data.grades.forEach(g => add(g.navn, g.subjectGroup || g.fagkode, g.class))
-    return m
-  }, [data.absences, data.grades])
-
-  const resolveClass = (navn: string, subjectGroup: string): string | undefined =>
-    classByNameSubject.get(buildNameSubjectKey(navn, subjectGroup)) ??
-    classByNameSubject.get(orderInvariantNameKey(navn))
-
   const handleFile = async (file: File | null) => {
     if (!file) return
     setError(null)
     try {
-      const buffer = await file.arrayBuffer()
-      const wb = XLSX.read(buffer)
-      const sheet = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]) as Record<string, any>[]
-
-      const parsed: IkkeBestattRow[] = []
-      for (const r of sheet) {
-        const fornavn = getRowValue(r, ['fornavn', 'first name', 'firstname'])
-        const etternavn = getRowValue(r, ['etternavn', 'last name', 'lastname'])
-        const navn =
-          [fornavn, etternavn].filter(Boolean).join(' ').trim() ||
-          getRowValue(r, ['navn', 'elev', 'student', 'navn_elev', 'elevnavn'])
-
-        const klasse = getRowValue(r, ['klasse', 'class', 'klassegruppe'])
-        const telefon = normalizePhone(getRowValue(r, ['telefon', 'phone', 'mobil', 'mobile', 'tlf', 'mobiltelefon']))
-        const fagkode = getRowValue(r, ['fagkode', 'code'])
-        const faggruppe = getRowValue(r, ['faggruppe', 'gruppe', 'subjectgroup'])
-        const subjectGroup = faggruppe || fagkode
-        const subject = getRowValue(r, ['fagnavn', 'fag', 'subject'])
-        const grade = getRowValue(r, ['karakter', 'grade', 'resultat'])
-        const halv = getRowValue(r, ['halvår', 'halvar', 'termin', 'term'])
-        const assessmentType = getRowValue(r, ['vurderingstype', 'assessment type', 'type'])
-
-        if (!navn || !subjectGroup || !grade) continue
-
-        const gradeNorm = canonicalGrade(grade)
-        const halvarNorm = halv.toString().trim().toLowerCase()
-        const assessmentNorm = assessmentType.toString().trim().toLowerCase()
-
-        const isExam =
-          assessmentNorm.includes('eksam') || assessmentNorm.includes('pas') || halvarNorm.includes('2')
-
-        // Only skip rows that explicitly belong to another term/assessment.
-        // When the file has no term/assessment columns, treat every row as relevant.
-        if (!isExam && !halvarNorm.includes('2') && (halvarNorm || assessmentNorm)) continue
-
-        const subjectName = resolveSubjectName(subject, fagkode, subjectGroup)
-        const resolvedClass = klasse || resolveClass(navn, subjectGroup)
-        const standpunkt = resolveStandpunkt(navn, fagkode, subjectGroup, subjectName)
-
-        parsed.push({
-          navn,
-          klasse: resolvedClass,
-          telefon,
-          subjectGroup,
-          subject: subjectName,
-          grade: gradeNorm,
-          standpunkt,
-          imDoc: gradeNorm === 'IM' ? detectImDoc(grade) : null,
-        })
-      }
-
-      // Show students who failed (1/IV/IM) in exam/2. termin, or whose result changed vs. standpunkt.
-      const rowsToShow = parsed.filter(p => {
-        if (FAIL_GRADES.has(p.grade)) return true
-        if (p.standpunkt && FAIL_GRADES.has(p.standpunkt) && p.grade && !FAIL_GRADES.has(p.grade) && Number(p.grade) >= 2) return true
-        if (p.standpunkt && !FAIL_GRADES.has(p.standpunkt) && p.grade && FAIL_GRADES.has(p.grade)) return true
-        return false
-      })
-
-      setFileName(file.name)
-      setRows(rowsToShow)
-      if (rowsToShow.length === 0) {
+      const parsed = await parseExamFile(file, data)
+      onParsed(parsed, file.name)
+      if (parsed.filter(isIkkeBestatt).length === 0) {
         setError('Ingen elever med ikke bestått ble funnet i filen.')
       }
     } catch {
@@ -561,7 +364,7 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
         <div className="text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-4 text-sm">{error}</div>
       )}
 
-      {rows.length > 0 && (
+      {failingRows.length > 0 && (
         <div className="overflow-x-auto">
           <div className="mb-3 text-sm text-slate-600">
             <span className="font-medium text-slate-700">{uniqueEleverCount}</span> unike elever
@@ -683,7 +486,7 @@ export default function IkkeBestattView({ data }: IkkeBestattViewProps) {
             </thead>
             <tbody>
               {visibleRows.map((r, i) => {
-                const isFailed = FAIL_GRADES.has(r.grade)
+                const isFailed = FAIL_GRADES.has(r.grade) || (Boolean(r.noExam) && FAIL_GRADES.has(r.standpunkt))
                 const isDokIM = r.grade === 'IM' && r.imDoc === 'dok'
                 const passedAfter = isPassedAfter(r)
                 const isIvStandpunkt = r.standpunkt === 'IV'

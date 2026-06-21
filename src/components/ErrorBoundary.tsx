@@ -13,7 +13,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
     return { hasError: true, message: error?.message }
   }
 
-  componentDidCatch(error: Error, info: unknown) {
+  componentDidCatch(_error: Error, _info: unknown) {
     // Could log to telemetry here
     // console.error('ErrorBoundary caught', error, info)
   }
