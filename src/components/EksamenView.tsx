@@ -9,6 +9,7 @@ import {
   formatExamGrade,
   truncate,
   classLevel,
+  fieldMatchesQuery,
 } from '../examData'
 
 interface EksamenViewProps {
@@ -74,6 +75,32 @@ export default function EksamenView({ data, rows, fileName, onParsed }: EksamenV
     '3': true,
   })
   const [showNus, setShowNus] = useState(true)
+  const [filters, setFilters] = useState<Record<SortKey, string>>({
+    navn: '',
+    klasse: '',
+    subject: '',
+    standpunkt: '',
+    grade: '',
+    endring: '',
+  })
+  const setFilter = (key: SortKey, value: string) => setFilters(prev => ({ ...prev, [key]: value }))
+
+  const columnValue = (r: ParsedExamRow, key: SortKey): string => {
+    switch (key) {
+      case 'navn':
+        return r.navn
+      case 'klasse':
+        return r.klasse || ''
+      case 'subject':
+        return r.subject || r.subjectGroup
+      case 'standpunkt':
+        return r.standpunkt || ''
+      case 'grade':
+        return formatExamGrade(r)
+      case 'endring':
+        return formatDelta(gradeDelta(r))
+    }
+  }
 
   const toggleSort = (key: SortKey) => {
     if (key === sortKey) {
@@ -117,8 +144,9 @@ export default function EksamenView({ data, rows, fileName, onParsed }: EksamenV
       if (lvl === null) return showNus
       return showVg[lvl]
     })
+    result = result.filter(r => COLUMNS.every(col => fieldMatchesQuery(columnValue(r, col.key), filters[col.key])))
     return result
-  }, [sortedRows, showOpp, showNed, showLikt, showVg, showNus])
+  }, [sortedRows, showOpp, showNed, showLikt, showVg, showNus, filters])
 
   const uniqueEleverCount = new Set(visibleRows.map(r => r.navn)).size
   const totalGrades = (rows ?? []).filter(r => !r.noExam).length
@@ -475,6 +503,20 @@ export default function EksamenView({ data, rows, fileName, onParsed }: EksamenV
                     </th>
                   )
                 })}
+              </tr>
+              <tr>
+                <th className="py-1 pr-4"></th>
+                {COLUMNS.map(col => (
+                  <th key={col.key} className="py-1 pr-4">
+                    <input
+                      type="search"
+                      value={filters[col.key]}
+                      onChange={e => setFilter(col.key, e.currentTarget.value)}
+                      placeholder="Filtrer…"
+                      className="w-full min-w-[4.5rem] rounded border border-slate-300 px-2 py-1 text-xs font-normal text-slate-700 focus:border-sky-500 focus:outline-none"
+                    />
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>

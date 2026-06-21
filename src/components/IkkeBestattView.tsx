@@ -9,6 +9,7 @@ import {
   truncate,
   classLevel,
   orderInvariantNameKey,
+  fieldMatchesQuery,
 } from '../examData'
 
 interface IkkeBestattViewProps {
@@ -67,6 +68,32 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
     '3': true,
   })
   const [showNus, setShowNus] = useState(true)
+  const [filters, setFilters] = useState<Record<SortKey, string>>({
+    navn: '',
+    klasse: '',
+    telefon: '',
+    subject: '',
+    standpunkt: '',
+    grade: '',
+  })
+  const setFilter = (key: SortKey, value: string) => setFilters(prev => ({ ...prev, [key]: value }))
+
+  const columnValue = (r: ParsedExamRow, key: SortKey): string => {
+    switch (key) {
+      case 'navn':
+        return r.navn
+      case 'klasse':
+        return r.klasse || 'NUS'
+      case 'telefon':
+        return r.telefon || ''
+      case 'subject':
+        return r.subject || r.subjectGroup
+      case 'standpunkt':
+        return r.standpunkt || ''
+      case 'grade':
+        return formatExamGrade(r)
+    }
+  }
 
   const toggleSort = (key: SortKey) => {
     if (key === sortKey) {
@@ -103,8 +130,9 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
       if (lvl === null) return showNus
       return showVg[lvl]
     })
+    result = result.filter(r => COLUMNS.every(col => fieldMatchesQuery(columnValue(r, col.key), filters[col.key])))
     return result
-  }, [sortedRows, hideBestatt, showOnlyIM, hideImDok, hideImUdok, showVg, showNus])
+  }, [sortedRows, hideBestatt, showOnlyIM, hideImDok, hideImUdok, showVg, showNus, filters])
 
   // Total unique students per trinn across the whole school (from the roster).
   const totalStudentsByLevel = useMemo(() => {
@@ -482,6 +510,20 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
                     </th>
                   )
                 })}
+              </tr>
+              <tr>
+                <th className="py-1 pr-4"></th>
+                {COLUMNS.map(col => (
+                  <th key={col.key} className="py-1 pr-4">
+                    <input
+                      type="search"
+                      value={filters[col.key]}
+                      onChange={e => setFilter(col.key, e.currentTarget.value)}
+                      placeholder="Filtrer…"
+                      className="w-full min-w-[4.5rem] rounded border border-slate-300 px-2 py-1 text-xs font-normal text-slate-700 focus:border-sky-500 focus:outline-none"
+                    />
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>

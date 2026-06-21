@@ -30,6 +30,19 @@ export const formatExamGrade = (r: ParsedExamRow): string =>
 // Truncate long subject names for display.
 export const truncate = (s: string, max: number): string => (s.length > max ? `${s.slice(0, max - 1)}…` : s)
 
+const stripDiacritics = (s: string): string =>
+  (s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+// Order-invariant, token-based match against a single field value. Every
+// whitespace separated token in the query must appear in the value, so e.g.
+// "Per Pettersen Jan" still matches "Jan Per Pettersen". Empty query = match.
+export const fieldMatchesQuery = (value: string | undefined, query: string): boolean => {
+  const tokens = stripDiacritics(query).split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) return true
+  const hay = stripDiacritics(value ?? '')
+  return tokens.every(t => hay.includes(t))
+}
+
 // Strip a leading +47 country code and format as "xx xx xx xx".
 export const normalizePhone = (raw: string): string => {
   const digits = (raw ?? '').trim().replace(/^\+47[\s-]*/, '').replace(/\D/g, '')

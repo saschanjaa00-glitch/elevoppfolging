@@ -1482,18 +1482,6 @@ function App() {
               )}
               {hasData && (
               <button
-                onClick={() => setActiveTab('ikkeBestatt')}
-                className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
-                  activeTab === 'ikkeBestatt'
-                    ? 'text-sky-700 border-sky-600'
-                    : 'text-slate-500 border-transparent hover:text-slate-700 hover:border-slate-300'
-                }`}
-              >
-                Ikke bestått
-              </button>
-              )}
-              {hasData && (
-              <button
                 onClick={() => setActiveTab('eksamen')}
                 className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
                   activeTab === 'eksamen'
@@ -1502,6 +1490,18 @@ function App() {
                 }`}
               >
                 Eksamen
+              </button>
+              )}
+              {hasData && (
+              <button
+                onClick={() => setActiveTab('ikkeBestatt')}
+                className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
+                  activeTab === 'ikkeBestatt'
+                    ? 'text-sky-700 border-sky-600'
+                    : 'text-slate-500 border-transparent hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                Ikke bestått
               </button>
               )}
 
