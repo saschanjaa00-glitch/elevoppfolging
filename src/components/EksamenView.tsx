@@ -27,8 +27,8 @@ const COLUMNS: Array<{ key: SortKey; label: string }> = [
   { key: 'navn', label: 'Elev' },
   { key: 'klasse', label: 'Klasse' },
   { key: 'subject', label: 'Fag' },
-  { key: 'standpunkt', label: 'Standpunkt' },
-  { key: 'grade', label: 'Eksamen / T2' },
+  { key: 'standpunkt', label: 'T2 / Standpunkt' },
+  { key: 'grade', label: 'Eksamen' },
   { key: 'endring', label: 'Endring' },
 ]
 
@@ -352,7 +352,7 @@ export default function EksamenView({ data, rows, fileName, onParsed }: EksamenV
   const exportExcel = () => {
     if (visibleRows.length === 0) return
     const aoa = [
-      ['Elev', 'Klasse', 'Fag', 'Standpunkt', 'Eksamen / T2', 'Endring'],
+      ['Elev', 'Klasse', 'Fag', 'T2 / Standpunkt', 'Eksamen', 'Endring'],
       ...visibleRows.map(r => [r.navn, r.klasse || 'NUS', r.subject || r.subjectGroup, r.standpunkt || '', formatExamGrade(r), formatDelta(gradeDelta(r))]),
     ]
     const ws = XLSX.utils.aoa_to_sheet(aoa)
@@ -371,7 +371,7 @@ export default function EksamenView({ data, rows, fileName, onParsed }: EksamenV
     const marginTop = 36
     const marginBottom = 30
     const rowHeight = 20
-    const headers = ['#', 'Elev', 'Klasse', 'Fag', 'Standpunkt', 'Eksamen / T2', 'Endring']
+    const headers = ['#', 'Elev', 'Klasse', 'Fag', 'T2 / Standpunkt', 'Eksamen', 'Endring']
     const widths = [24, 140, 55, 140, 65, 65, 50]
     let y = marginTop
 

@@ -29,8 +29,8 @@ const COLUMNS: Array<{ key: SortKey; label: string }> = [
   { key: 'klasse', label: 'Klasse' },
   { key: 'telefon', label: 'Telefon' },
   { key: 'subject', label: 'Fag' },
-  { key: 'standpunkt', label: 'Standpunkt' },
-  { key: 'grade', label: 'Eksamen / T2' },
+  { key: 'standpunkt', label: 'T2 / Standpunkt' },
+  { key: 'grade', label: 'Eksamen' },
 ]
 
 const compareByColumn = (key: SortKey, a: string, b: string): number => {
@@ -53,6 +53,20 @@ const isIkkeBestatt = (p: ParsedExamRow): boolean => {
   return false
 }
 
+// The outcome grade that decides NUS eligibility: exam grade, or standpunkt when there's no exam.
+const outcomeGrade = (r: ParsedExamRow): string => (r.noExam ? r.standpunkt : r.grade) || ''
+
+// IV or IM (udokumentert) — these do NOT grant a NUS (ny/utsatt/særskilt) eksamen.
+// IM (dokumentert) and a plain "1" do grant one, so they count as NUS-berettiget.
+const isIvOrImUdok = (r: ParsedExamRow): boolean => {
+  const g = outcomeGrade(r)
+  return g === 'IV' || (g === 'IM' && r.imDoc === 'udok')
+}
+
+// The subject was passed on the exam (a real exam with a passing grade).
+const isPassedOnExam = (r: ParsedExamRow): boolean =>
+  Boolean(!r.noExam && r.grade && !FAIL_GRADES.has(r.grade))
+
 export default function IkkeBestattView({ data, rows, fileName, onParsed }: IkkeBestattViewProps) {
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
@@ -62,6 +76,8 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
   const [showOnlyIM, setShowOnlyIM] = useState(false)
   const [hideImDok, setHideImDok] = useState(false)
   const [hideImUdok, setHideImUdok] = useState(false)
+  const [showOnlyIvImUdok, setShowOnlyIvImUdok] = useState(false)
+  const [showOnlyNus, setShowOnlyNus] = useState(false)
   const [showVg, setShowVg] = useState<{ '1': boolean; '2': boolean; '3': boolean }>({
     '1': true,
     '2': true,
@@ -125,6 +141,8 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
     if (showOnlyIM) result = result.filter(r => r.grade === 'IM')
     if (hideImDok) result = result.filter(r => !(r.grade === 'IM' && r.imDoc === 'dok'))
     if (hideImUdok) result = result.filter(r => !(r.grade === 'IM' && r.imDoc === 'udok'))
+    if (showOnlyIvImUdok) result = result.filter(isIvOrImUdok)
+    if (showOnlyNus) result = result.filter(r => !isIvOrImUdok(r) && !isPassedOnExam(r))
     result = result.filter(r => {
       const lvl = classLevel(r.klasse)
       if (lvl === null) return showNus
@@ -132,7 +150,7 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
     })
     result = result.filter(r => COLUMNS.every(col => fieldMatchesQuery(columnValue(r, col.key), filters[col.key])))
     return result
-  }, [sortedRows, hideBestatt, showOnlyIM, hideImDok, hideImUdok, showVg, showNus, filters])
+  }, [sortedRows, hideBestatt, showOnlyIM, hideImDok, hideImUdok, showOnlyIvImUdok, showOnlyNus, showVg, showNus, filters])
 
   // Total unique students per trinn across the whole school (from the roster).
   const totalStudentsByLevel = useMemo(() => {
@@ -169,7 +187,7 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
   const exportExcel = () => {
     if (visibleRows.length === 0) return
     const aoa = [
-      ['Elev', 'Klasse', 'Telefon', 'Fag', 'Standpunkt', 'Eksamen / T2'],
+      ['Elev', 'Klasse', 'Telefon', 'Fag', 'T2 / Standpunkt', 'Eksamen'],
       ...visibleRows.map(r => [r.navn, r.klasse || 'NUS', r.telefon || '', r.subject || r.subjectGroup, r.standpunkt || '', formatExamGrade(r)]),
     ]
     const ws = XLSX.utils.aoa_to_sheet(aoa)
@@ -188,7 +206,7 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
     const marginTop = 36
     const marginBottom = 30
     const rowHeight = 20
-    const headers = ['#', 'Elev', 'Klasse', 'Telefon', 'Fag', 'Standpunkt', 'Eksamen / T2']
+    const headers = ['#', 'Elev', 'Klasse', 'Telefon', 'Fag', 'T2 / Standpunkt', 'Eksamen']
     const widths = [24, 120, 55, 80, 120, 70, 70]
     let y = marginTop
 
@@ -438,6 +456,24 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
                 className="rounded border-slate-300"
               />
               Skjul IM (udok)
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showOnlyIvImUdok}
+                onChange={e => setShowOnlyIvImUdok(e.currentTarget.checked)}
+                className="rounded border-slate-300"
+              />
+              Vis kun IV / IM (udok)
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showOnlyNus}
+                onChange={e => setShowOnlyNus(e.currentTarget.checked)}
+                className="rounded border-slate-300"
+              />
+              Vis kun NUS-eksamen
             </label>
             <div className="inline-flex items-center gap-3 text-sm text-slate-600">
               <span className="text-slate-500">Trinn:</span>

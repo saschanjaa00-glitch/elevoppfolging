@@ -155,6 +155,7 @@ export async function parseExamFile(file: File, data: DataStore): Promise<Parsed
   // different fagkode still resolves the matching standpunkt grade.
   const byCode = new Map<string, string>()
   const byName = new Map<string, string>()
+  const byFagkode = new Map<string, string>()
   data.grades.forEach(g => {
     if (!isFinalGrade(g)) return
     const nameKey = orderInvariantNameKey(g.navn)
@@ -162,6 +163,11 @@ export async function parseExamFile(file: File, data: DataStore): Promise<Parsed
     const grade = canonicalGrade(g.grade ?? '')
     const codeKey = buildNameSubjectKey(g.navn, g.subjectGroup || g.fagkode)
     if (codeKey && !byCode.has(codeKey)) byCode.set(codeKey, grade)
+    const fk = subjectCodeOf(g.fagkode, g.subjectGroup)
+    if (fk) {
+      const fkKey = `${nameKey}::${fk}`
+      if (!byFagkode.has(fkKey)) byFagkode.set(fkKey, grade)
+    }
     const subName = fagkodeLookup[subjectCodeOf(g.fagkode, g.subjectGroup)] || ''
     const nKey = subjectNameKey(subName)
     if (nKey) {
@@ -170,9 +176,14 @@ export async function parseExamFile(file: File, data: DataStore): Promise<Parsed
     }
   })
 
-  const resolveStandpunkt = (navn: string, _fagkode: string, subjectGroup: string, subjectName: string): string => {
+  const resolveStandpunkt = (navn: string, fagkode: string, subjectGroup: string, subjectName: string): string => {
     const code = byCode.get(buildNameSubjectKey(navn, subjectGroup))
     if (code) return code
+    const fk = subjectCodeOf(fagkode, subjectGroup)
+    if (fk) {
+      const byFk = byFagkode.get(`${orderInvariantNameKey(navn)}::${fk}`)
+      if (byFk) return byFk
+    }
     const nKey = subjectNameKey(subjectName)
     if (!nKey) return ''
     return byName.get(`${orderInvariantNameKey(navn)}::${nKey}`) ?? ''

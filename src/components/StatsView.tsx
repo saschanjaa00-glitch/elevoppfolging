@@ -9,12 +9,22 @@ import {
   normalizeMatch,
   resolveClassFromSubjectLookup,
 } from '../studentInfoUtils'
+import { fagkodeLookup } from '../fagkodeLookup'
 import { todayDdMmYyyy } from '../dateUtils'
 
 interface Props {
   data: DataStore
   threshold: number
 }
+
+// A subject needs a calculator when its fagkode starts with MAT or REA.
+const CALC_CODE_RE = /\b(MAT|REA)\d+/
+// Geofag fagkoder start with REA but do not require a calculator.
+const GEOFAG_CODES = new Set(
+  Object.entries(fagkodeLookup)
+    .filter(([, name]) => (name ?? '').toLowerCase().includes('geofag'))
+    .map(([code]) => code.toUpperCase()),
+)
 
 interface ClassStats {
   className: string
@@ -1215,6 +1225,29 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
     }
   }, [filteredPerClass, data.absences, gradesByStudent, gradesByStudentT1, termFilter])
 
+  // Students needing a calculator: at least one MAT/REA subject that isn't Geofag,
+  // limited to the currently selected classes.
+  const calculatorCount = useMemo(() => {
+    const classNames = new Set(filteredPerClass.map(c => c.className))
+    const inScope = new Set<string>()
+    data.absences.forEach(a => {
+      if (classNames.has(a.class)) inScope.add(normalizeMatch(a.navn))
+    })
+    const hasCalc = new Set<string>()
+    const consider = (navn: string, rawCode: string, subjectName: string) => {
+      const key = normalizeMatch(navn)
+      if (!inScope.has(key)) return
+      const match = (rawCode ?? '').toUpperCase().match(CALC_CODE_RE)
+      if (!match) return
+      if (GEOFAG_CODES.has(match[0])) return
+      if ((subjectName ?? '').toLowerCase().includes('geofag')) return
+      hasCalc.add(key)
+    }
+    data.absences.forEach(a => consider(a.navn, a.subjectGroup, a.subject))
+    data.grades.forEach(g => consider(g.navn, g.fagkode || g.subjectGroup, fagkodeLookup[g.fagkode] || ''))
+    return hasCalc.size
+  }, [filteredPerClass, data.absences, data.grades])
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap justify-between items-center gap-3 mb-2">
@@ -1356,6 +1389,10 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
             highlight
             active={selectedMetric === 'missingWarnings'}
             onClick={() => toggleMetric('missingWarnings')}
+          />
+          <StatCard
+            label="Trenger kalkulator"
+            value={String(calculatorCount)}
           />
         </div>
 
