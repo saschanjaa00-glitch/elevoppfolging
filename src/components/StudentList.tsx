@@ -19,6 +19,7 @@ import {
 } from '../studentInfoUtils'
 import { compareDateStrings, formatDateDdMmYyyy, parseFlexibleDate, todayDdMmYyyy, warningDateColorClass } from '../dateUtils'
 import { sanitizeFilenamePart } from '../securityUtils'
+import { meetsThreshold } from '../thresholdUtils'
 
 interface StudentListProps {
   data: DataStore
@@ -291,7 +292,7 @@ export default function StudentList({
     const shouldIncludeSubject = (percentageAbsence: number, grade: string | undefined, gradeT2: string | undefined): boolean => {
       if (noFilter) return true
 
-      const overThreshold = percentageAbsence > threshold
+      const overThreshold = meetsThreshold(percentageAbsence, threshold)
 
       // Pick which grade(s) to check based on gradeHalvaar
       const gradesToCheck: (string | undefined)[] =
@@ -438,7 +439,7 @@ export default function StudentList({
         if (!noFilter && fullRapport) includeSubject = matchesFullRapportGrade
         else if (!noFilter && lowGradeFilter.length > 0) {
           includeSubject = filterLogic === 'og'
-            ? matchesSelectedGrade && sourceAbsencePercentage > threshold
+            ? matchesSelectedGrade && meetsThreshold(sourceAbsencePercentage, threshold)
             : matchesSelectedGrade
         }
         if (!includeSubject) return
@@ -569,7 +570,7 @@ export default function StudentList({
       }
 
       const subjects = teacherFilteredSubjects.filter(
-        sub => sub.warnings.length === 0 && sub.percentageAbsence > threshold
+        sub => sub.warnings.length === 0 && meetsThreshold(sub.percentageAbsence, threshold)
       )
       if (subjects.length === 0) return
       filtered.push({ ...studentWithTeacherFilteredSubjects, subjects })
@@ -1050,7 +1051,7 @@ export default function StudentList({
     const dedupedEntries = new Map<string, MissingWarningEntry>()
 
     data.absences
-      .filter(record => selectedClassSet.has(record.class) && record.percentageAbsence > threshold)
+      .filter(record => selectedClassSet.has(record.class) && meetsThreshold(record.percentageAbsence, threshold))
       .forEach(record => {
         const studentNorm = normalizeMatch(record.navn)
         const subjectGroupNorm = normalizeSubjectGroupKey(record.subjectGroup)

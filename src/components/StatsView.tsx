@@ -11,6 +11,7 @@ import {
 } from '../studentInfoUtils'
 import { fagkodeLookup } from '../fagkodeLookup'
 import { todayDdMmYyyy } from '../dateUtils'
+import { meetsThreshold } from '../thresholdUtils'
 
 interface Props {
   data: DataStore
@@ -859,7 +860,7 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
         if (checkedCombos.has(comboKey)) return
         checkedCombos.add(comboKey)
         const warnings = warningMap.get(comboKey) ?? []
-        if (r.percentageAbsence > threshold && warnings.length === 0) {
+        if (meetsThreshold(r.percentageAbsence, threshold) && warnings.length === 0) {
           missingWarnings++
           missingWarningStudents.add(buildStudentClassKey(r.navn, r.class))
         }

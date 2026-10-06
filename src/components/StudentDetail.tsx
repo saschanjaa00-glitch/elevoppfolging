@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { DataStore } from '../types'
 import { resolveTeacher } from '../teacherUtils'
+import { meetsThreshold } from '../thresholdUtils'
 import {
   createAbsenceSubjectClassLookup,
   createStudentInfoLookup,
@@ -228,7 +229,7 @@ export default function StudentDetail({
   return (
     <div className="bg-white divide-y divide-slate-100 py-1">
       {subjectSummaries.map(({ subject, topRecord: record, warnings, grade, gradeT2, teacher, noAbsenceData, showSidemalExemption }) => {
-        const isAtRisk = !noAbsenceData && record.percentageAbsence > threshold
+        const isAtRisk = !noAbsenceData && meetsThreshold(record.percentageAbsence, threshold)
         const isHighRisk = !noAbsenceData && record.percentageAbsence > 10
         const isLowGrade = grade && ['1', '2', 'iv'].includes(grade.toLowerCase())
         const isLowGradeT2 = gradeT2 && ['1', '2', 'iv'].includes(gradeT2.toLowerCase())

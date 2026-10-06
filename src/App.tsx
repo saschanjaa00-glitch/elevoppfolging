@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, AlertCircle } from 'lucide-react'
 import { resolveTeacher } from './teacherUtils'
+import { meetsThreshold } from './thresholdUtils'
 import {
   buildStudentSubjectKey,
   createAbsenceSubjectClassLookup,
@@ -234,7 +235,7 @@ function App() {
       const comboKey = buildStudentSubjectKey(r.navn, r.class, r.subjectGroup)
       if (seen.has(comboKey)) return
       seen.add(comboKey)
-      if (r.percentageAbsence > effectiveThreshold && !(warningMap.get(comboKey) ?? 0)) {
+      if (meetsThreshold(r.percentageAbsence, effectiveThreshold) && !(warningMap.get(comboKey) ?? 0)) {
         count++
         const teacherField = r.teacher?.trim()
         const kl = r.kontaktlaerer?.trim()

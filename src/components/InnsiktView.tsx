@@ -8,6 +8,7 @@ import {
   normalizeMatch,
   resolveClassFromSubjectLookup,
 } from '../studentInfoUtils'
+import { meetsThreshold } from '../thresholdUtils'
 
 interface Props {
   data: DataStore
@@ -358,7 +359,7 @@ export default function InnsiktView({ data, threshold }: Props) {
 
     const checkedCombos = new Set<string>()
     normalizedAbsences.forEach(a => {
-      if (a.percentageAbsence <= threshold) return
+      if (!meetsThreshold(a.percentageAbsence, threshold)) return
       const comboKey = studentSubjectKey(a.studentKey, a.subjectDisplay)
       if (checkedCombos.has(comboKey)) return
       checkedCombos.add(comboKey)
