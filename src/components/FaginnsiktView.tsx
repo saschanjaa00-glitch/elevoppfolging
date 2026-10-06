@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, Fragment } from 'react'
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight } from 'lucide-react'
 import type { DataStore, StudentGender } from '../types'
 import KarakterutviklingPanel from './KarakterutviklingPanel'
+import FravaerOverview from './FravaerOverview'
 import { fagkodeLookup } from '../fagkodeLookup'
 import {
   buildStudentClassKey,
@@ -36,8 +37,8 @@ const subjectAggregateKey = (
 
 interface Props {
   data: DataStore
-  subtab?: 'oversikt' | 'karakterutvikling'
-  onSubtabChange?: (subtab: 'oversikt' | 'karakterutvikling') => void
+  subtab?: 'oversikt' | 'karakterutvikling' | 'fravaer'
+  onSubtabChange?: (subtab: 'oversikt' | 'karakterutvikling' | 'fravaer') => void
 }
 
 interface TeacherInSubject {
@@ -165,7 +166,7 @@ const genderGap = (
 
 export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChange }: Props) {
   const [searchTerm, setSearchTerm] = useState('')
-  const [activeSubtab, setActiveSubtab] = useState<'oversikt' | 'karakterutvikling'>(subtab)
+  const [activeSubtab, setActiveSubtab] = useState<'oversikt' | 'karakterutvikling' | 'fravaer'>(subtab)
   const [termMode, setTermMode] = useState<TermMode>('t1')
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
@@ -177,7 +178,7 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
       setActiveSubtab(subtab)
     }, [subtab])
 
-    const selectSubtab = (next: 'oversikt' | 'karakterutvikling') => {
+    const selectSubtab = (next: 'oversikt' | 'karakterutvikling' | 'fravaer') => {
       setActiveSubtab(next)
       onSubtabChange?.(next)
     }
@@ -939,6 +940,17 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
           >
             Karakterutvikling
           </button>
+          <button
+            type="button"
+            onClick={() => selectSubtab('fravaer')}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+              activeSubtab === 'fravaer'
+                ? 'bg-sky-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            Fravær
+          </button>
         </div>
       </div>
 
@@ -1303,8 +1315,10 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
           {filteredAndSorted.length} fag av {subjectRows.length} totalt
         </div>
       </div>
-      ) : (
+      ) : activeSubtab === 'karakterutvikling' ? (
         <KarakterutviklingPanel baseGrades={data.grades} studentInfo={data.studentInfo} absences={data.absences} />
+      ) : (
+        <FravaerOverview data={data} groupBy="fag" />
       )}
 
       {subjectForPdfPrompt && (

@@ -43,7 +43,7 @@ const IkkeBestattView = lazy(loadIkkeBestattView)
 const EksamenView = lazy(loadEksamenView)
 
 type AppTab = 'elever' | 'statistikk' | 'faginnsikt' | 'innsikt' | 'hoyestsnitt' | 'ikkeBestatt' | 'eksamen'
-type FaginnsiktSubtab = 'oversikt' | 'karakterutvikling'
+type FaginnsiktSubtab = 'oversikt' | 'karakterutvikling' | 'fravaer'
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000
 

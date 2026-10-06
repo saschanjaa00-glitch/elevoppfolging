@@ -9,6 +9,7 @@ import {
   resolveClassFromSubjectLookup,
 } from '../studentInfoUtils'
 import { meetsThreshold } from '../thresholdUtils'
+import FravaerOverview from './FravaerOverview'
 
 interface Props {
   data: DataStore
@@ -106,6 +107,7 @@ const genderGap = (
 
 export default function InnsiktView({ data, threshold }: Props) {
   const [searchTerm, setSearchTerm] = useState<string>('')
+  const [activeSubtab, setActiveSubtab] = useState<'oversikt' | 'fravaer'>('oversikt')
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [expandedTeacher, setExpandedTeacher] = useState<string | null>(null)
@@ -867,6 +869,36 @@ export default function InnsiktView({ data, threshold }: Props) {
 
   return (
     <div className="space-y-4">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveSubtab('oversikt')}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+              activeSubtab === 'oversikt'
+                ? 'bg-sky-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            Læreroversikt
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubtab('fravaer')}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+              activeSubtab === 'fravaer'
+                ? 'bg-sky-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            Fravær
+          </button>
+        </div>
+      </div>
+
+      {activeSubtab === 'fravaer' ? (
+        <FravaerOverview data={data} groupBy="laerer" threshold={threshold} />
+      ) : (
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold text-slate-900">Lærere</h2>
@@ -1366,6 +1398,7 @@ export default function InnsiktView({ data, threshold }: Props) {
           {filteredAndSorted.length} lærere av {teacherStats.length} totalt
         </div>
       </div>
+      )}
     </div>
   )
 }
