@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, AlertCircle } from 'lucide-react'
 import { resolveTeacher } from './teacherUtils'
 import { meetsThreshold } from './thresholdUtils'
+import { sanitizeFilenamePart } from './securityUtils'
 import {
   buildStudentSubjectKey,
   compareByLastName,
@@ -134,6 +135,11 @@ function App() {
   const [classListModalOpen, setClassListModalOpen] = useState<boolean>(false)
   const [classListIncludePhone, setClassListIncludePhone] = useState<boolean>(false)
   const [classListSortBy, setClassListSortBy] = useState<'first' | 'last'>('first')
+  const [gruppelisteModalOpen, setGruppelisteModalOpen] = useState<boolean>(false)
+  const [gruppelisteGroup, setGruppelisteGroup] = useState<string>('')
+  const [gruppelisteSearch, setGruppelisteSearch] = useState<string>('')
+  const [gruppelisteIncludePhone, setGruppelisteIncludePhone] = useState<boolean>(false)
+  const [gruppelisteSortBy, setGruppelisteSortBy] = useState<'first' | 'last'>('first')
   const [lowGradeFilter, setLowGradeFilter] = useState<string[]>(['IV', '1', '2'])
   const [gradeHalvaar, setGradeHalvaar] = useState<'H1' | 'H2' | 'begge'>('begge')
   const [filterLogic, setFilterLogic] = useState<'og' | 'eller'>('eller')
@@ -153,6 +159,53 @@ function App() {
   } | null>(null)
   const studentInfoLookup = useMemo(() => createStudentInfoLookup(data.studentInfo), [data.studentInfo])
   const hasPhoneData = useMemo(() => data.studentInfo.some(info => Boolean(info.phone)), [data.studentInfo])
+
+  const groupOptions = useMemo(() => {
+    const formatTeacherShort = (fullName: string): string => {
+      const parts = fullName.trim().split(/\s+/).filter(Boolean)
+      if (parts.length === 0) return ''
+      if (parts.length === 1) return parts[0]
+      return `${parts[0]} ${parts[parts.length - 1].charAt(0).toUpperCase()}.`
+    }
+
+    const map = new Map<
+      string,
+      { subjectGroup: string; subject: string; students: Set<string>; teacherCounts: Map<string, number> }
+    >()
+    data.absences.forEach(record => {
+      if (!record.subjectGroup) return
+      let entry = map.get(record.subjectGroup)
+      if (!entry) {
+        entry = {
+          subjectGroup: record.subjectGroup,
+          subject: record.subject ?? '',
+          students: new Set(),
+          teacherCounts: new Map(),
+        }
+        map.set(record.subjectGroup, entry)
+      }
+      if (!entry.subject && record.subject) entry.subject = record.subject
+      entry.students.add(normalizeMatch(record.navn))
+      const teacher = resolveTeacher(record.subject ?? '', record.teacher ?? '').trim()
+      if (teacher) entry.teacherCounts.set(teacher, (entry.teacherCounts.get(teacher) ?? 0) + 1)
+    })
+    return Array.from(map.values())
+      .map(({ subjectGroup, subject, students, teacherCounts }) => {
+        const topTeacher = Array.from(teacherCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? ''
+        return { subjectGroup, subject, count: students.size, teacher: formatTeacherShort(topTeacher) }
+      })
+      .sort((a, b) => a.subjectGroup.localeCompare(b.subjectGroup, 'nb-NO', { numeric: true }))
+  }, [data.absences])
+
+  const filteredGroupOptions = useMemo(() => {
+    const query = gruppelisteSearch.trim().toLowerCase()
+    if (!query) return groupOptions
+    return groupOptions.filter(
+      option =>
+        option.subjectGroup.toLowerCase().includes(query) ||
+        option.subject.toLowerCase().includes(query)
+    )
+  }, [groupOptions, gruppelisteSearch])
   const absenceSubjectClassLookup = useMemo(
     () => createAbsenceSubjectClassLookup(data.absences),
     [data.absences]
@@ -1238,11 +1291,11 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
-  const handlePrintClassLists = async (
-    { includePhone = false, sortBy = 'first' }: { includePhone?: boolean; sortBy?: 'first' | 'last' } = {}
+  const generateStudentListDocx = async (
+    sections: Array<{ title: string; students: Array<{ navn: string; className: string }> }>,
+    { includePhone, sortBy }: { includePhone: boolean; sortBy: 'first' | 'last' },
+    fileName: string
   ) => {
-    if (selectedClasses.length === 0) return
-
     const {
       BorderStyle,
       Document,
@@ -1259,26 +1312,20 @@ function App() {
 
     const rowsPerPage = 35
     const children: Array<any> = []
-    const orderedClasses = [...selectedClasses].sort((a, b) =>
-      a.localeCompare(b, 'nb-NO', { numeric: true })
-    )
-
     let isFirstPage = true
 
-    orderedClasses.forEach(className => {
+    sections.forEach(section => {
       const students = Array.from(
         new Map(
-          data.absences
-            .filter(record => record.class === className)
-            .map(record => [normalizeMatch(record.navn), record.navn.trim()])
+          section.students.map(s => [`${s.className}::${normalizeMatch(s.navn)}`, s])
         ).values()
       )
         .sort((a, b) =>
           sortBy === 'last'
-            ? compareByLastName(studentInfoLookup, className, a, b)
-            : a.localeCompare(b, 'nb-NO')
+            ? compareByLastName(studentInfoLookup, a.className, a.navn, b.navn)
+            : a.navn.localeCompare(b.navn, 'nb-NO')
         )
-        .map(navn => {
+        .map(({ navn, className }) => {
           const info = findStudentInfoInLookup(studentInfoLookup, navn, className)
           let displayName = navn
           if (sortBy === 'last') {
@@ -1288,7 +1335,6 @@ function App() {
           }
           const isAdult = Boolean(info?.isAdult)
           return {
-            navn,
             label: isAdult ? `${displayName} (18+)` : displayName,
             phone: info?.phone ?? '',
             isAdult,
@@ -1311,8 +1357,8 @@ function App() {
           new Paragraph({
             text:
               pageCount > 1
-                ? `Klasseliste ${className} (${pageIndex + 1}/${pageCount})`
-                : `Klasseliste ${className}`,
+                ? `${section.title} (${pageIndex + 1}/${pageCount})`
+                : section.title,
             heading: HeadingLevel.HEADING_1,
             pageBreakBefore: !isFirstPage,
             spacing: { after: 120 },
@@ -1406,9 +1452,55 @@ function App() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `klasselister_${orderedClasses.join('-')}_${todayDdMmYyyy()}.docx`
+    a.download = fileName
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const handlePrintClassLists = async (
+    { includePhone = false, sortBy = 'first' }: { includePhone?: boolean; sortBy?: 'first' | 'last' } = {}
+  ) => {
+    if (selectedClasses.length === 0) return
+
+    const orderedClasses = [...selectedClasses].sort((a, b) =>
+      a.localeCompare(b, 'nb-NO', { numeric: true })
+    )
+
+    const sections = orderedClasses.map(className => ({
+      title: `Klasseliste ${className}`,
+      students: Array.from(
+        new Map(
+          data.absences
+            .filter(record => record.class === className)
+            .map(record => [normalizeMatch(record.navn), { navn: record.navn.trim(), className }])
+        ).values()
+      ),
+    }))
+
+    await generateStudentListDocx(
+      sections,
+      { includePhone, sortBy },
+      `klasselister_${orderedClasses.join('-')}_${todayDdMmYyyy()}.docx`
+    )
+  }
+
+  const handlePrintGruppeliste = async (
+    subjectGroup: string,
+    { includePhone = false, sortBy = 'first' }: { includePhone?: boolean; sortBy?: 'first' | 'last' } = {}
+  ) => {
+    if (!subjectGroup) return
+
+    const records = data.absences.filter(record => record.subjectGroup === subjectGroup)
+    if (records.length === 0) return
+
+    const subject = records.find(record => record.subject)?.subject ?? ''
+    const title = subject ? `${subjectGroup} – ${subject}` : subjectGroup
+
+    await generateStudentListDocx(
+      [{ title, students: records.map(record => ({ navn: record.navn.trim(), className: record.class })) }],
+      { includePhone, sortBy },
+      `gruppeliste_${sanitizeFilenamePart(subjectGroup)}_${todayDdMmYyyy()}.docx`
+    )
   }
 
   return (
@@ -1617,6 +1709,7 @@ function App() {
                     selectedClasses={selectedClasses}
                     onClassChange={setSelectedClasses}
                     onPrintClassLists={() => setClassListModalOpen(true)}
+                    onPrintGruppeliste={() => setGruppelisteModalOpen(true)}
                     onExportOppfolgingsark={handleExportClassOppfolgingsark}
                     onExportKlasseradsskjema={() => setKlasseradSeasonModalOpen(true)}
                   />
@@ -1668,6 +1761,99 @@ function App() {
                           Skriv ut
                         </button>
                         <button className="text-xs text-slate-400 hover:text-slate-600 mt-1" onClick={() => setClassListModalOpen(false)}>Avbryt</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {gruppelisteModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setGruppelisteModalOpen(false)}>
+                      <div className="bg-white rounded-xl shadow-xl p-6 w-[36rem] max-w-[92vw] flex flex-col gap-4" onClick={e => e.stopPropagation()}>
+                        <h2 className="text-base font-semibold text-slate-900">Gruppeliste</h2>
+                        <div className="flex flex-col gap-2">
+                          <span className="text-sm font-medium text-slate-700">Velg gruppe</span>
+                          <input
+                            type="text"
+                            value={gruppelisteSearch}
+                            onChange={e => setGruppelisteSearch(e.target.value)}
+                            placeholder="Søk på faggruppe eller fagnavn…"
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                          />
+                          <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+                            {filteredGroupOptions.length === 0 ? (
+                              <p className="px-3 py-2 text-sm text-slate-400">Ingen grupper funnet</p>
+                            ) : (
+                              filteredGroupOptions.map(option => (
+                                <button
+                                  key={option.subjectGroup}
+                                  type="button"
+                                  onClick={() => setGruppelisteGroup(option.subjectGroup)}
+                                  className={`w-full px-3 py-2 text-left text-sm transition-colors flex items-center justify-between gap-3 ${
+                                    gruppelisteGroup === option.subjectGroup
+                                      ? 'bg-sky-100 text-sky-800'
+                                      : 'hover:bg-slate-50 text-slate-700'
+                                  }`}
+                                >
+                                  <span className="min-w-0 truncate">
+                                    <span className="font-medium">{option.subjectGroup}</span>
+                                    {option.subject ? <span className="text-slate-500"> — {option.subject}</span> : null}
+                                    <span className="text-xs text-slate-400"> ({option.count})</span>
+                                  </span>
+                                  {option.teacher ? (
+                                    <span className="text-xs text-slate-500 whitespace-nowrap">{option.teacher}</span>
+                                  ) : null}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <span className="text-sm font-medium text-slate-700">Sorter etter</span>
+                          <div className="flex rounded-lg border border-slate-300 overflow-hidden">
+                            {(['first', 'last'] as const).map(option => (
+                              <button
+                                key={option}
+                                type="button"
+                                onClick={() => setGruppelisteSortBy(option)}
+                                className={`flex-1 px-3 py-1.5 text-sm font-medium transition-colors ${
+                                  gruppelisteSortBy === option
+                                    ? 'bg-sky-600 text-white'
+                                    : 'bg-white text-slate-600 hover:bg-slate-50'
+                                }`}
+                              >
+                                {option === 'first' ? 'Fornavn' : 'Etternavn'}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        {hasPhoneData && (
+                          <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={gruppelisteIncludePhone}
+                              onChange={e => setGruppelisteIncludePhone(e.target.checked)}
+                              className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                            />
+                            Inkluder telefonnummer
+                          </label>
+                        )}
+                        <button
+                          disabled={!gruppelisteGroup}
+                          className={`w-full px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                            gruppelisteGroup
+                              ? 'bg-slate-800 text-white hover:bg-slate-700'
+                              : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                          }`}
+                          onClick={() => {
+                            setGruppelisteModalOpen(false)
+                            void handlePrintGruppeliste(gruppelisteGroup, {
+                              includePhone: hasPhoneData && gruppelisteIncludePhone,
+                              sortBy: gruppelisteSortBy,
+                            })
+                          }}
+                        >
+                          Skriv ut
+                        </button>
+                        <button className="text-xs text-slate-400 hover:text-slate-600 mt-1" onClick={() => setGruppelisteModalOpen(false)}>Avbryt</button>
                       </div>
                     </div>
                   )}

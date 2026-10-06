@@ -6,6 +6,7 @@ interface ClassSelectorProps {
   selectedClasses: string[]
   onClassChange: (classNames: string[]) => void
   onPrintClassLists?: () => void
+  onPrintGruppeliste?: () => void
   onExportOppfolgingsark?: () => void
   onExportKlasseradsskjema?: () => void
 }
@@ -15,6 +16,7 @@ function ClassSelector({
   selectedClasses,
   onClassChange,
   onPrintClassLists,
+  onPrintGruppeliste,
   onExportOppfolgingsark,
   onExportKlasseradsskjema,
 }: ClassSelectorProps) {
@@ -114,7 +116,7 @@ function ClassSelector({
         ))}
       </div>
 
-      {(onPrintClassLists || onExportOppfolgingsark || onExportKlasseradsskjema) && (
+      {(onPrintClassLists || onPrintGruppeliste || onExportOppfolgingsark || onExportKlasseradsskjema) && (
         <div className="mt-4 space-y-2 border-t border-slate-100 pt-4">
           {onPrintClassLists && (
             <button
@@ -156,6 +158,15 @@ function ClassSelector({
               }`}
             >
               Klasselærerråd for valgte klasser
+            </button>
+          )}
+          {onPrintGruppeliste && (
+            <button
+              type="button"
+              onClick={onPrintGruppeliste}
+              className="w-full px-3 py-2 text-sm font-medium rounded-lg transition-colors bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
+            >
+              Gruppeliste
             </button>
           )}
         </div>
