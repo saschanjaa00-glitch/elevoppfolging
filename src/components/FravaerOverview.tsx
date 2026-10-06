@@ -219,12 +219,16 @@ export default function FravaerOverview({ data, groupBy, threshold = 0 }: Props)
                 <Fragment key={row.key}>
                   <tr
                     onClick={() => setExpandedKey(isExpanded ? null : row.key)}
-                    className="border-b border-slate-100 hover:bg-sky-50/40 cursor-pointer"
+                    className={`border-b cursor-pointer transition-colors ${
+                      isExpanded
+                        ? 'bg-sky-100/70 border-sky-200'
+                        : 'border-slate-100 hover:bg-sky-50/40'
+                    }`}
                   >
                     <td className="py-2 px-3 font-medium text-slate-900">
                       <div className="flex items-center gap-2">
                         {isExpanded ? (
-                          <ChevronDown className="w-4 h-4 flex-shrink-0 text-slate-400" />
+                          <ChevronDown className="w-4 h-4 flex-shrink-0 text-sky-600" />
                         ) : (
                           <ChevronRight className="w-4 h-4 flex-shrink-0 text-slate-400" />
                         )}
@@ -249,10 +253,15 @@ export default function FravaerOverview({ data, groupBy, threshold = 0 }: Props)
                     )}
                   </tr>
                   {isExpanded &&
-                    row.children.map(child => (
-                      <tr key={child.key} className="bg-slate-50/70 border-b border-slate-100">
-                        <td className="py-2 pl-9 pr-3 text-slate-700">
-                          <div className="leading-tight">
+                    row.children.map((child, childIndex) => (
+                      <tr
+                        key={child.key}
+                        className={`bg-slate-50 ${
+                          childIndex === row.children.length - 1 ? 'border-b-2 border-slate-200' : 'border-b border-slate-200/60'
+                        }`}
+                      >
+                        <td className="py-2 pr-3 pl-10 text-slate-700">
+                          <div className="border-l-2 border-slate-300 pl-3 leading-tight">
                             <div className="font-medium text-slate-800">{child.subjectGroup}</div>
                             {child.secondary ? <div className="text-xs text-slate-500">{child.secondary}</div> : null}
                           </div>
