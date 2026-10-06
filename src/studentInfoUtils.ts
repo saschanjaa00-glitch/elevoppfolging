@@ -125,6 +125,45 @@ export const findStudentInfoInLookup = (
   return className ? lookup.get(buildStudentClassKey(navn, className)) : undefined
 }
 
+export const getSortNameParts = (
+  lookup: Map<string, StudentInfoRecord>,
+  navn: string,
+  className?: string
+): { lastName: string; firstName: string } => {
+  const info = findStudentInfoInLookup(lookup, navn, className)
+  const lastNameFromInfo = info?.etternavn?.trim() ?? ''
+  const firstNameFromInfo = info?.fornavn?.trim() ?? ''
+  if (lastNameFromInfo || firstNameFromInfo) {
+    return {
+      lastName: lastNameFromInfo || navn.trim(),
+      firstName: firstNameFromInfo || '',
+    }
+  }
+
+  const parts = navn.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return { lastName: '', firstName: '' }
+  if (parts.length === 1) return { lastName: parts[0], firstName: '' }
+  return {
+    lastName: parts[parts.length - 1],
+    firstName: parts.slice(0, -1).join(' '),
+  }
+}
+
+export const compareByLastName = (
+  lookup: Map<string, StudentInfoRecord>,
+  className: string | undefined,
+  aName: string,
+  bName: string
+): number => {
+  const a = getSortNameParts(lookup, aName, className)
+  const b = getSortNameParts(lookup, bName, className)
+  const lastNameCompare = a.lastName.localeCompare(b.lastName, 'nb-NO')
+  if (lastNameCompare !== 0) return lastNameCompare
+  const firstNameCompare = a.firstName.localeCompare(b.firstName, 'nb-NO')
+  if (firstNameCompare !== 0) return firstNameCompare
+  return aName.localeCompare(bName, 'nb-NO')
+}
+
 export const formatIntakePoints = (intakePoints: number | null): {
   label: string
   tone: 'green' | 'slate'

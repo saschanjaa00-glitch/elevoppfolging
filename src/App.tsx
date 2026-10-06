@@ -4,10 +4,12 @@ import { resolveTeacher } from './teacherUtils'
 import { meetsThreshold } from './thresholdUtils'
 import {
   buildStudentSubjectKey,
+  compareByLastName,
   createAbsenceSubjectClassLookup,
   createStudentInfoLookup,
   findStudentInfoInLookup,
   getDisplayClassName,
+  getSortNameParts,
   isNorskSubject,
   normalizeMatch,
   normalizeSubjectGroupKey,
@@ -562,7 +564,7 @@ function App() {
     ).sort((a, b) => {
       const classCompare = a.className.localeCompare(b.className, 'nb-NO', { numeric: true })
       if (classCompare !== 0) return classCompare
-      return a.navn.localeCompare(b.navn, 'nb-NO')
+      return compareByLastName(studentInfoLookup, a.className, a.navn, b.navn)
     })
 
     const children: Array<any> = []
@@ -702,35 +704,8 @@ function App() {
     const seasonSuffix = `${seasonLabel} ${seasonYear}`
     const showGradeColumns = data.grades.length > 0
 
-    const getNamePartsForSort = (className: string, navn: string) => {
-      const info = findStudentInfoInLookup(studentInfoLookup, navn, className)
-      const lastNameFromInfo = info?.etternavn?.trim() ?? ''
-      const firstNameFromInfo = info?.fornavn?.trim() ?? ''
-      if (lastNameFromInfo || firstNameFromInfo) {
-        return {
-          lastName: lastNameFromInfo || navn.trim(),
-          firstName: firstNameFromInfo || '',
-        }
-      }
-
-      const parts = navn.trim().split(/\s+/).filter(Boolean)
-      if (parts.length === 0) return { lastName: '', firstName: '' }
-      if (parts.length === 1) return { lastName: parts[0], firstName: '' }
-      return {
-        lastName: parts[parts.length - 1],
-        firstName: parts.slice(0, -1).join(' '),
-      }
-    }
-
-    const compareByLastName = (className: string, aName: string, bName: string) => {
-      const a = getNamePartsForSort(className, aName)
-      const b = getNamePartsForSort(className, bName)
-      const lastNameCompare = a.lastName.localeCompare(b.lastName, 'nb-NO')
-      if (lastNameCompare !== 0) return lastNameCompare
-      const firstNameCompare = a.firstName.localeCompare(b.firstName, 'nb-NO')
-      if (firstNameCompare !== 0) return firstNameCompare
-      return aName.localeCompare(bName, 'nb-NO')
-    }
+    const getNamePartsForSort = (className: string, navn: string) =>
+      getSortNameParts(studentInfoLookup, navn, className)
 
     const formatNameLastFirst = (className: string, navn: string) => {
       const parts = getNamePartsForSort(className, navn)
@@ -824,7 +799,7 @@ function App() {
               { navn: record.navn, displayNavn: formatNameLastFirst(className, record.navn) },
             ])
         ).values()
-      ).sort((a, b) => compareByLastName(className, a.navn, b.navn))
+      ).sort((a, b) => compareByLastName(studentInfoLookup, className, a.navn, b.navn))
 
       const kontaktlaerer = getClassKontaktlaerer(className)
       const radgiver = ownerForClassByRole(className, 'Rådgiver')
