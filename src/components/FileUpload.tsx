@@ -5,6 +5,7 @@ import type { DataStore, AbsenceRecord, WarningRecord, StudentInfoRecord, Preset
 import { anonymizeData } from '../anonymizeNames'
 import { normalizeCellText } from '../securityUtils'
 import { inferGenderFromFodselsnummer } from '../studentInfoUtils'
+import { normalizePhone } from '../examData'
 
 
 interface FileUploadProps {
@@ -378,6 +379,7 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
           programArea: getRowValue(row, ['programområde', 'programomrade', 'program area']),
           sidemalExemption: sidemalValue.toLowerCase().includes('assessment exemption'),
           intakePoints: getNumericField(row, ['inntakspoeng', 'intake points']),
+          phone: normalizePhone(getRowValue(row, ['mobilnummer', 'mobil', 'mobiltelefon', 'telefon', 'tlf', 'phone', 'mobile'])) || undefined,
         }
       })
       .filter(r => r.navn)
@@ -649,7 +651,7 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
             { key: 'absence', label: 'Fravær', sub: 'Fraværsrapport', cols: ['Navn', 'Klasse', 'Fagnavn', 'Faggruppe', 'H1+H2 % udok. fravær', 'H1+H2 timer udok. fravær', 'Lærer', 'Kontaktlærer', 'Avbrudd i skoleåret'] },
             { key: 'warnings', label: 'Varsler', sub: 'Varseloversikt*', cols: ['Elevnavn', 'Klasse', 'Faggruppe', 'Type varsel', 'Sendt dato', 'Fødselsdato'] },
             { key: 'grades', label: 'Karakterer', sub: 'Karakterrapport', cols: ['Elev', 'Klassegruppe', 'Gruppe', 'Fagkode', 'Karakter', 'Faglærer', 'Halvår'] },
-            { key: 'studentInfo', label: 'Elevfil', sub: 'Elevliste', cols: ['Fornavn', 'Etternavn', 'Fødselsdato', 'Programområde', 'Fritak i sidemål', 'Inntakspoeng', 'Klasse', 'Fødselsnummer (valgfri)'] },
+            { key: 'studentInfo', label: 'Elevfil', sub: 'Elevliste', cols: ['Fornavn', 'Etternavn', 'Fødselsdato', 'Programområde', 'Fritak i sidemål', 'Inntakspoeng', 'Klasse', 'Fødselsnummer (valgfri)', 'Mobilnummer (valgfri)'] },
             { key: 'preset', label: 'Preset-fil', sub: 'Valgfri', cols: ['Navn', 'Rolle', 'Klasser'] },
           ] as const).map(({ key, label, sub, cols }) => {
             const detected = detectedTypes.has(key)

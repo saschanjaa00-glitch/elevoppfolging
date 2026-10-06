@@ -38,6 +38,7 @@ export interface StudentInfoRecord {
   programArea: string
   sidemalExemption: boolean
   intakePoints: number | null
+  phone?: string
 }
 
 export interface StudentAbsenceSummary {

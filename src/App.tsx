@@ -131,6 +131,9 @@ function App() {
   const [vurderingFromDate, setVurderingFromDate] = useState<string>('')
   const [oversiktModalOpen, setOversiktModalOpen] = useState<boolean>(false)
   const [klasseradSeasonModalOpen, setKlasseradSeasonModalOpen] = useState<boolean>(false)
+  const [classListModalOpen, setClassListModalOpen] = useState<boolean>(false)
+  const [classListIncludePhone, setClassListIncludePhone] = useState<boolean>(false)
+  const [classListSortBy, setClassListSortBy] = useState<'first' | 'last'>('first')
   const [lowGradeFilter, setLowGradeFilter] = useState<string[]>(['IV', '1', '2'])
   const [gradeHalvaar, setGradeHalvaar] = useState<'H1' | 'H2' | 'begge'>('begge')
   const [filterLogic, setFilterLogic] = useState<'og' | 'eller'>('eller')
@@ -149,6 +152,7 @@ function App() {
     fullRapportInclude2: boolean
   } | null>(null)
   const studentInfoLookup = useMemo(() => createStudentInfoLookup(data.studentInfo), [data.studentInfo])
+  const hasPhoneData = useMemo(() => data.studentInfo.some(info => Boolean(info.phone)), [data.studentInfo])
   const absenceSubjectClassLookup = useMemo(
     () => createAbsenceSubjectClassLookup(data.absences),
     [data.absences]
@@ -1234,7 +1238,9 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
-  const handlePrintClassLists = async () => {
+  const handlePrintClassLists = async (
+    { includePhone = false, sortBy = 'first' }: { includePhone?: boolean; sortBy?: 'first' | 'last' } = {}
+  ) => {
     if (selectedClasses.length === 0) return
 
     const {
@@ -1266,7 +1272,28 @@ function App() {
             .filter(record => record.class === className)
             .map(record => [normalizeMatch(record.navn), record.navn.trim()])
         ).values()
-      ).sort((a, b) => a.localeCompare(b, 'nb-NO'))
+      )
+        .sort((a, b) =>
+          sortBy === 'last'
+            ? compareByLastName(studentInfoLookup, className, a, b)
+            : a.localeCompare(b, 'nb-NO')
+        )
+        .map(navn => {
+          const info = findStudentInfoInLookup(studentInfoLookup, navn, className)
+          let displayName = navn
+          if (sortBy === 'last') {
+            const parts = getSortNameParts(studentInfoLookup, navn, className)
+            if (parts.lastName && parts.firstName) displayName = `${parts.lastName}, ${parts.firstName}`
+            else if (parts.lastName) displayName = parts.lastName
+          }
+          const isAdult = Boolean(info?.isAdult)
+          return {
+            navn,
+            label: isAdult ? `${displayName} (18+)` : displayName,
+            phone: info?.phone ?? '',
+            isAdult,
+          }
+        })
 
       const pageCount = Math.max(1, Math.ceil(students.length / rowsPerPage))
 
@@ -1292,30 +1319,54 @@ function App() {
           }),
           new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
-            rows: pageStudents.map(name =>
-              new TableRow({
+            rows: pageStudents.map(student => {
+              const cellBorders = {
+                top: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                bottom: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                left: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+                right: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
+              }
+              const shading = student.isAdult ? { fill: 'E8F6E8' } : undefined
+              return new TableRow({
                 height: {
                   value: rowHeightTwips,
                   rule: HeightRule.EXACT,
                 },
                 children: [
                   new TableCell({
-                    borders: {
-                      top: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
-                      bottom: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
-                      left: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
-                      right: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
-                    },
+                    width: { size: 7, type: WidthType.PERCENTAGE },
+                    borders: cellBorders,
+                    shading,
+                    children: [new Paragraph({ text: '', spacing: { before: 0, after: 0 } })],
+                  }),
+                  new TableCell({
+                    borders: cellBorders,
+                    shading,
                     children: [
                       new Paragraph({
-                        children: [new TextRun({ text: name, size: 22 })],
+                        children: [new TextRun({ text: student.label, size: 22 })],
                         spacing: { before: 0, after: 0 },
                       }),
                     ],
                   }),
+                  ...(includePhone
+                    ? [
+                        new TableCell({
+                          width: { size: 25, type: WidthType.PERCENTAGE },
+                          borders: cellBorders,
+                          shading,
+                          children: [
+                            new Paragraph({
+                              children: [new TextRun({ text: student.phone, size: 22 })],
+                              spacing: { before: 0, after: 0 },
+                            }),
+                          ],
+                        }),
+                      ]
+                    : []),
                 ],
               })
-            ),
+            }),
           })
         )
 
@@ -1565,10 +1616,61 @@ function App() {
                     data={data}
                     selectedClasses={selectedClasses}
                     onClassChange={setSelectedClasses}
-                    onPrintClassLists={handlePrintClassLists}
+                    onPrintClassLists={() => setClassListModalOpen(true)}
                     onExportOppfolgingsark={handleExportClassOppfolgingsark}
                     onExportKlasseradsskjema={() => setKlasseradSeasonModalOpen(true)}
                   />
+
+                  {classListModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setClassListModalOpen(false)}>
+                      <div className="bg-white rounded-xl shadow-xl p-6 w-80 flex flex-col gap-4" onClick={e => e.stopPropagation()}>
+                        <h2 className="text-base font-semibold text-slate-900">Skriv ut klasselister</h2>
+                        <div className="flex flex-col gap-2">
+                          <span className="text-sm font-medium text-slate-700">Sorter etter</span>
+                          <div className="flex rounded-lg border border-slate-300 overflow-hidden">
+                            {(['first', 'last'] as const).map(option => (
+                              <button
+                                key={option}
+                                type="button"
+                                onClick={() => setClassListSortBy(option)}
+                                className={`flex-1 px-3 py-1.5 text-sm font-medium transition-colors ${
+                                  classListSortBy === option
+                                    ? 'bg-sky-600 text-white'
+                                    : 'bg-white text-slate-600 hover:bg-slate-50'
+                                }`}
+                              >
+                                {option === 'first' ? 'Fornavn' : 'Etternavn'}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        {hasPhoneData && (
+                          <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={classListIncludePhone}
+                              onChange={e => setClassListIncludePhone(e.target.checked)}
+                              className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                            />
+                            Inkluder telefonnummer
+                          </label>
+                        )}
+                        <button
+                          className="w-full px-4 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors"
+                          onClick={() => {
+                            setClassListModalOpen(false)
+                            void handlePrintClassLists({
+                              includePhone: hasPhoneData && classListIncludePhone,
+                              sortBy: classListSortBy,
+                            })
+                          }}
+                        >
+                          Skriv ut
+                        </button>
+                        <button className="text-xs text-slate-400 hover:text-slate-600 mt-1" onClick={() => setClassListModalOpen(false)}>Avbryt</button>
+                      </div>
+                    </div>
+                  )}
 
                   {klasseradSeasonModalOpen && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setKlasseradSeasonModalOpen(false)}>
