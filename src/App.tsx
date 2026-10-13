@@ -1506,7 +1506,7 @@ function App() {
 
   const handlePrintLaererliste = () => {
     if (selectedClasses.length === 0) return
-    const opened = printTeacherMatrix(data.absences, selectedClasses)
+    const opened = printTeacherMatrix(data.absences, selectedClasses, presets)
     if (!opened) {
       window.alert('Kunne ikke åpne utskriftsvinduet. Sjekk at popup-blokkering er slått av, og at valgte klasser har lærerdata.')
     }
