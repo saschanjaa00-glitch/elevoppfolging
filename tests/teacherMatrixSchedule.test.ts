@@ -258,6 +258,7 @@ describe('teacher discussion scheduling', () => {
     expect(html).toContain('Forslag til tidsplan for klasselærerråd')
     expect(html).toContain('Rom 1')
     expect(html).toContain('Trinnleder/avdelingsleder: <span class="pname" data-real="Leder A" data-anon="Leder 1">Leder A</span>')
+    expect(html).toContain('.schedule-table td > span {')
     expect(html).toContain('u/kollisjon')
     expect(html).toContain('m/kollisjon')
     expect(html).toContain('total ·')
@@ -275,6 +276,17 @@ describe('teacher discussion scheduling', () => {
     expect(html).toContain('data-sync-group="room"')
     expect(html).toContain('oninput="syncLabel(this)"')
     expect(html).toContain('data-sync-group="slot" data-sync-index="0"')
+    const discussionTable = html.slice(
+      html.indexOf('id="discussion-schedule-table"'),
+      html.indexOf('id="teacher-schedule-table"')
+    )
+    const teacherTable = html.slice(
+      html.indexOf('id="teacher-schedule-table"'),
+      html.indexOf('id="teacher-meeting-table"')
+    )
+    expect(discussionTable).toContain('contenteditable="true"')
+    expect(teacherTable).not.toContain('contenteditable="true"')
+    expect(html).toContain('<th class="meeting-slot"><span class="sync-label"')
     expect(html).toContain('id="discussion-schedule-table"')
     expect(html).toContain('id="teacher-schedule-table"')
     expect(html).toContain("copyScheduleTable(this, 'discussion-schedule-table')")

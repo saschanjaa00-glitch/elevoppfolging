@@ -720,8 +720,8 @@ function buildDiscussionScheduleHtml(
       )
       .join('')
 
-  const headers = roomHeaders(false)
-  const editableTeacherHeaders = roomHeaders(true)
+  const editableHeaders = roomHeaders(true)
+  const teacherHeaders = roomHeaders(false)
 
   const rows = schedule.slots
     .map((slot, slotIndex) => {
@@ -748,7 +748,8 @@ function buildDiscussionScheduleHtml(
         })
         .join('')
       return `<tr><th scope="row">${syncedLabelHtml(SLOT_SYNC_GROUP, slotIndex, slot.label, {
-        editable: false,
+        editable: true,
+        ariaLabel: 'Rediger navn på tidsluke',
       })}<span class="schedule-collision-summary">${teacherOccurrences.size} total · ${teachersWithoutCollisions} u/kollisjon · ${teachersWithCollisions} m/kollisjon</span></th>${cells}</tr>`
     })
     .join('')
@@ -780,8 +781,7 @@ function buildDiscussionScheduleHtml(
         })
         .join('')
       return `<tr><th scope="row">${syncedLabelHtml(SLOT_SYNC_GROUP, slotIndex, slot.label, {
-        editable: true,
-        ariaLabel: 'Rediger navn på tidsluke',
+        editable: false,
       })}</th>${cells}</tr>`
     })
     .join('')
@@ -801,12 +801,13 @@ function buildDiscussionScheduleHtml(
         <button type="button" onclick="copyScheduleTable(this, 'discussion-schedule-table')">Kopier tabell</button>
         <button type="button" onclick="exportTableToExcel(this, 'discussion-schedule-table', 'tidsplan_klasselaererrad')">Last ned Excel</button>
         <label class="toggle-option"><input type="checkbox" onchange="toggleCollisions(this)"> Vis kollisjoner</label>
+        <span class="room-edit-hint">Klikk på et rom- eller tidsnavn for å endre det. Endringen oppdateres i alle tabellene.</span>
       </div>
       <table id="discussion-schedule-table" class="schedule-table hide-collisions">
         <thead>
           <tr>
             <th class="schedule-time">Tid</th>
-            ${headers}
+            ${editableHeaders}
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -825,13 +826,12 @@ function buildDiscussionScheduleHtml(
         <button type="button" onclick="copyScheduleTable(this, 'teacher-schedule-table')">Kopier tabell</button>
         <button type="button" onclick="exportTableToExcel(this, 'teacher-schedule-table', 'laererfordeling_tidsluke')">Last ned Excel</button>
         <label class="toggle-option"><input type="checkbox" onchange="toggleParentheses(this, 'teacher-schedule-table')"> Vis tall i parentes</label>
-        <span class="room-edit-hint">Klikk på et rom- eller tidsnavn for å endre det. Endringen oppdateres i alle tabellene.</span>
       </div>
       <table id="teacher-schedule-table" class="schedule-table teacher-schedule-table hide-paren">
         <thead>
           <tr>
             <th class="schedule-time">Tid</th>
-            ${editableTeacherHeaders}
+            ${teacherHeaders}
           </tr>
         </thead>
         <tbody>${teacherRows}</tbody>
@@ -846,7 +846,7 @@ function buildTeacherMeetingOverviewHtml(
   anonymization: AnonymizationMap | null
 ): string {
   const headerCells = overview.slotLabels
-    .map((label, index) => `<th>${syncedLabelHtml(SLOT_SYNC_GROUP, index, label, { editable: false })}</th>`)
+    .map((label, index) => `<th class="meeting-slot">${syncedLabelHtml(SLOT_SYNC_GROUP, index, label, { editable: false })}</th>`)
     .join('')
 
   const bodyRows = overview.teachers
@@ -1096,7 +1096,7 @@ export function buildTeacherMatrixHtml(
   }
   .schedule-table .room-number,
   .schedule-table .room-adviser,
-  .schedule-table td span {
+  .schedule-table td > span {
     display: block;
   }
   .schedule-table .room-number {
@@ -1108,7 +1108,7 @@ export function buildTeacherMatrixHtml(
     margin-bottom: 1mm;
     font-size: 9pt;
   }
-  .schedule-table td span {
+  .schedule-table td > span {
     margin-top: 0.5mm;
   }
   .schedule-table .schedule-empty {
@@ -1171,7 +1171,8 @@ export function buildTeacherMatrixHtml(
     vertical-align: middle;
   }
   .meeting-table .meeting-cell,
-  .meeting-table .meeting-total {
+  .meeting-table .meeting-total,
+  .meeting-table .meeting-slot {
     text-align: center;
     vertical-align: middle;
   }
