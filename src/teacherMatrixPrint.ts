@@ -39,6 +39,7 @@ export interface DiscussionSchedule {
   rooms: Array<{ key: string; adviser: string }>
   slots: Array<{ label: string; assignments: DiscussionAssignment[] }>
   warnings: string[]
+  minStudents: number | null
 }
 
 export interface TeacherMeetingOverview {
@@ -223,7 +224,8 @@ function getPresetOwners(
 function buildDiscussionClasses(
   absences: AbsenceRecord[],
   classNames: string[],
-  presets: PresetRecord[]
+  presets: PresetRecord[],
+  minStudents: number | null = null
 ): { classes: DiscussionClass[]; warnings: string[] } {
   const warnings: string[] = []
   const classes = [...new Set(classNames)]
@@ -287,6 +289,9 @@ function buildDiscussionClasses(
         students.add(normalizeMatch(student))
       })
 
+      const keepTeacher = (teacherKey: string, studentCount: number): boolean =>
+        contactTeacherKeys.has(teacherKey) || minStudents === null || studentCount >= minStudents
+
       return {
         className,
         adviser,
@@ -294,9 +299,15 @@ function buildDiscussionClasses(
         roomKey,
         requiredPersonKeys,
         teacherWeights: new Map(
-          Array.from(studentsByTeacher.entries()).map(([teacherKey, students]) => [teacherKey, students.size])
+          Array.from(studentsByTeacher.entries())
+            .filter(([teacherKey, students]) => keepTeacher(teacherKey, students.size))
+            .map(([teacherKey, students]) => [teacherKey, students.size])
         ),
-        teacherNames,
+        teacherNames: new Map(
+          Array.from(teacherNames.entries()).filter(([teacherKey]) =>
+            keepTeacher(teacherKey, studentsByTeacher.get(teacherKey)?.size ?? 0)
+          )
+        ),
         contactTeacherKeys,
       }
     })
@@ -564,9 +575,10 @@ function buildSlotAssignments(slotClasses: DiscussionClass[]): DiscussionAssignm
 export function buildDiscussionSchedule(
   absences: AbsenceRecord[],
   classNames: string[],
-  presets: PresetRecord[]
+  presets: PresetRecord[],
+  minStudents: number | null = null
 ): DiscussionSchedule | null {
-  const { classes, warnings } = buildDiscussionClasses(absences, classNames, presets)
+  const { classes, warnings } = buildDiscussionClasses(absences, classNames, presets, minStudents)
   if (classes.length === 0) return null
 
   const colors = improveDiscussionSchedule(colorDiscussionClasses(classes), classes)
@@ -585,7 +597,7 @@ export function buildDiscussionSchedule(
     )
     .map((assignments, slotIndex) => ({ label: `Tid ${slotIndex + 1}`, assignments }))
 
-  return { rooms, slots, warnings }
+  return { rooms, slots, warnings, minStudents }
 }
 
 function buildDiscussionScheduleHtml(schedule: DiscussionSchedule): string {
@@ -675,7 +687,11 @@ function buildDiscussionScheduleHtml(schedule: DiscussionSchedule): string {
         <tbody>${rows}</tbody>
       </table>
       <h3 class="schedule-subtitle">Lærerfordeling per tidsluke</h3>
-      <p class="meta">Kontaktlærere er plassert i egen klasse. Andre lærere er plassert i klassen der de har flest elever i den aktuelle tidsluken. Tallene i parentes viser antall elever læreren har i hver av klassene i tidsluken (samme rekkefølge som kolonnene), og det understrekede tallet er klassen læreren er plassert i.</p>
+      <p class="meta">Kontaktlærere er plassert i egen klasse. Andre lærere er plassert i klassen der de har flest elever i den aktuelle tidsluken. Tallene i parentes viser antall elever læreren har i hver av klassene i tidsluken (samme rekkefølge som kolonnene), og det understrekede tallet er klassen læreren er plassert i.${
+        schedule.minStudents !== null
+          ? ` Filter: lærere med færre enn ${schedule.minStudents} elever i en klasse er utelatt (kontaktlærere deltar alltid).`
+          : ''
+      }</p>
       <div class="no-print copy-row">
         <button type="button" onclick="copyScheduleTable(this, 'teacher-schedule-table')">Kopier tabell</button>
       </div>
@@ -1150,13 +1166,14 @@ async function buildTeacherMeetingWorkbookUrl(overview: TeacherMeetingOverview):
 export function printTeacherMatrix(
   absences: AbsenceRecord[],
   classNames: string[],
-  presets: PresetRecord[] = []
+  presets: PresetRecord[] = [],
+  minStudents: number | null = null
 ): boolean {
   const sections = buildTeacherMatrixSections(absences, classNames)
   if (sections.length === 0) return false
 
   const rankOverview = buildTeacherClassRankOverview(absences, sections)
-  const discussionSchedule = buildDiscussionSchedule(absences, classNames, presets)
+  const discussionSchedule = buildDiscussionSchedule(absences, classNames, presets, minStudents)
 
   const printWindow = window.open('', '_blank')
   if (!printWindow) return false

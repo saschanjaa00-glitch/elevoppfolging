@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react'
+import { memo, useMemo, useState } from 'react'
 import type { DataStore } from '../types'
 
 interface ClassSelectorProps {
@@ -9,7 +9,7 @@ interface ClassSelectorProps {
   onPrintGruppeliste?: () => void
   onExportOppfolgingsark?: () => void
   onExportKlasseradsskjema?: () => void
-  onPrintLaererliste?: () => void
+  onPrintLaererliste?: (minStudents: number | null) => void
 }
 
 function ClassSelector({
@@ -26,6 +26,16 @@ function ClassSelector({
     () => Array.from(new Set(data.absences.map(a => a.class))).sort(),
     [data.absences]
   )
+
+  const [showLaererlisteOptions, setShowLaererlisteOptions] = useState(false)
+  const [minStudentsInput, setMinStudentsInput] = useState('')
+
+  const startLaererliste = () => {
+    const parsed = Number.parseInt(minStudentsInput, 10)
+    const minStudents = Number.isFinite(parsed) && parsed > 0 ? parsed : null
+    setShowLaererlisteOptions(false)
+    onPrintLaererliste?.(minStudents)
+  }
 
   const { vg1, vg2, vg3, other } = useMemo(() => {
     const nextVg1 = classes.filter(c => /^1/i.test(c))
@@ -163,18 +173,58 @@ function ClassSelector({
             </button>
           )}
           {onPrintLaererliste && (
-            <button
-              type="button"
-              onClick={onPrintLaererliste}
-              disabled={selectedClasses.length === 0}
-              className={`w-full px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                selectedClasses.length > 0
-                  ? 'bg-sky-600 text-white hover:bg-sky-700 shadow-sm'
-                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-              }`}
-            >
-              Lærerliste klasselærerråd
-            </button>
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowLaererlisteOptions(prev => !prev)}
+                disabled={selectedClasses.length === 0}
+                className={`w-full px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  selectedClasses.length > 0
+                    ? 'bg-sky-600 text-white hover:bg-sky-700 shadow-sm'
+                    : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                }`}
+              >
+                Lærerliste klasselærerråd
+              </button>
+              {showLaererlisteOptions && selectedClasses.length > 0 && (
+                <div className="mt-2 p-3 rounded-lg border border-sky-200 bg-sky-50 space-y-2">
+                  <label htmlFor="min-students" className="block text-xs font-semibold text-slate-700">
+                    Minimum antall elever
+                  </label>
+                  <input
+                    id="min-students"
+                    type="number"
+                    min={1}
+                    value={minStudentsInput}
+                    placeholder="Ingen filter"
+                    onChange={event => setMinStudentsInput(event.target.value)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter') startLaererliste()
+                    }}
+                    className="w-full px-2 py-1.5 text-sm rounded-lg border border-slate-300 bg-white"
+                  />
+                  <p className="text-[11px] leading-snug text-slate-600">
+                    Lærere med færre elever enn dette slipper møtet. Kontaktlærere deltar alltid. Tomt felt = ingen filter.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={startLaererliste}
+                      className="flex-1 px-2 py-1.5 text-xs font-medium bg-sky-600 text-white hover:bg-sky-700 rounded-lg transition-colors"
+                    >
+                      Åpne
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowLaererlisteOptions(false)}
+                      className="flex-1 px-2 py-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
+                    >
+                      Avbryt
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
           {onPrintGruppeliste && (
             <button

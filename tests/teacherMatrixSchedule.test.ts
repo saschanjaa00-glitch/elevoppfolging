@@ -173,6 +173,41 @@ describe('teacher discussion scheduling', () => {
     expect(bjorn?.classBySlot.filter(Boolean)).toEqual(['1C'])
   })
 
+  it('excludes teachers below the minimum student filter but keeps contact teachers', () => {
+    const classNames = ['1A', '1B']
+    const smallRecord = absence('1A', 'Liten Lærer', 1)
+    smallRecord.kontaktlaerer = 'Kontakt Lærer'
+    const absences = [
+      smallRecord,
+      ...Array.from({ length: 3 }, (_, index) => absence('1A', 'Stor Lærer', index + 1)),
+      ...Array.from({ length: 5 }, (_, index) => absence('1B', 'Stor Lærer', index + 10)),
+    ]
+    const presets = [
+      preset('Rådgiver A', 'Rådgiver', ['1A']),
+      preset('Rådgiver B', 'Rådgiver', ['1B']),
+      preset('Leder A', 'Avdelingsleder', ['1A']),
+      preset('Leder B', 'Avdelingsleder', ['1B']),
+    ]
+
+    const unfiltered = buildDiscussionSchedule(absences, classNames, presets)
+    const unfilteredNames = unfiltered?.slots
+      .flatMap(slot => slot.assignments)
+      .flatMap(item => item.assignedTeachers ?? [])
+      .map(teacher => teacher.name)
+    expect(unfilteredNames).toContain('Liten Lærer')
+
+    const filtered = buildDiscussionSchedule(absences, classNames, presets, 4)
+    const filteredNames = filtered?.slots
+      .flatMap(slot => slot.assignments)
+      .flatMap(item => item.assignedTeachers ?? [])
+      .map(teacher => teacher.name)
+
+    expect(filtered?.minStudents).toBe(4)
+    expect(filteredNames).not.toContain('Liten Lærer')
+    expect(filteredNames).toContain('Kontakt Lærer')
+    expect(filteredNames).toContain('Stor Lærer')
+  })
+
   it('renders the schedule as the final print section', () => {
     const classNames = ['1A', '1B']
     const absences = classNames.map(className => absence(className, `Lærer ${className}`, 1))
