@@ -687,13 +687,6 @@ export function buildDiscussionSchedule(
   return { rooms, slots, warnings, minStudents, maxMeetings }
 }
 
-function buildTableActionsHtml(tableId: string, filenameBase: string): string {
-  return `<div class="no-print copy-row">
-        <button type="button" onclick="copyScheduleTable(this, '${tableId}')">Kopier tabell</button>
-        <button type="button" onclick="exportTableToExcel(this, '${tableId}', '${escapeHtml(sanitizeFilenamePart(filenameBase))}')">Last ned Excel</button>
-      </div>`
-}
-
 function buildDiscussionScheduleHtml(
   schedule: DiscussionSchedule,
   anonymization: AnonymizationMap | null
@@ -702,6 +695,12 @@ function buildDiscussionScheduleHtml(
     .map(
       (room, index) =>
         `<th><span class="room-number">Rom ${index + 1}</span><span class="room-adviser">${personSpan(room.adviser, anonymization)}</span></th>`
+    )
+    .join('')
+  const editableTeacherHeaders = schedule.rooms
+    .map(
+      (room, index) =>
+        `<th><span class="room-number editable-room-number" contenteditable="true" spellcheck="false" aria-label="Rediger romnavn">Rom ${index + 1}</span><span class="room-adviser">${personSpan(room.adviser, anonymization)}</span></th>`
     )
     .join('')
 
@@ -746,7 +745,7 @@ function buildDiscussionScheduleHtml(
                   index === teacher.placedSlotIndex ? `<u>${count}</u>` : `${count}`
                 )
                 .join(' / ')
-              const content = `${personSpan(teacher.name, anonymization)} (${counts})${teacher.isContactTeacher ? ' <em>(kontaktlærer)</em>' : ''}`
+              const content = `${personSpan(teacher.name, anonymization)}<span class="paren"> (${counts})</span>${teacher.isContactTeacher ? '<span class="paren"> <em>(kontaktlærer)</em></span>' : ''}`
               return `<li>${isEmphasizedTeacher(teacher) ? `<b>${content}</b>` : content}</li>`
             })
             .join('')
@@ -754,7 +753,7 @@ function buildDiscussionScheduleHtml(
           const contactCount = assigned.filter(teacher => teacher.isContactTeacher).length
           const otherCount = assigned.length - contactCount
           return `<td>
-            <strong>${escapeHtml(assignment.className)} (${contactCount}+${otherCount})</strong>
+            <strong>${escapeHtml(assignment.className)}<span class="paren"> (${contactCount}+${otherCount})</span></strong>
             ${teachers ? `<ul class="schedule-teachers">${teachers}</ul>` : '<span>Ingen lærere</span>'}
           </td>`
         })
@@ -774,8 +773,12 @@ function buildDiscussionScheduleHtml(
       <h2>Forslag til tidsplan for klasselærerråd</h2>
       <p class="meta">Rommene følger rådgiverne. Planen bruker færrest mulige tidsluker, fordeler klassene jevnt og minimerer lærerkonflikter vektet etter antall elever.</p>
       ${warnings}
-      ${buildTableActionsHtml('discussion-schedule-table', 'tidsplan_klasselaererrad')}
-      <table id="discussion-schedule-table" class="schedule-table">
+      <div class="no-print copy-row">
+        <button type="button" onclick="copyScheduleTable(this, 'discussion-schedule-table')">Kopier tabell</button>
+        <button type="button" onclick="exportTableToExcel(this, 'discussion-schedule-table', 'tidsplan_klasselaererrad')">Last ned Excel</button>
+        <label class="toggle-option"><input type="checkbox" onchange="toggleCollisions(this)"> Vis kollisjoner</label>
+      </div>
+      <table id="discussion-schedule-table" class="schedule-table hide-collisions">
         <thead>
           <tr>
             <th class="schedule-time">Tid</th>
@@ -797,12 +800,14 @@ function buildDiscussionScheduleHtml(
       <div class="no-print copy-row">
         <button type="button" onclick="copyScheduleTable(this, 'teacher-schedule-table')">Kopier tabell</button>
         <button type="button" onclick="exportTableToExcel(this, 'teacher-schedule-table', 'laererfordeling_tidsluke')">Last ned Excel</button>
+        <label class="toggle-option"><input type="checkbox" onchange="toggleParentheses(this, 'teacher-schedule-table')"> Vis tall i parentes</label>
+        <span class="room-edit-hint">Klikk på et romnavn for å endre det.</span>
       </div>
-      <table id="teacher-schedule-table" class="schedule-table teacher-schedule-table">
+      <table id="teacher-schedule-table" class="schedule-table teacher-schedule-table hide-paren">
         <thead>
           <tr>
             <th class="schedule-time">Tid</th>
-            ${headers}
+            ${editableTeacherHeaders}
           </tr>
         </thead>
         <tbody>${teacherRows}</tbody>
@@ -1039,6 +1044,18 @@ export function buildTeacherMatrixHtml(
     text-align: left;
     font-weight: 700;
   }
+  .editable-room-number {
+    cursor: text;
+  }
+  .editable-room-number:hover,
+  .editable-room-number:focus {
+    outline: 1px dashed #000;
+    outline-offset: 1px;
+  }
+  .room-edit-hint {
+    margin-left: 3mm;
+    font-size: 9pt;
+  }
   .schedule-table .schedule-time {
     width: 16mm;
     vertical-align: middle;
@@ -1049,6 +1066,9 @@ export function buildTeacherMatrixHtml(
     font-size: 6.5pt;
     font-weight: 400;
     line-height: 1.2;
+  }
+  .schedule-table.hide-collisions .schedule-collision-summary {
+    display: none;
   }
   .schedule-table .room-number,
   .schedule-table .room-adviser,
@@ -1121,6 +1141,7 @@ export function buildTeacherMatrixHtml(
     font-size: 9pt;
     cursor: pointer;
   }
+  .hide-paren .paren { display: none; }
   .meeting-table .meeting-teacher {
     width: 45mm;
     vertical-align: middle;
@@ -1137,6 +1158,7 @@ export function buildTeacherMatrixHtml(
   @media print {
     body { padding: 0; }
     .no-print { display: none; }
+    .editable-room-number { outline: none; }
   }
 </style>
 </head>
@@ -1154,6 +1176,18 @@ export function buildTeacherMatrixHtml(
       clone.setAttribute('border', '1');
       clone.style.borderCollapse = 'collapse';
       clone.removeAttribute('style');
+      if (table.className.indexOf('hide-paren') >= 0) {
+        var hidden = clone.querySelectorAll('.paren');
+        for (var h = hidden.length - 1; h >= 0; h -= 1) {
+          hidden[h].parentNode.removeChild(hidden[h]);
+        }
+      }
+      if (table.className.indexOf('hide-collisions') >= 0) {
+        var collisionSummaries = clone.querySelectorAll('.schedule-collision-summary');
+        for (var c = collisionSummaries.length - 1; c >= 0; c -= 1) {
+          collisionSummaries[c].parentNode.removeChild(collisionSummaries[c]);
+        }
+      }
       var slanted = clone.querySelectorAll('th.slant');
       for (var s = 0; s < slanted.length; s += 1) {
         slanted[s].textContent = slanted[s].textContent.trim();
@@ -1207,8 +1241,10 @@ export function buildTeacherMatrixHtml(
           if (items.length > 0) {
             var parts = [];
             var heading = cell.querySelector('strong');
-            if (heading) parts.push(heading.textContent.trim());
-            for (var k = 0; k < items.length; k += 1) parts.push(items[k].textContent.trim());
+            if (heading) parts.push((heading.innerText || heading.textContent || '').trim());
+            for (var k = 0; k < items.length; k += 1) {
+              parts.push((items[k].innerText || items[k].textContent || '').trim());
+            }
             values.push(parts.join('\\n'));
           } else {
             values.push((cell.innerText || cell.textContent || '').replace(/\\s*\\n\\s*/g, '\\n').trim());
@@ -1265,6 +1301,26 @@ export function buildTeacherMatrixHtml(
         cells[i].textContent = show
           ? cells[i].getAttribute('data-count')
           : cells[i].getAttribute('data-plain');
+      }
+    }
+
+    function toggleParentheses(checkbox, tableId) {
+      var table = document.getElementById(tableId);
+      if (!table) return;
+      if (checkbox.checked) {
+        table.className = table.className.replace(/\\s*hide-paren/g, '');
+      } else if (table.className.indexOf('hide-paren') < 0) {
+        table.className += ' hide-paren';
+      }
+    }
+
+    function toggleCollisions(checkbox) {
+      var table = document.getElementById('discussion-schedule-table');
+      if (!table) return;
+      if (checkbox.checked) {
+        table.className = table.className.replace(/\\s*hide-collisions/g, '');
+      } else if (table.className.indexOf('hide-collisions') < 0) {
+        table.className += ' hide-collisions';
       }
     }
 
