@@ -14,6 +14,8 @@ const TEACHER_COLUMN_MM = 42
 const HEADER_HEIGHT_MM = 30
 const MAX_COLUMN_MM = 7.5
 const MIN_COLUMN_MM = 4.5
+const SLOT_SYNC_GROUP = 'slot'
+const ROOM_SYNC_GROUP = 'room'
 const FEW_STUDENTS_LIMIT = 5
 const MAX_CLASS_RANK = 10
 
@@ -687,25 +689,42 @@ export function buildDiscussionSchedule(
   return { rooms, slots, warnings, minStudents, maxMeetings }
 }
 
+function syncedLabelHtml(
+  group: string,
+  index: number,
+  text: string,
+  options: { editable: boolean; className?: string; ariaLabel?: string }
+): string {
+  const classes = ['sync-label', options.className, options.editable ? 'editable-label' : null]
+    .filter(Boolean)
+    .join(' ')
+  const editableAttrs = options.editable
+    ? ` contenteditable="true" spellcheck="false" oninput="syncLabel(this)" aria-label="${escapeHtml(options.ariaLabel ?? 'Rediger navn')}"`
+    : ''
+  return `<span class="${classes}" data-sync-group="${group}" data-sync-index="${index}"${editableAttrs}>${escapeHtml(text)}</span>`
+}
+
 function buildDiscussionScheduleHtml(
   schedule: DiscussionSchedule,
   anonymization: AnonymizationMap | null
 ): string {
-  const headers = schedule.rooms
-    .map(
-      (room, index) =>
-        `<th><span class="room-number">Rom ${index + 1}</span><span class="room-adviser">${personSpan(room.adviser, anonymization)}</span></th>`
-    )
-    .join('')
-  const editableTeacherHeaders = schedule.rooms
-    .map(
-      (room, index) =>
-        `<th><span class="room-number editable-room-number" contenteditable="true" spellcheck="false" aria-label="Rediger romnavn">Rom ${index + 1}</span><span class="room-adviser">${personSpan(room.adviser, anonymization)}</span></th>`
-    )
-    .join('')
+  const roomHeaders = (editable: boolean): string =>
+    schedule.rooms
+      .map(
+        (room, index) =>
+          `<th>${syncedLabelHtml(ROOM_SYNC_GROUP, index, `Rom ${index + 1}`, {
+            editable,
+            className: 'room-number',
+            ariaLabel: 'Rediger romnavn',
+          })}<span class="room-adviser">${personSpan(room.adviser, anonymization)}</span></th>`
+      )
+      .join('')
+
+  const headers = roomHeaders(false)
+  const editableTeacherHeaders = roomHeaders(true)
 
   const rows = schedule.slots
-    .map(slot => {
+    .map((slot, slotIndex) => {
       const teacherOccurrences = new Map<string, number>()
       slot.assignments.forEach(assignment => {
         (assignment.teacherKeys ?? []).forEach(teacher => {
@@ -728,12 +747,14 @@ function buildDiscussionScheduleHtml(
           </td>`
         })
         .join('')
-      return `<tr><th scope="row">${escapeHtml(slot.label)}<span class="schedule-collision-summary">${teacherOccurrences.size} total · ${teachersWithoutCollisions} u/kollisjon · ${teachersWithCollisions} m/kollisjon</span></th>${cells}</tr>`
+      return `<tr><th scope="row">${syncedLabelHtml(SLOT_SYNC_GROUP, slotIndex, slot.label, {
+        editable: false,
+      })}<span class="schedule-collision-summary">${teacherOccurrences.size} total · ${teachersWithoutCollisions} u/kollisjon · ${teachersWithCollisions} m/kollisjon</span></th>${cells}</tr>`
     })
     .join('')
 
   const teacherRows = schedule.slots
-    .map(slot => {
+    .map((slot, slotIndex) => {
       const cells = schedule.rooms
         .map(room => {
           const assignment = slot.assignments.find(item => item.adviser === room.adviser)
@@ -758,7 +779,10 @@ function buildDiscussionScheduleHtml(
           </td>`
         })
         .join('')
-      return `<tr><th scope="row">${escapeHtml(slot.label)}</th>${cells}</tr>`
+      return `<tr><th scope="row">${syncedLabelHtml(SLOT_SYNC_GROUP, slotIndex, slot.label, {
+        editable: true,
+        ariaLabel: 'Rediger navn på tidsluke',
+      })}</th>${cells}</tr>`
     })
     .join('')
 
@@ -801,7 +825,7 @@ function buildDiscussionScheduleHtml(
         <button type="button" onclick="copyScheduleTable(this, 'teacher-schedule-table')">Kopier tabell</button>
         <button type="button" onclick="exportTableToExcel(this, 'teacher-schedule-table', 'laererfordeling_tidsluke')">Last ned Excel</button>
         <label class="toggle-option"><input type="checkbox" onchange="toggleParentheses(this, 'teacher-schedule-table')"> Vis tall i parentes</label>
-        <span class="room-edit-hint">Klikk på et romnavn for å endre det.</span>
+        <span class="room-edit-hint">Klikk på et rom- eller tidsnavn for å endre det. Endringen oppdateres i alle tabellene.</span>
       </div>
       <table id="teacher-schedule-table" class="schedule-table teacher-schedule-table hide-paren">
         <thead>
@@ -822,7 +846,7 @@ function buildTeacherMeetingOverviewHtml(
   anonymization: AnonymizationMap | null
 ): string {
   const headerCells = overview.slotLabels
-    .map(label => `<th>${escapeHtml(label)}</th>`)
+    .map((label, index) => `<th>${syncedLabelHtml(SLOT_SYNC_GROUP, index, label, { editable: false })}</th>`)
     .join('')
 
   const bodyRows = overview.teachers
@@ -1044,11 +1068,11 @@ export function buildTeacherMatrixHtml(
     text-align: left;
     font-weight: 700;
   }
-  .editable-room-number {
+  .editable-label {
     cursor: text;
   }
-  .editable-room-number:hover,
-  .editable-room-number:focus {
+  .editable-label:hover,
+  .editable-label:focus {
     outline: 1px dashed #000;
     outline-offset: 1px;
   }
@@ -1158,7 +1182,7 @@ export function buildTeacherMatrixHtml(
   @media print {
     body { padding: 0; }
     .no-print { display: none; }
-    .editable-room-number { outline: none; }
+    .editable-label { outline: none; }
   }
 </style>
 </head>
@@ -1314,6 +1338,19 @@ export function buildTeacherMatrixHtml(
       }
     }
 
+    function syncLabel(source) {
+      var group = source.getAttribute('data-sync-group');
+      var index = source.getAttribute('data-sync-index');
+      if (group === null || index === null) return;
+      var text = (source.innerText || source.textContent || '').replace(/\\s+/g, ' ').trim();
+      var selector = '[data-sync-group="' + group + '"][data-sync-index="' + index + '"]';
+      var targets = document.querySelectorAll(selector);
+      for (var i = 0; i < targets.length; i += 1) {
+        if (targets[i] === source) continue;
+        targets[i].textContent = text;
+      }
+    }
+
     function toggleCollisions(checkbox) {
       var table = document.getElementById('discussion-schedule-table');
       if (!table) return;
@@ -1355,6 +1392,16 @@ export function buildTeacherMatrixHtml(
         setTimeout(function () { button.textContent = originalLabel; }, 2000);
       });
     }
+
+    document.addEventListener('paste', function (event) {
+      var target = event.target;
+      if (!target || !target.className || String(target.className).indexOf('editable-label') < 0) return;
+      event.preventDefault();
+      var clipboard = event.clipboardData || window.clipboardData;
+      var text = clipboard ? clipboard.getData('text') : '';
+      document.execCommand('insertText', false, text.replace(/\\s+/g, ' ').trim());
+      syncLabel(target);
+    });
   </script>
 </body>
 </html>`
