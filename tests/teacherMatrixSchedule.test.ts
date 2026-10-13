@@ -211,6 +211,35 @@ describe('teacher discussion scheduling', () => {
     expect(filteredNames).toContain('Stor Lærer')
   })
 
+  it('limits meetings by student count, keeps contact classes, and breaks ties alphabetically', () => {
+    const classNames = ['1A', '1B', '1C', '1D']
+    const contactRecord = absence('1A', 'Felles Lærer', 1)
+    contactRecord.kontaktlaerer = 'Felles Lærer'
+    const absences = [
+      contactRecord,
+      ...Array.from({ length: 5 }, (_, index) => absence('1B', 'Felles Lærer', index + 10)),
+      ...Array.from({ length: 5 }, (_, index) => absence('1C', 'Felles Lærer', index + 20)),
+      ...Array.from({ length: 3 }, (_, index) => absence('1D', 'Felles Lærer', index + 30)),
+    ]
+    const presets = classNames.flatMap(className => [
+      preset(`Rådgiver ${className}`, 'Rådgiver', [className]),
+      preset(`Leder ${className}`, 'Avdelingsleder', [className]),
+    ])
+
+    const schedule = buildDiscussionSchedule(absences, classNames, presets, null, 2)
+    const teacherClasses = schedule?.slots
+      .flatMap(slot => slot.assignments)
+      .filter(assignment => assignment.teacherKeys?.some(key => key.includes('felles')))
+      .map(assignment => assignment.className)
+      .sort()
+
+    expect(schedule?.maxMeetings).toBe(2)
+    expect(teacherClasses).toEqual(['1A', '1B'])
+    const overview = buildTeacherMeetingOverview(schedule!)
+    expect(overview.teachers.find(teacher => teacher.name === 'Felles Lærer')?.total)
+      .toBeLessThanOrEqual(2)
+  })
+
   it('renders the schedule as the final print section', () => {
     const classNames = ['1A', '1B']
     const absences = classNames.map(className => absence(className, `Lærer ${className}`, 1))
@@ -221,30 +250,74 @@ describe('teacher discussion scheduling', () => {
       preset('Leder B', 'Trinnleder', ['1B']),
     ]
     const sections = buildTeacherMatrixSections(absences, classNames)
-    const overview = buildTeacherClassRankOverview(absences, sections)
     const schedule = buildDiscussionSchedule(absences, classNames, presets)
 
-    const html = buildTeacherMatrixHtml(sections, overview, schedule)
+    const html = buildTeacherMatrixHtml(sections, schedule)
 
-    expect(html.lastIndexOf('Forslag til tidsplan for klasselærerråd'))
-      .toBeGreaterThan(html.lastIndexOf('Lærernes klassefordeling'))
+    expect(html).not.toContain('Lærernes klassefordeling')
+    expect(html).toContain('Forslag til tidsplan for klasselærerråd')
     expect(html).toContain('Rom 1')
-    expect(html).toContain('Trinnleder/avdelingsleder: Leder A')
+    expect(html).toContain('Trinnleder/avdelingsleder: <span class="pname" data-real="Leder A" data-anon="Leder 1">Leder A</span>')
     expect(html).toContain('u/kollisjon')
     expect(html).toContain('m/kollisjon')
     expect(html).toContain('total ·')
     expect(html).toContain('Lærerfordeling per tidsluke')
-    expect(html).toContain('<b>Lærer 1A (<u>1</u> / 0)</b>')
+    expect(html).toContain('<strong>1A (0+1)</strong>')
+    expect(html).toContain('<b><span class="pname" data-real="Lærer 1A" data-anon="Lærer 1">Lærer 1A</span> (<u>1</u> / 0)</b>')
     expect(html).toContain('id="discussion-schedule-table"')
     expect(html).toContain('id="teacher-schedule-table"')
     expect(html).toContain("copyScheduleTable(this, 'discussion-schedule-table')")
     expect(html).toContain("copyScheduleTable(this, 'teacher-schedule-table')")
     expect(html).toContain('Møteoversikt per lærer')
     expect(html).toContain('id="teacher-meeting-table"')
-    expect(html).toContain('id="teacher-meeting-excel"')
     expect(html).toContain("copyScheduleTable(this, 'teacher-meeting-table')")
     expect(html).toContain('toggleMeetingCounts(this)')
     expect(html).toContain('Vis antall elever')
     expect(html).toContain('data-count=')
+  })
+
+  it('offers anonymisation plus copy and Excel export on every table', () => {
+    const classNames = ['1A', '1B']
+    const absences = [
+      absence('1A', 'Anne Berg', 1),
+      absence('1B', 'Bjørn Dahl', 2),
+    ]
+    const presets = [
+      preset('Rådgiver A', 'Rådgiver', ['1A']),
+      preset('Rådgiver B', 'Rådgiver', ['1B']),
+      preset('Leder A', 'Avdelingsleder', ['1A']),
+      preset('Leder B', 'Trinnleder', ['1B']),
+    ]
+    const sections = buildTeacherMatrixSections(absences, classNames)
+    const schedule = buildDiscussionSchedule(absences, classNames, presets)
+
+    const html = buildTeacherMatrixHtml(sections, schedule)
+
+    expect(html).toContain('toggleAnonymous(this)')
+    expect(html).toContain('Anonymiser')
+    expect(html).toContain('data-anon="Elev 1"')
+    expect(html).toContain('data-anon="Lærer 1"')
+    expect(html).toContain('data-anon="Rådgiver 1"')
+    expect(html).toContain('data-anon="Leder 1"')
+
+    const tableIds = [
+      'matrix-table-0',
+      'matrix-table-1',
+      'discussion-schedule-table',
+      'teacher-schedule-table',
+      'teacher-meeting-table',
+    ]
+    tableIds.forEach(tableId => {
+      expect(html).toContain(`id="${tableId}"`)
+      if (tableId.startsWith('matrix-table-')) {
+        expect(html).not.toContain(`copyTableAsPng(this, '${tableId}')`)
+        expect(html).not.toContain(`copyScheduleTable(this, '${tableId}')`)
+        expect(html).not.toContain(`exportTableToExcel(this, '${tableId}'`)
+      } else {
+        expect(html).toContain(`copyScheduleTable(this, '${tableId}')`)
+        expect(html).toContain(`exportTableToExcel(this, '${tableId}'`)
+      }
+    })
+    expect(html).not.toContain('renderTablePng')
   })
 })

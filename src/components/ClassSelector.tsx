@@ -9,7 +9,7 @@ interface ClassSelectorProps {
   onPrintGruppeliste?: () => void
   onExportOppfolgingsark?: () => void
   onExportKlasseradsskjema?: () => void
-  onPrintLaererliste?: (minStudents: number | null) => void
+  onPrintLaererliste?: (minStudents: number | null, maxMeetings: number | null) => void
 }
 
 function ClassSelector({
@@ -29,12 +29,19 @@ function ClassSelector({
 
   const [showLaererlisteOptions, setShowLaererlisteOptions] = useState(false)
   const [minStudentsInput, setMinStudentsInput] = useState('')
+  const [maxMeetingsInput, setMaxMeetingsInput] = useState('')
 
   const startLaererliste = () => {
-    const parsed = Number.parseInt(minStudentsInput, 10)
-    const minStudents = Number.isFinite(parsed) && parsed > 0 ? parsed : null
+    const parsedMinStudents = Number.parseInt(minStudentsInput, 10)
+    const minStudents = Number.isFinite(parsedMinStudents) && parsedMinStudents > 0
+      ? parsedMinStudents
+      : null
+    const parsedMaxMeetings = Number.parseInt(maxMeetingsInput, 10)
+    const maxMeetings = Number.isFinite(parsedMaxMeetings) && parsedMaxMeetings > 0
+      ? parsedMaxMeetings
+      : null
     setShowLaererlisteOptions(false)
-    onPrintLaererliste?.(minStudents)
+    onPrintLaererliste?.(minStudents, maxMeetings)
   }
 
   const { vg1, vg2, vg3, other } = useMemo(() => {
@@ -205,6 +212,24 @@ function ClassSelector({
                   />
                   <p className="text-[11px] leading-snug text-slate-600">
                     Lærere med færre elever enn dette slipper møtet. Kontaktlærere deltar alltid. Tomt felt = ingen filter.
+                  </p>
+                  <label htmlFor="max-meetings" className="block text-xs font-semibold text-slate-700">
+                    Maksimum antall møter
+                  </label>
+                  <input
+                    id="max-meetings"
+                    type="number"
+                    min={1}
+                    value={maxMeetingsInput}
+                    placeholder="Ingen grense"
+                    onChange={event => setMaxMeetingsInput(event.target.value)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter') startLaererliste()
+                    }}
+                    className="w-full px-2 py-1.5 text-sm rounded-lg border border-slate-300 bg-white"
+                  />
+                  <p className="text-[11px] leading-snug text-slate-600">
+                    Ved for mange møter beholdes klassene med flest elever. Ved likt elevtall prioriteres klassen alfabetisk. Kontaktlærermøter beholdes alltid.
                   </p>
                   <div className="flex gap-2">
                     <button

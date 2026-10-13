@@ -1504,9 +1504,18 @@ function App() {
     )
   }
 
-  const handlePrintLaererliste = (minStudents: number | null) => {
+  const handlePrintLaererliste = (
+    minStudents: number | null,
+    maxMeetings: number | null
+  ) => {
     if (selectedClasses.length === 0) return
-    const opened = printTeacherMatrix(data.absences, selectedClasses, presets, minStudents)
+    const opened = printTeacherMatrix(
+      data.absences,
+      selectedClasses,
+      presets,
+      minStudents,
+      maxMeetings
+    )
     if (!opened) {
       window.alert('Kunne ikke åpne utskriftsvinduet. Sjekk at popup-blokkering er slått av, og at valgte klasser har lærerdata.')
     }

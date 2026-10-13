@@ -1,5 +1,6 @@
 import type { AbsenceRecord, PresetRecord } from './types'
 import { normalizeMatch } from './studentInfoUtils'
+import { sanitizeFilenamePart } from './securityUtils'
 import { todayDdMmYyyy } from './dateUtils'
 
 export interface TeacherMatrixSection {
@@ -40,6 +41,7 @@ export interface DiscussionSchedule {
   slots: Array<{ label: string; assignments: DiscussionAssignment[] }>
   warnings: string[]
   minStudents: number | null
+  maxMeetings: number | null
 }
 
 export interface TeacherMeetingOverview {
@@ -109,6 +111,32 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
+}
+
+export interface AnonymizationMap {
+  lookup: Map<string, string>
+}
+
+function createAnonymizationMap(
+  groups: Array<{ label: string; names: string[] }>
+): AnonymizationMap {
+  const lookup = new Map<string, string>()
+  groups.forEach(group => {
+    Array.from(new Set(group.names.map(name => name.trim()).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, 'nb', { sensitivity: 'base' }))
+      .forEach((name, index) => {
+        const key = normalizeMatch(name)
+        if (!lookup.has(key)) lookup.set(key, `${group.label} ${index + 1}`)
+      })
+  })
+  return { lookup }
+}
+
+function personSpan(name: string, anonymization: AnonymizationMap | null): string {
+  const real = escapeHtml(name)
+  const anonymous = anonymization?.lookup.get(normalizeMatch(name))
+  if (!anonymous) return real
+  return `<span class="pname" data-real="${real}" data-anon="${escapeHtml(anonymous)}">${real}</span>`
 }
 
 export function buildTeacherMatrixSections(
@@ -240,7 +268,8 @@ function buildDiscussionClasses(
   absences: AbsenceRecord[],
   classNames: string[],
   presets: PresetRecord[],
-  minStudents: number | null = null
+  minStudents: number | null = null,
+  maxMeetings: number | null = null
 ): { classes: DiscussionClass[]; warnings: string[] } {
   const warnings: string[] = []
   const classes = [...new Set(classNames)]
@@ -326,6 +355,42 @@ function buildDiscussionClasses(
         contactTeacherKeys,
       }
     })
+
+  if (maxMeetings !== null) {
+    const teacherKeys = new Set(classes.flatMap(item => Array.from(item.teacherNames.keys())))
+
+    teacherKeys.forEach(teacherKey => {
+      const memberships = classes.filter(item => item.teacherNames.has(teacherKey))
+      if (memberships.length <= maxMeetings) return
+
+      const contactClasses = memberships.filter(item => item.contactTeacherKeys.has(teacherKey))
+      const otherClasses = memberships
+        .filter(item => !item.contactTeacherKeys.has(teacherKey))
+        .sort(
+          (a, b) =>
+            (b.teacherWeights.get(teacherKey) ?? 0) - (a.teacherWeights.get(teacherKey) ?? 0) ||
+            a.className.localeCompare(b.className, 'nb', { sensitivity: 'base', numeric: true })
+        )
+      const availableOtherMeetings = Math.max(0, maxMeetings - contactClasses.length)
+      const keptClasses = new Set([
+        ...contactClasses,
+        ...otherClasses.slice(0, availableOtherMeetings),
+      ])
+
+      memberships.forEach(item => {
+        if (keptClasses.has(item)) return
+        item.teacherWeights.delete(teacherKey)
+        item.teacherNames.delete(teacherKey)
+      })
+
+      if (contactClasses.length > maxMeetings) {
+        const teacherName = contactClasses[0].teacherNames.get(teacherKey) ?? teacherKey
+        warnings.push(
+          `${teacherName}: har ${contactClasses.length} kontaktlærermøter og kan derfor ikke begrenses til ${maxMeetings} møter.`
+        )
+      }
+    })
+  }
 
   return { classes, warnings }
 }
@@ -591,9 +656,16 @@ export function buildDiscussionSchedule(
   absences: AbsenceRecord[],
   classNames: string[],
   presets: PresetRecord[],
-  minStudents: number | null = null
+  minStudents: number | null = null,
+  maxMeetings: number | null = null
 ): DiscussionSchedule | null {
-  const { classes, warnings } = buildDiscussionClasses(absences, classNames, presets, minStudents)
+  const { classes, warnings } = buildDiscussionClasses(
+    absences,
+    classNames,
+    presets,
+    minStudents,
+    maxMeetings
+  )
   if (classes.length === 0) return null
 
   const colors = improveDiscussionSchedule(colorDiscussionClasses(classes), classes)
@@ -612,14 +684,24 @@ export function buildDiscussionSchedule(
     )
     .map((assignments, slotIndex) => ({ label: `Tid ${slotIndex + 1}`, assignments }))
 
-  return { rooms, slots, warnings, minStudents }
+  return { rooms, slots, warnings, minStudents, maxMeetings }
 }
 
-function buildDiscussionScheduleHtml(schedule: DiscussionSchedule): string {
+function buildTableActionsHtml(tableId: string, filenameBase: string): string {
+  return `<div class="no-print copy-row">
+        <button type="button" onclick="copyScheduleTable(this, '${tableId}')">Kopier tabell</button>
+        <button type="button" onclick="exportTableToExcel(this, '${tableId}', '${escapeHtml(sanitizeFilenamePart(filenameBase))}')">Last ned Excel</button>
+      </div>`
+}
+
+function buildDiscussionScheduleHtml(
+  schedule: DiscussionSchedule,
+  anonymization: AnonymizationMap | null
+): string {
   const headers = schedule.rooms
     .map(
       (room, index) =>
-        `<th><span class="room-number">Rom ${index + 1}</span><span class="room-adviser">${escapeHtml(room.adviser)}</span></th>`
+        `<th><span class="room-number">Rom ${index + 1}</span><span class="room-adviser">${personSpan(room.adviser, anonymization)}</span></th>`
     )
     .join('')
 
@@ -638,11 +720,11 @@ function buildDiscussionScheduleHtml(schedule: DiscussionSchedule): string {
           const assignment = slot.assignments.find(item => item.adviser === room.adviser)
           if (!assignment) return '<td class="schedule-empty"></td>'
           const leaders = assignment.leaders.length > 0
-            ? assignment.leaders.map(escapeHtml).join(', ')
+            ? assignment.leaders.map(leader => personSpan(leader, anonymization)).join(', ')
             : 'Mangler i preset'
           return `<td>
             <strong>${escapeHtml(assignment.className)}</strong>
-            <span>Rådgiver: ${escapeHtml(assignment.adviser)}</span>
+            <span>Rådgiver: ${personSpan(assignment.adviser, anonymization)}</span>
             <span>Trinnleder/avdelingsleder: ${leaders}</span>
           </td>`
         })
@@ -664,12 +746,15 @@ function buildDiscussionScheduleHtml(schedule: DiscussionSchedule): string {
                   index === teacher.placedSlotIndex ? `<u>${count}</u>` : `${count}`
                 )
                 .join(' / ')
-              const content = `${escapeHtml(teacher.name)} (${counts})${teacher.isContactTeacher ? ' <em>(kontaktlærer)</em>' : ''}`
+              const content = `${personSpan(teacher.name, anonymization)} (${counts})${teacher.isContactTeacher ? ' <em>(kontaktlærer)</em>' : ''}`
               return `<li>${isEmphasizedTeacher(teacher) ? `<b>${content}</b>` : content}</li>`
             })
             .join('')
+          const assigned = assignment.assignedTeachers ?? []
+          const contactCount = assigned.filter(teacher => teacher.isContactTeacher).length
+          const otherCount = assigned.length - contactCount
           return `<td>
-            <strong>${escapeHtml(assignment.className)}</strong>
+            <strong>${escapeHtml(assignment.className)} (${contactCount}+${otherCount})</strong>
             ${teachers ? `<ul class="schedule-teachers">${teachers}</ul>` : '<span>Ingen lærere</span>'}
           </td>`
         })
@@ -689,9 +774,7 @@ function buildDiscussionScheduleHtml(schedule: DiscussionSchedule): string {
       <h2>Forslag til tidsplan for klasselærerråd</h2>
       <p class="meta">Rommene følger rådgiverne. Planen bruker færrest mulige tidsluker, fordeler klassene jevnt og minimerer lærerkonflikter vektet etter antall elever.</p>
       ${warnings}
-      <div class="no-print copy-row">
-        <button type="button" onclick="copyScheduleTable(this, 'discussion-schedule-table')">Kopier tabell</button>
-      </div>
+      ${buildTableActionsHtml('discussion-schedule-table', 'tidsplan_klasselaererrad')}
       <table id="discussion-schedule-table" class="schedule-table">
         <thead>
           <tr>
@@ -702,13 +785,18 @@ function buildDiscussionScheduleHtml(schedule: DiscussionSchedule): string {
         <tbody>${rows}</tbody>
       </table>
       <h3 class="schedule-subtitle">Lærerfordeling per tidsluke</h3>
-      <p class="meta">Kontaktlærere er plassert i egen klasse. Andre lærere er plassert i klassen der de har flest elever i den aktuelle tidsluken. Tallene i parentes viser antall elever læreren har i hver av klassene i tidsluken (samme rekkefølge som kolonnene), og det understrekede tallet er klassen læreren er plassert i.${
+      <p class="meta">Tallene bak klassenavnet viser antall kontaktlærere + antall øvrige lærere. Kontaktlærere er plassert i egen klasse. Andre lærere er plassert i klassen der de har flest elever i den aktuelle tidsluken. Tallene i parentes viser antall elever læreren har i hver av klassene i tidsluken (samme rekkefølge som kolonnene), og det understrekede tallet er klassen læreren er plassert i.${
         schedule.minStudents !== null
           ? ` Filter: lærere med færre enn ${schedule.minStudents} elever i en klasse er utelatt (kontaktlærere deltar alltid).`
+          : ''
+      }${
+        schedule.maxMeetings !== null
+          ? ` Maks ${schedule.maxMeetings} møter per lærer; klassene med flest elever prioriteres, deretter klassenavn alfabetisk. Kontaktlærermøter beholdes alltid.`
           : ''
       }</p>
       <div class="no-print copy-row">
         <button type="button" onclick="copyScheduleTable(this, 'teacher-schedule-table')">Kopier tabell</button>
+        <button type="button" onclick="exportTableToExcel(this, 'teacher-schedule-table', 'laererfordeling_tidsluke')">Last ned Excel</button>
       </div>
       <table id="teacher-schedule-table" class="schedule-table teacher-schedule-table">
         <thead>
@@ -719,12 +807,15 @@ function buildDiscussionScheduleHtml(schedule: DiscussionSchedule): string {
         </thead>
         <tbody>${teacherRows}</tbody>
       </table>
-      ${buildTeacherMeetingOverviewHtml(buildTeacherMeetingOverview(schedule))}
+      ${buildTeacherMeetingOverviewHtml(buildTeacherMeetingOverview(schedule), anonymization)}
     </section>
   `
 }
 
-function buildTeacherMeetingOverviewHtml(overview: TeacherMeetingOverview): string {
+function buildTeacherMeetingOverviewHtml(
+  overview: TeacherMeetingOverview,
+  anonymization: AnonymizationMap | null
+): string {
   const headerCells = overview.slotLabels
     .map(label => `<th>${escapeHtml(label)}</th>`)
     .join('')
@@ -738,7 +829,7 @@ function buildTeacherMeetingOverviewHtml(overview: TeacherMeetingOverview): stri
           return `<td class="meeting-cell" data-plain="${escapeHtml(className)}" data-count="${escapeHtml(withCount)}">${escapeHtml(className)}</td>`
         })
         .join('')
-      return `<tr><th class="meeting-teacher" scope="row">${escapeHtml(teacher.name)}</th>${cells}<td class="meeting-total">${teacher.total}</td></tr>`
+      return `<tr><th class="meeting-teacher" scope="row">${personSpan(teacher.name, anonymization)}</th>${cells}<td class="meeting-total">${teacher.total}</td></tr>`
     })
     .join('')
 
@@ -747,7 +838,7 @@ function buildTeacherMeetingOverviewHtml(overview: TeacherMeetingOverview): stri
       <p class="meta">Klassen læreren skal møte i hver tidsluke. Siste kolonne viser totalt antall møter læreren skal delta på.</p>
       <div class="no-print copy-row">
         <button type="button" onclick="copyScheduleTable(this, 'teacher-meeting-table')">Kopier tabell</button>
-        <a id="teacher-meeting-excel" class="download-link" href="#" aria-disabled="true">Forbereder Excel …</a>
+        <button type="button" onclick="exportTableToExcel(this, 'teacher-meeting-table', 'moteoversikt_laerere')">Last ned Excel</button>
         <label class="toggle-option"><input type="checkbox" onchange="toggleMeetingCounts(this)"> Vis antall elever</label>
       </div>
       <table id="teacher-meeting-table" class="schedule-table meeting-table">
@@ -763,56 +854,21 @@ function buildTeacherMeetingOverviewHtml(overview: TeacherMeetingOverview): stri
   `
 }
 
-function buildRankOverviewHtml(overview: TeacherClassRankOverview): string {
-  const columnCount = overview.classes.length
-  const available = PAGE_CONTENT_WIDTH_MM - TEACHER_COLUMN_MM - HEADER_HEIGHT_MM
-  const columnMm = Math.max(MIN_COLUMN_MM, Math.min(MAX_COLUMN_MM, available / Math.max(columnCount, 1)))
-
-  const headerCells = overview.classes
-    .map(className => `<th class="slant"><div><span>${escapeHtml(className)}</span></div></th>`)
-    .join('')
-
-  const bodyRows = overview.teachers
-    .map(teacher => {
-      const cells = overview.classes
-        .map(className => {
-          const rank = teacher.ranks.get(className)
-          return `<td class="mark">${rank ?? ''}</td>`
-        })
-        .join('')
-      return `<tr><th class="teacher" scope="row">${escapeHtml(teacher.name)}</th>${cells}<td class="spacer"></td></tr>`
-    })
-    .join('')
-
-  return `
-    <section class="sheet page-break">
-      <h2>Lærernes klassefordeling</h2>
-      <p class="meta">1 = klassen læreren har flest elever i, opp til ${MAX_CLASS_RANK}. Tom celle = ingen elever.</p>
-      <table style="--col-width: ${columnMm.toFixed(2)}mm">
-        <thead>
-          <tr>
-            <th class="teacher corner"></th>
-            ${headerCells}
-            <th class="spacer"></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${bodyRows}
-        </tbody>
-      </table>
-    </section>
-  `
-}
-
-function buildSectionHtml(section: TeacherMatrixSection, isFirst: boolean): string {
+function buildSectionHtml(
+  section: TeacherMatrixSection,
+  isFirst: boolean,
+  index: number,
+  anonymization: AnonymizationMap | null
+): string {
   const columnCount = section.students.length
   const available = PAGE_CONTENT_WIDTH_MM - TEACHER_COLUMN_MM - HEADER_HEIGHT_MM
   const columnMm = Math.max(MIN_COLUMN_MM, Math.min(MAX_COLUMN_MM, available / Math.max(columnCount, 1)))
+  const tableId = `matrix-table-${index}`
 
   const headerCells = section.students
     .map(
       student =>
-        `<th class="slant"><div><span>${escapeHtml(student)}</span></div></th>`
+        `<th class="slant"><div><span>${personSpan(student, anonymization)}</span></div></th>`
     )
     .join('')
 
@@ -827,7 +883,7 @@ function buildSectionHtml(section: TeacherMatrixSection, isFirst: boolean): stri
         })
         .join('')
       const rowClass = studentCount <= FEW_STUDENTS_LIMIT ? ' class="few"' : ''
-      return `<tr${rowClass}><th class="teacher" scope="row"${rowStyle}>${escapeHtml(teacher.name)} (${studentCount})</th>${cells}<td class="spacer"${rowStyle}></td></tr>`
+      return `<tr${rowClass}><th class="teacher" scope="row"${rowStyle}>${personSpan(teacher.name, anonymization)} (${studentCount})</th>${cells}<td class="spacer"${rowStyle}></td></tr>`
     })
     .join('')
 
@@ -835,7 +891,7 @@ function buildSectionHtml(section: TeacherMatrixSection, isFirst: boolean): stri
     <section class="sheet${isFirst ? '' : ' page-break'}">
       <h2>Lærerliste klasselærerråd – ${escapeHtml(section.className)}</h2>
       <p class="meta">${section.teachers.length} lærere · ${columnCount} elever · ${escapeHtml(todayDdMmYyyy())}</p>
-      <table style="--col-width: ${columnMm.toFixed(2)}mm">
+      <table id="${tableId}" style="--col-width: ${columnMm.toFixed(2)}mm">
         <thead>
           <tr>
             <th class="teacher corner"></th>
@@ -853,14 +909,33 @@ function buildSectionHtml(section: TeacherMatrixSection, isFirst: boolean): stri
 
 export function buildTeacherMatrixHtml(
   sections: TeacherMatrixSection[],
-  rankOverview: TeacherClassRankOverview | null = null,
   discussionSchedule: DiscussionSchedule | null = null
 ): string {
   const title = 'Lærerliste klasselærerråd'
+  const anonymization = createAnonymizationMap([
+    { label: 'Elev', names: sections.flatMap(section => section.students) },
+    {
+      label: 'Lærer',
+      names: [
+        ...sections.flatMap(section => section.teachers.map(teacher => teacher.name)),
+        ...(discussionSchedule?.slots ?? [])
+          .flatMap(slot => slot.assignments)
+          .flatMap(assignment => (assignment.assignedTeachers ?? []).map(teacher => teacher.name)),
+      ],
+    },
+    { label: 'Rådgiver', names: (discussionSchedule?.rooms ?? []).map(room => room.adviser) },
+    {
+      label: 'Leder',
+      names: (discussionSchedule?.slots ?? [])
+        .flatMap(slot => slot.assignments)
+        .flatMap(assignment => assignment.leaders),
+    },
+  ])
   const body =
-    sections.map((section, index) => buildSectionHtml(section, index === 0)).join('') +
-    (rankOverview ? buildRankOverviewHtml(rankOverview) : '') +
-    (discussionSchedule ? buildDiscussionScheduleHtml(discussionSchedule) : '')
+    sections
+      .map((section, index) => buildSectionHtml(section, index === 0, index, anonymization))
+      .join('') +
+    (discussionSchedule ? buildDiscussionScheduleHtml(discussionSchedule, anonymization) : '')
 
   return `<!DOCTYPE html>
 <html lang="nb">
@@ -1028,25 +1103,17 @@ export function buildTeacherMatrixHtml(
   }
   .no-print { margin-bottom: 6mm; }
   .no-print.copy-row { margin: 2mm 0 0; }
+  .no-print.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 3mm;
+  }
   .no-print button {
     font: inherit;
     padding: 2mm 4mm;
     border: 1px solid #000;
     background: #fff;
     cursor: pointer;
-  }
-  .download-link {
-    display: inline-block;
-    margin-left: 3mm;
-    padding: 2mm 4mm;
-    border: 1px solid #000;
-    background: #fff;
-    color: #000;
-    text-decoration: none;
-  }
-  .download-link[aria-disabled="true"] {
-    opacity: 0.5;
-    pointer-events: none;
   }
   .toggle-option {
     display: inline-block;
@@ -1074,7 +1141,10 @@ export function buildTeacherMatrixHtml(
 </style>
 </head>
 <body>
-  <div class="no-print"><button type="button" onclick="window.print()">Skriv ut / lagre som PDF</button></div>
+  <div class="no-print toolbar">
+    <button type="button" onclick="window.print()">Skriv ut / lagre som PDF</button>
+    <label class="toggle-option"><input type="checkbox" onchange="toggleAnonymous(this)"> Anonymiser</label>
+  </div>
   <h1>${title}</h1>
   <p class="doc-meta">Dato: ${escapeHtml(todayDdMmYyyy())}</p>
   ${body}
@@ -1083,6 +1153,16 @@ export function buildTeacherMatrixHtml(
       var clone = table.cloneNode(true);
       clone.setAttribute('border', '1');
       clone.style.borderCollapse = 'collapse';
+      clone.removeAttribute('style');
+      var slanted = clone.querySelectorAll('th.slant');
+      for (var s = 0; s < slanted.length; s += 1) {
+        slanted[s].textContent = slanted[s].textContent.trim();
+        slanted[s].className = '';
+      }
+      var spacers = clone.querySelectorAll('.spacer');
+      for (var p = spacers.length - 1; p >= 0; p -= 1) {
+        spacers[p].parentNode.removeChild(spacers[p]);
+      }
       var cells = clone.querySelectorAll('th, td');
       for (var i = 0; i < cells.length; i += 1) {
         cells[i].style.border = '1px solid #000';
@@ -1106,11 +1186,37 @@ export function buildTeacherMatrixHtml(
         var cells = rows[i].querySelectorAll('th, td');
         var values = [];
         for (var j = 0; j < cells.length; j += 1) {
+          if (cells[j].className.indexOf('spacer') >= 0) continue;
           values.push((cells[j].innerText || cells[j].textContent || '').replace(/\\s*\\n\\s*/g, '; ').trim());
         }
         lines.push(values.join('\\t'));
       }
       return lines.join('\\n');
+    }
+
+    function readTableMatrix(table) {
+      var matrix = [];
+      var rows = table.querySelectorAll('tr');
+      for (var i = 0; i < rows.length; i += 1) {
+        var cells = rows[i].querySelectorAll('th, td');
+        var values = [];
+        for (var j = 0; j < cells.length; j += 1) {
+          var cell = cells[j];
+          if (cell.className.indexOf('spacer') >= 0) continue;
+          var items = cell.querySelectorAll('li');
+          if (items.length > 0) {
+            var parts = [];
+            var heading = cell.querySelector('strong');
+            if (heading) parts.push(heading.textContent.trim());
+            for (var k = 0; k < items.length; k += 1) parts.push(items[k].textContent.trim());
+            values.push(parts.join('\\n'));
+          } else {
+            values.push((cell.innerText || cell.textContent || '').replace(/\\s*\\n\\s*/g, '\\n').trim());
+          }
+        }
+        matrix.push(values);
+      }
+      return matrix;
     }
 
     function copyScheduleTable(button, tableId) {
@@ -1161,77 +1267,117 @@ export function buildTeacherMatrixHtml(
           : cells[i].getAttribute('data-plain');
       }
     }
+
+    function toggleAnonymous(checkbox) {
+      var anonymous = checkbox.checked;
+      var names = document.querySelectorAll('.pname');
+      for (var i = 0; i < names.length; i += 1) {
+        names[i].textContent = anonymous
+          ? names[i].getAttribute('data-anon')
+          : names[i].getAttribute('data-real');
+      }
+    }
+
+    function exportTableToExcel(button, tableId, filenameBase) {
+      var table = document.getElementById(tableId);
+      if (!table || typeof window.buildTableWorkbook !== 'function') return;
+      var originalLabel = button.getAttribute('data-label') || button.textContent;
+      button.setAttribute('data-label', originalLabel);
+      button.textContent = 'Lager Excel …';
+      window.buildTableWorkbook(readTableMatrix(table), filenameBase).then(function (download) {
+        var link = document.createElement('a');
+        link.href = download.url;
+        link.download = download.filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(function () { URL.revokeObjectURL(download.url); }, 10000);
+        button.textContent = 'Lastet ned!';
+        setTimeout(function () { button.textContent = originalLabel; }, 2000);
+      }, function () {
+        button.textContent = 'Eksport feilet';
+        setTimeout(function () { button.textContent = originalLabel; }, 2000);
+      });
+    }
   </script>
 </body>
 </html>`
 }
 
-async function buildTeacherMeetingWorkbookUrl(overview: TeacherMeetingOverview): Promise<string> {
+interface TableWorkbookDownload {
+  url: string
+  filename: string
+}
+
+async function buildTableWorkbookDownload(
+  matrix: string[][],
+  filenameBase: string
+): Promise<TableWorkbookDownload> {
   const ExcelJS = await import('exceljs')
   const workbook = new ExcelJS.Workbook()
-  const sheet = workbook.addWorksheet('Møteoversikt')
+  const sheet = workbook.addWorksheet('Tabell')
+  const rows = Array.from(matrix, row =>
+    Array.from(row, value => String(value ?? ''))
+  )
 
-  sheet.columns = [
-    { header: 'Lærer', key: 'teacher', width: 32 },
-    ...overview.slotLabels.map((label, index) => ({ header: label, key: `slot${index}`, width: 14 })),
-    { header: 'Totalt', key: 'total', width: 10 },
-  ]
+  rows.forEach(row => sheet.addRow(row))
 
-  overview.teachers.forEach(teacher => {
-    const row: Record<string, string | number> = { teacher: teacher.name, total: teacher.total }
-    teacher.classBySlot.forEach((className, index) => {
-      row[`slot${index}`] = className ?? ''
-    })
-    sheet.addRow(row)
-  })
+  const columnCount = rows.reduce((widest, row) => Math.max(widest, row.length), 0)
+  for (let index = 1; index <= columnCount; index += 1) {
+    const longest = rows.reduce((widest, row) => {
+      const lines = (row[index - 1] ?? '').split('\n')
+      return Math.max(widest, ...lines.map(line => line.length))
+    }, 0)
+    sheet.getColumn(index).width = Math.max(8, Math.min(40, longest + 2))
+    sheet.getColumn(index).alignment = { vertical: 'top', wrapText: true }
+  }
 
-  sheet.getRow(1).font = { bold: true }
+  if (rows.length > 0) sheet.getRow(1).font = { bold: true }
   sheet.views = [{ state: 'frozen', xSplit: 1, ySplit: 1 }]
 
   const buffer = await workbook.xlsx.writeBuffer()
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   })
-  return URL.createObjectURL(blob)
+  const url = URL.createObjectURL(blob)
+  return {
+    url,
+    filename: `${sanitizeFilenamePart(filenameBase)}_${todayDdMmYyyy()}.xlsx`,
+  }
 }
 
 export function printTeacherMatrix(
   absences: AbsenceRecord[],
   classNames: string[],
   presets: PresetRecord[] = [],
-  minStudents: number | null = null
+  minStudents: number | null = null,
+  maxMeetings: number | null = null
 ): boolean {
   const sections = buildTeacherMatrixSections(absences, classNames)
   if (sections.length === 0) return false
 
-  const rankOverview = buildTeacherClassRankOverview(absences, sections)
-  const discussionSchedule = buildDiscussionSchedule(absences, classNames, presets, minStudents)
+  const discussionSchedule = buildDiscussionSchedule(
+    absences,
+    classNames,
+    presets,
+    minStudents,
+    maxMeetings
+  )
 
   const printWindow = window.open('', '_blank')
   if (!printWindow) return false
 
   printWindow.document.open()
-  printWindow.document.write(buildTeacherMatrixHtml(sections, rankOverview, discussionSchedule))
+  printWindow.document.write(buildTeacherMatrixHtml(sections, discussionSchedule))
   printWindow.document.close()
   printWindow.focus()
 
-  if (discussionSchedule) {
-    const overview = buildTeacherMeetingOverview(discussionSchedule)
-    void buildTeacherMeetingWorkbookUrl(overview).then(
-      url => {
-        const link = printWindow.document.getElementById('teacher-meeting-excel')
-        if (!link) return
-        link.setAttribute('href', url)
-        link.setAttribute('download', `moteoversikt_laerere_${todayDdMmYyyy()}.xlsx`)
-        link.removeAttribute('aria-disabled')
-        link.textContent = 'Last ned Excel'
-      },
-      () => {
-        const link = printWindow.document.getElementById('teacher-meeting-excel')
-        if (link) link.textContent = 'Excel utilgjengelig'
-      }
-    )
-  }
+  ;(printWindow as Window & {
+    buildTableWorkbook?: (
+      matrix: string[][],
+      filenameBase: string
+    ) => Promise<TableWorkbookDownload>
+  }).buildTableWorkbook = buildTableWorkbookDownload
 
   return true
 }
