@@ -3,6 +3,7 @@ import { AlertTriangle, AlertCircle } from 'lucide-react'
 import { resolveTeacher } from './teacherUtils'
 import { meetsThreshold } from './thresholdUtils'
 import { sanitizeFilenamePart } from './securityUtils'
+import { printTeacherMatrix } from './teacherMatrixPrint'
 import {
   buildStudentSubjectKey,
   compareByLastName,
@@ -1503,6 +1504,14 @@ function App() {
     )
   }
 
+  const handlePrintLaererliste = () => {
+    if (selectedClasses.length === 0) return
+    const opened = printTeacherMatrix(data.absences, selectedClasses)
+    if (!opened) {
+      window.alert('Kunne ikke åpne utskriftsvinduet. Sjekk at popup-blokkering er slått av, og at valgte klasser har lærerdata.')
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-50">
       {/* Header */}
@@ -1712,6 +1721,7 @@ function App() {
                     onPrintGruppeliste={() => setGruppelisteModalOpen(true)}
                     onExportOppfolgingsark={handleExportClassOppfolgingsark}
                     onExportKlasseradsskjema={() => setKlasseradSeasonModalOpen(true)}
+                    onPrintLaererliste={handlePrintLaererliste}
                   />
 
                   {classListModalOpen && (

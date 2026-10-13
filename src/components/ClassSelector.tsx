@@ -9,6 +9,7 @@ interface ClassSelectorProps {
   onPrintGruppeliste?: () => void
   onExportOppfolgingsark?: () => void
   onExportKlasseradsskjema?: () => void
+  onPrintLaererliste?: () => void
 }
 
 function ClassSelector({
@@ -19,6 +20,7 @@ function ClassSelector({
   onPrintGruppeliste,
   onExportOppfolgingsark,
   onExportKlasseradsskjema,
+  onPrintLaererliste,
 }: ClassSelectorProps) {
   const classes = useMemo(
     () => Array.from(new Set(data.absences.map(a => a.class))).sort(),
@@ -116,7 +118,7 @@ function ClassSelector({
         ))}
       </div>
 
-      {(onPrintClassLists || onPrintGruppeliste || onExportOppfolgingsark || onExportKlasseradsskjema) && (
+      {(onPrintClassLists || onPrintGruppeliste || onExportOppfolgingsark || onExportKlasseradsskjema || onPrintLaererliste) && (
         <div className="mt-4 space-y-2 border-t border-slate-100 pt-4">
           {onPrintClassLists && (
             <button
@@ -158,6 +160,20 @@ function ClassSelector({
               }`}
             >
               Klasselærerråd for valgte klasser
+            </button>
+          )}
+          {onPrintLaererliste && (
+            <button
+              type="button"
+              onClick={onPrintLaererliste}
+              disabled={selectedClasses.length === 0}
+              className={`w-full px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                selectedClasses.length > 0
+                  ? 'bg-sky-600 text-white hover:bg-sky-700 shadow-sm'
+                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+              }`}
+            >
+              Lærerliste klasselærerråd
             </button>
           )}
           {onPrintGruppeliste && (
