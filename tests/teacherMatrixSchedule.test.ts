@@ -171,6 +171,9 @@ describe('teacher discussion scheduling', () => {
     const bjorn = overview.teachers.find(teacher => teacher.name === 'Bjørn Dahl')
     expect(bjorn?.total).toBe(1)
     expect(bjorn?.classBySlot.filter(Boolean)).toEqual(['1C'])
+
+    expect(anne?.classWithCountBySlot.filter(Boolean).sort()).toEqual(['1A (1)', '1B (1)'])
+    expect(bjorn?.classWithCountBySlot.filter(Boolean)).toEqual(['1C (1)'])
   })
 
   it('excludes teachers below the minimum student filter but keeps contact teachers', () => {
@@ -240,5 +243,8 @@ describe('teacher discussion scheduling', () => {
     expect(html).toContain('id="teacher-meeting-table"')
     expect(html).toContain('id="teacher-meeting-excel"')
     expect(html).toContain("copyScheduleTable(this, 'teacher-meeting-table')")
+    expect(html).toContain('toggleMeetingCounts(this)')
+    expect(html).toContain('Vis antall elever')
+    expect(html).toContain('data-count=')
   })
 })

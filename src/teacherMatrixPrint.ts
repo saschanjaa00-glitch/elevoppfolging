@@ -44,12 +44,20 @@ export interface DiscussionSchedule {
 
 export interface TeacherMeetingOverview {
   slotLabels: string[]
-  teachers: Array<{ name: string; classBySlot: Array<string | null>; total: number }>
+  teachers: Array<{
+    name: string
+    classBySlot: Array<string | null>
+    classWithCountBySlot: Array<string | null>
+    total: number
+  }>
 }
 
 export function buildTeacherMeetingOverview(schedule: DiscussionSchedule): TeacherMeetingOverview {
   const slotLabels = schedule.slots.map(slot => slot.label)
-  const byTeacher = new Map<string, { name: string; classBySlot: Array<string | null> }>()
+  const byTeacher = new Map<
+    string,
+    { name: string; entriesBySlot: Array<Array<{ className: string; studentCount: number }>> }
+  >()
 
   schedule.slots.forEach((slot, slotIndex) => {
     slot.assignments.forEach(assignment => {
@@ -57,13 +65,13 @@ export function buildTeacherMeetingOverview(schedule: DiscussionSchedule): Teach
         const key = normalizeMatch(teacher.name)
         let entry = byTeacher.get(key)
         if (!entry) {
-          entry = { name: teacher.name, classBySlot: slotLabels.map(() => null) }
+          entry = { name: teacher.name, entriesBySlot: slotLabels.map(() => []) }
           byTeacher.set(key, entry)
         }
-        const existing = entry.classBySlot[slotIndex]
-        entry.classBySlot[slotIndex] = existing
-          ? `${existing}, ${assignment.className}`
-          : assignment.className
+        entry.entriesBySlot[slotIndex].push({
+          className: assignment.className,
+          studentCount: teacher.studentCount,
+        })
       })
     })
   })
@@ -71,8 +79,15 @@ export function buildTeacherMeetingOverview(schedule: DiscussionSchedule): Teach
   const teachers = Array.from(byTeacher.values())
     .map(entry => ({
       name: entry.name,
-      classBySlot: entry.classBySlot,
-      total: entry.classBySlot.filter(Boolean).length,
+      classBySlot: entry.entriesBySlot.map(items =>
+        items.length ? items.map(item => item.className).join(', ') : null
+      ),
+      classWithCountBySlot: entry.entriesBySlot.map(items =>
+        items.length
+          ? items.map(item => `${item.className} (${item.studentCount})`).join(', ')
+          : null
+      ),
+      total: entry.entriesBySlot.filter(items => items.length > 0).length,
     }))
     .sort((a, b) => a.name.localeCompare(b.name, 'nb', { sensitivity: 'base' }))
 
@@ -717,11 +732,11 @@ function buildTeacherMeetingOverviewHtml(overview: TeacherMeetingOverview): stri
   const bodyRows = overview.teachers
     .map(teacher => {
       const cells = teacher.classBySlot
-        .map(className =>
-          className
-            ? `<td class="meeting-cell">${escapeHtml(className)}</td>`
-            : '<td class="meeting-cell schedule-empty"></td>'
-        )
+        .map((className, index) => {
+          if (!className) return '<td class="meeting-cell schedule-empty"></td>'
+          const withCount = teacher.classWithCountBySlot[index] ?? className
+          return `<td class="meeting-cell" data-plain="${escapeHtml(className)}" data-count="${escapeHtml(withCount)}">${escapeHtml(className)}</td>`
+        })
         .join('')
       return `<tr><th class="meeting-teacher" scope="row">${escapeHtml(teacher.name)}</th>${cells}<td class="meeting-total">${teacher.total}</td></tr>`
     })
@@ -733,6 +748,7 @@ function buildTeacherMeetingOverviewHtml(overview: TeacherMeetingOverview): stri
       <div class="no-print copy-row">
         <button type="button" onclick="copyScheduleTable(this, 'teacher-meeting-table')">Kopier tabell</button>
         <a id="teacher-meeting-excel" class="download-link" href="#" aria-disabled="true">Forbereder Excel …</a>
+        <label class="toggle-option"><input type="checkbox" onchange="toggleMeetingCounts(this)"> Vis antall elever</label>
       </div>
       <table id="teacher-meeting-table" class="schedule-table meeting-table">
         <thead>
@@ -1032,6 +1048,12 @@ export function buildTeacherMatrixHtml(
     opacity: 0.5;
     pointer-events: none;
   }
+  .toggle-option {
+    display: inline-block;
+    margin-left: 3mm;
+    font-size: 9pt;
+    cursor: pointer;
+  }
   .meeting-table .meeting-teacher {
     width: 45mm;
     vertical-align: middle;
@@ -1128,6 +1150,16 @@ export function buildTeacherMatrixHtml(
         return;
       }
       fallback();
+    }
+
+    function toggleMeetingCounts(checkbox) {
+      var show = checkbox.checked;
+      var cells = document.querySelectorAll('#teacher-meeting-table .meeting-cell[data-plain]');
+      for (var i = 0; i < cells.length; i += 1) {
+        cells[i].textContent = show
+          ? cells[i].getAttribute('data-count')
+          : cells[i].getAttribute('data-plain');
+      }
     }
   </script>
 </body>
