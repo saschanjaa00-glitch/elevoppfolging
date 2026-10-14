@@ -2,6 +2,8 @@ import type { AbsenceRecord, PresetRecord } from './types'
 import { normalizeMatch } from './studentInfoUtils'
 import { sanitizeFilenamePart } from './securityUtils'
 import { todayDdMmYyyy } from './dateUtils'
+import printWindowCssUrl from './teacherMatrixPrintWindow.css?url'
+import printWindowScriptUrl from './teacherMatrixPrintWindow.js?url'
 
 export interface TeacherMatrixSection {
   className: string
@@ -10,6 +12,7 @@ export interface TeacherMatrixSection {
 }
 
 const PAGE_CONTENT_WIDTH_MM = 275
+// TEACHER_COLUMN_MM and HEADER_HEIGHT_MM are mirrored in teacherMatrixPrintWindow.css.
 const TEACHER_COLUMN_MM = 42
 const HEADER_HEIGHT_MM = 30
 const MAX_COLUMN_MM = 7.5
@@ -699,7 +702,7 @@ function syncedLabelHtml(
     .filter(Boolean)
     .join(' ')
   const editableAttrs = options.editable
-    ? ` contenteditable="true" spellcheck="false" oninput="syncLabel(this)" aria-label="${escapeHtml(options.ariaLabel ?? 'Rediger navn')}"`
+    ? ` contenteditable="true" spellcheck="false" aria-label="${escapeHtml(options.ariaLabel ?? 'Rediger navn')}"`
     : ''
   return `<span class="${classes}" data-sync-group="${group}" data-sync-index="${index}"${editableAttrs}>${escapeHtml(text)}</span>`
 }
@@ -798,9 +801,9 @@ function buildDiscussionScheduleHtml(
       <p class="meta">Rommene følger rådgiverne. Planen bruker færrest mulige tidsluker, fordeler klassene jevnt og minimerer lærerkonflikter vektet etter antall elever.</p>
       ${warnings}
       <div class="no-print copy-row">
-        <button type="button" onclick="copyScheduleTable(this, 'discussion-schedule-table')">Kopier tabell</button>
-        <button type="button" onclick="exportTableToExcel(this, 'discussion-schedule-table', 'tidsplan_klasselaererrad')">Last ned Excel</button>
-        <label class="toggle-option"><input type="checkbox" onchange="toggleCollisions(this)"> Vis kollisjoner</label>
+        <button type="button" data-action="copy-table" data-table="discussion-schedule-table">Kopier tabell</button>
+        <button type="button" data-action="export-excel" data-table="discussion-schedule-table" data-filename="tidsplan_klasselaererrad">Last ned Excel</button>
+        <label class="toggle-option"><input type="checkbox" data-action="toggle-collisions"> Vis kollisjoner</label>
         <span class="room-edit-hint">Klikk på et rom- eller tidsnavn for å endre det. Endringen oppdateres i alle tabellene.</span>
       </div>
       <table id="discussion-schedule-table" class="schedule-table hide-collisions">
@@ -823,9 +826,9 @@ function buildDiscussionScheduleHtml(
           : ''
       }</p>
       <div class="no-print copy-row">
-        <button type="button" onclick="copyScheduleTable(this, 'teacher-schedule-table')">Kopier tabell</button>
-        <button type="button" onclick="exportTableToExcel(this, 'teacher-schedule-table', 'laererfordeling_tidsluke')">Last ned Excel</button>
-        <label class="toggle-option"><input type="checkbox" onchange="toggleParentheses(this, 'teacher-schedule-table')"> Vis tall i parentes</label>
+        <button type="button" data-action="copy-table" data-table="teacher-schedule-table">Kopier tabell</button>
+        <button type="button" data-action="export-excel" data-table="teacher-schedule-table" data-filename="laererfordeling_tidsluke">Last ned Excel</button>
+        <label class="toggle-option"><input type="checkbox" data-action="toggle-parentheses" data-table="teacher-schedule-table"> Vis tall i parentes</label>
       </div>
       <table id="teacher-schedule-table" class="schedule-table teacher-schedule-table hide-paren">
         <thead>
@@ -866,9 +869,9 @@ function buildTeacherMeetingOverviewHtml(
       <h3 class="schedule-subtitle">Møteoversikt per lærer</h3>
       <p class="meta">Klassen læreren skal møte i hver tidsluke. Siste kolonne viser totalt antall møter læreren skal delta på.</p>
       <div class="no-print copy-row">
-        <button type="button" onclick="copyScheduleTable(this, 'teacher-meeting-table')">Kopier tabell</button>
-        <button type="button" onclick="exportTableToExcel(this, 'teacher-meeting-table', 'moteoversikt_laerere')">Last ned Excel</button>
-        <label class="toggle-option"><input type="checkbox" onchange="toggleMeetingCounts(this)"> Vis antall elever</label>
+        <button type="button" data-action="copy-table" data-table="teacher-meeting-table">Kopier tabell</button>
+        <button type="button" data-action="export-excel" data-table="teacher-meeting-table" data-filename="moteoversikt_laerere">Last ned Excel</button>
+        <label class="toggle-option"><input type="checkbox" data-action="toggle-meeting-counts"> Vis antall elever</label>
       </div>
       <table id="teacher-meeting-table" class="schedule-table meeting-table">
         <thead>
@@ -904,15 +907,14 @@ function buildSectionHtml(
   const bodyRows = section.teachers
     .map(teacher => {
       const studentCount = teacher.studentKeys.size
-      const rowStyle = studentCount <= FEW_STUDENTS_LIMIT ? ' style="background-color: #f1f1f1;"' : ''
       const cells = section.students
         .map(student => {
           const teaches = teacher.studentKeys.has(normalizeMatch(student))
-          return `<td class="mark"${rowStyle}>${teaches ? '✓' : ''}</td>`
+          return `<td class="mark">${teaches ? '✓' : ''}</td>`
         })
         .join('')
       const rowClass = studentCount <= FEW_STUDENTS_LIMIT ? ' class="few"' : ''
-      return `<tr${rowClass}><th class="teacher" scope="row"${rowStyle}>${personSpan(teacher.name, anonymization)} (${studentCount})</th>${cells}<td class="spacer"${rowStyle}></td></tr>`
+      return `<tr${rowClass}><th class="teacher" scope="row">${personSpan(teacher.name, anonymization)} (${studentCount})</th>${cells}<td class="spacer"></td></tr>`
     })
     .join('')
 
@@ -920,7 +922,7 @@ function buildSectionHtml(
     <section class="sheet${isFirst ? '' : ' page-break'}">
       <h2>Lærerliste klasselærerråd – ${escapeHtml(section.className)}</h2>
       <p class="meta">${section.teachers.length} lærere · ${columnCount} elever · ${escapeHtml(todayDdMmYyyy())}</p>
-      <table id="${tableId}" style="--col-width: ${columnMm.toFixed(2)}mm">
+      <table id="${tableId}" data-col-width="${columnMm.toFixed(2)}mm">
         <thead>
           <tr>
             <th class="teacher corner"></th>
@@ -971,439 +973,17 @@ export function buildTeacherMatrixHtml(
 <head>
 <meta charset="utf-8" />
 <title>${title} – ${escapeHtml(todayDdMmYyyy())}</title>
-<style>
-  @page { size: A4 landscape; margin: 10mm; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    padding: 10mm;
-    background: #fff;
-    color: #000;
-    font-family: Calibri, Arial, sans-serif;
-  }
-  h1 { font-size: 15pt; margin: 0 0 2mm; }
-  h2 { font-size: 12pt; margin: 0 0 1mm; }
-  .doc-meta { font-size: 9pt; margin: 0 0 6mm; }
-  .meta { font-size: 8.5pt; margin: 0 0 2mm; }
-  .sheet { padding-top: 8mm; }
-  .page-break { break-before: page; page-break-before: always; }
-  table {
-    border-collapse: collapse;
-    table-layout: fixed;
-    margin-top: 6mm;
-  }
-  th, td { border: 1px solid #000; font-size: 8pt; }
-  th.teacher {
-    width: ${TEACHER_COLUMN_MM}mm;
-    text-align: left;
-    font-weight: normal;
-    padding: 0.8mm 1.5mm;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  th.corner { border: none; }
-  td.mark {
-    width: var(--col-width);
-    height: 5.5mm;
-    text-align: center;
-    vertical-align: middle;
-    font-size: 9pt;
-  }
-  th.spacer, td.spacer { width: ${HEADER_HEIGHT_MM}mm; border: none; }
-  th.slant {
-    width: var(--col-width);
-    height: ${HEADER_HEIGHT_MM}mm;
-    padding: 0;
-    border: none;
-    vertical-align: bottom;
-  }
-  th.slant > div {
-    position: relative;
-    width: var(--col-width);
-    height: ${HEADER_HEIGHT_MM}mm;
-    transform-origin: bottom left;
-    transform: skewX(-45deg);
-    border-left: 1px solid #000;
-    border-right: 1px solid #000;
-    border-top: 1px solid #000;
-  }
-  /* skewX(45deg) cancels the parent skew so the text sits at a true 45 degrees */
-  th.slant > div > span {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    display: block;
-    transform-origin: bottom left;
-    transform: skewX(45deg) rotate(-45deg) translate(3.5mm, 3mm);
-    white-space: nowrap;
-    max-width: ${(HEADER_HEIGHT_MM * 1.414 - 3).toFixed(1)}mm;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    background: #fff;
-    padding: 0 0.8mm;
-    font-weight: 600;
-    font-size: 7.5pt;
-    line-height: 1;
-  }
-  thead { display: table-header-group; }
-  tr { break-inside: avoid; page-break-inside: avoid; }
-  tbody tr.few th.teacher, tbody tr.few td.mark {
-    background: #f1f1f1;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-  .schedule-table {
-    width: 100%;
-    table-layout: fixed;
-    margin-top: 4mm;
-  }
-  .schedule-table th,
-  .schedule-table td {
-    padding: 2mm;
-    vertical-align: top;
-    font-size: 8pt;
-  }
-  .schedule-table th {
-    text-align: left;
-    font-weight: 700;
-  }
-  .editable-label {
-    cursor: text;
-  }
-  .editable-label:hover,
-  .editable-label:focus {
-    outline: 1px dashed #000;
-    outline-offset: 1px;
-  }
-  .room-edit-hint {
-    margin-left: 3mm;
-    font-size: 9pt;
-  }
-  .schedule-table .schedule-time {
-    width: 16mm;
-    vertical-align: middle;
-  }
-  .schedule-table .schedule-collision-summary {
-    display: block;
-    margin-top: 1mm;
-    font-size: 6.5pt;
-    font-weight: 400;
-    line-height: 1.2;
-  }
-  .schedule-table.hide-collisions .schedule-collision-summary {
-    display: none;
-  }
-  .schedule-table .room-number,
-  .schedule-table .room-adviser,
-  .schedule-table td > span {
-    display: block;
-  }
-  .schedule-table .room-number {
-    font-size: 7pt;
-    font-weight: 400;
-  }
-  .schedule-table td strong {
-    display: block;
-    margin-bottom: 1mm;
-    font-size: 9pt;
-  }
-  .schedule-table td > span {
-    margin-top: 0.5mm;
-  }
-  .schedule-table .schedule-empty {
-    background: #f7f7f7;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-  .schedule-subtitle {
-    margin: 8mm 0 1mm;
-    font-size: 11pt;
-  }
-  .teacher-schedule-table {
-    margin-top: 3mm;
-  }
-  .schedule-teachers {
-    margin: 1mm 0 0 4mm;
-    padding: 0;
-  }
-  .schedule-teachers li {
-    margin: 0.5mm 0;
-  }
-  .schedule-teachers em {
-    font-size: 7pt;
-    font-style: normal;
-    font-weight: 700;
-  }
-  .schedule-warnings {
-    margin: 3mm 0;
-    padding: 2mm 3mm;
-    border: 1px solid #777;
-    font-size: 8pt;
-  }
-  .schedule-warnings ul {
-    margin: 1mm 0 0 5mm;
-    padding: 0;
-  }
-  .no-print { margin-bottom: 6mm; }
-  .no-print.copy-row { margin: 2mm 0 0; }
-  .no-print.toolbar {
-    display: flex;
-    align-items: center;
-    gap: 3mm;
-  }
-  .no-print button {
-    font: inherit;
-    padding: 2mm 4mm;
-    border: 1px solid #000;
-    background: #fff;
-    cursor: pointer;
-  }
-  .toggle-option {
-    display: inline-block;
-    margin-left: 3mm;
-    font-size: 9pt;
-    cursor: pointer;
-  }
-  .hide-paren .paren { display: none; }
-  .meeting-table .meeting-teacher {
-    width: 45mm;
-    vertical-align: middle;
-  }
-  .meeting-table .meeting-cell,
-  .meeting-table .meeting-total,
-  .meeting-table .meeting-slot {
-    text-align: center;
-    vertical-align: middle;
-  }
-  .meeting-table .meeting-total {
-    width: 16mm;
-    font-weight: 700;
-  }
-  @media print {
-    body { padding: 0; }
-    .no-print { display: none; }
-    .editable-label { outline: none; }
-  }
-</style>
+<link rel="stylesheet" href="${escapeHtml(printWindowCssUrl)}" />
 </head>
 <body>
   <div class="no-print toolbar">
-    <button type="button" onclick="window.print()">Skriv ut / lagre som PDF</button>
-    <label class="toggle-option"><input type="checkbox" onchange="toggleAnonymous(this)"> Anonymiser</label>
+    <button type="button" data-action="print">Skriv ut / lagre som PDF</button>
+    <label class="toggle-option"><input type="checkbox" data-action="toggle-anonymous"> Anonymiser</label>
   </div>
   <h1>${title}</h1>
   <p class="doc-meta">Dato: ${escapeHtml(todayDdMmYyyy())}</p>
   ${body}
-  <script>
-    function buildScheduleClipboardHtml(table) {
-      var clone = table.cloneNode(true);
-      clone.setAttribute('border', '1');
-      clone.style.borderCollapse = 'collapse';
-      clone.removeAttribute('style');
-      if (table.className.indexOf('hide-paren') >= 0) {
-        var hidden = clone.querySelectorAll('.paren');
-        for (var h = hidden.length - 1; h >= 0; h -= 1) {
-          hidden[h].parentNode.removeChild(hidden[h]);
-        }
-      }
-      if (table.className.indexOf('hide-collisions') >= 0) {
-        var collisionSummaries = clone.querySelectorAll('.schedule-collision-summary');
-        for (var c = collisionSummaries.length - 1; c >= 0; c -= 1) {
-          collisionSummaries[c].parentNode.removeChild(collisionSummaries[c]);
-        }
-      }
-      var slanted = clone.querySelectorAll('th.slant');
-      for (var s = 0; s < slanted.length; s += 1) {
-        slanted[s].textContent = slanted[s].textContent.trim();
-        slanted[s].className = '';
-      }
-      var spacers = clone.querySelectorAll('.spacer');
-      for (var p = spacers.length - 1; p >= 0; p -= 1) {
-        spacers[p].parentNode.removeChild(spacers[p]);
-      }
-      var cells = clone.querySelectorAll('th, td');
-      for (var i = 0; i < cells.length; i += 1) {
-        cells[i].style.border = '1px solid #000';
-        cells[i].style.padding = '4px 6px';
-        cells[i].style.verticalAlign = 'top';
-        cells[i].style.fontFamily = 'Calibri, Arial, sans-serif';
-        cells[i].style.fontSize = '10pt';
-      }
-      var lists = clone.querySelectorAll('ul');
-      for (var j = 0; j < lists.length; j += 1) {
-        lists[j].style.margin = '2px 0 0 14px';
-        lists[j].style.padding = '0';
-      }
-      return '<meta charset="utf-8">' + clone.outerHTML;
-    }
-
-    function buildScheduleClipboardText(table) {
-      var lines = [];
-      var rows = table.querySelectorAll('tr');
-      for (var i = 0; i < rows.length; i += 1) {
-        var cells = rows[i].querySelectorAll('th, td');
-        var values = [];
-        for (var j = 0; j < cells.length; j += 1) {
-          if (cells[j].className.indexOf('spacer') >= 0) continue;
-          values.push((cells[j].innerText || cells[j].textContent || '').replace(/\\s*\\n\\s*/g, '; ').trim());
-        }
-        lines.push(values.join('\\t'));
-      }
-      return lines.join('\\n');
-    }
-
-    function readTableMatrix(table) {
-      var matrix = [];
-      var rows = table.querySelectorAll('tr');
-      for (var i = 0; i < rows.length; i += 1) {
-        var cells = rows[i].querySelectorAll('th, td');
-        var values = [];
-        for (var j = 0; j < cells.length; j += 1) {
-          var cell = cells[j];
-          if (cell.className.indexOf('spacer') >= 0) continue;
-          var items = cell.querySelectorAll('li');
-          if (items.length > 0) {
-            var parts = [];
-            var heading = cell.querySelector('strong');
-            if (heading) parts.push((heading.innerText || heading.textContent || '').trim());
-            for (var k = 0; k < items.length; k += 1) {
-              parts.push((items[k].innerText || items[k].textContent || '').trim());
-            }
-            values.push(parts.join('\\n'));
-          } else {
-            values.push((cell.innerText || cell.textContent || '').replace(/\\s*\\n\\s*/g, '\\n').trim());
-          }
-        }
-        matrix.push(values);
-      }
-      return matrix;
-    }
-
-    function copyScheduleTable(button, tableId) {
-      var table = document.getElementById(tableId);
-      if (!table) return;
-      var html = buildScheduleClipboardHtml(table);
-      var text = buildScheduleClipboardText(table);
-      var originalLabel = button.getAttribute('data-label') || button.textContent;
-      button.setAttribute('data-label', originalLabel);
-
-      function done(ok) {
-        button.textContent = ok ? 'Kopiert!' : 'Kopiering feilet';
-        setTimeout(function () { button.textContent = originalLabel; }, 2000);
-      }
-
-      function fallback() {
-        try {
-          var selection = window.getSelection();
-          var range = document.createRange();
-          range.selectNode(table);
-          selection.removeAllRanges();
-          selection.addRange(range);
-          var ok = document.execCommand('copy');
-          selection.removeAllRanges();
-          done(ok);
-        } catch (error) {
-          done(false);
-        }
-      }
-
-      if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
-        var item = new window.ClipboardItem({
-          'text/html': new Blob([html], { type: 'text/html' }),
-          'text/plain': new Blob([text], { type: 'text/plain' })
-        });
-        navigator.clipboard.write([item]).then(function () { done(true); }, fallback);
-        return;
-      }
-      fallback();
-    }
-
-    function toggleMeetingCounts(checkbox) {
-      var show = checkbox.checked;
-      var cells = document.querySelectorAll('#teacher-meeting-table .meeting-cell[data-plain]');
-      for (var i = 0; i < cells.length; i += 1) {
-        cells[i].textContent = show
-          ? cells[i].getAttribute('data-count')
-          : cells[i].getAttribute('data-plain');
-      }
-    }
-
-    function toggleParentheses(checkbox, tableId) {
-      var table = document.getElementById(tableId);
-      if (!table) return;
-      if (checkbox.checked) {
-        table.className = table.className.replace(/\\s*hide-paren/g, '');
-      } else if (table.className.indexOf('hide-paren') < 0) {
-        table.className += ' hide-paren';
-      }
-    }
-
-    function syncLabel(source) {
-      var group = source.getAttribute('data-sync-group');
-      var index = source.getAttribute('data-sync-index');
-      if (group === null || index === null) return;
-      var text = (source.innerText || source.textContent || '').replace(/\\s+/g, ' ').trim();
-      var selector = '[data-sync-group="' + group + '"][data-sync-index="' + index + '"]';
-      var targets = document.querySelectorAll(selector);
-      for (var i = 0; i < targets.length; i += 1) {
-        if (targets[i] === source) continue;
-        targets[i].textContent = text;
-      }
-    }
-
-    function toggleCollisions(checkbox) {
-      var table = document.getElementById('discussion-schedule-table');
-      if (!table) return;
-      if (checkbox.checked) {
-        table.className = table.className.replace(/\\s*hide-collisions/g, '');
-      } else if (table.className.indexOf('hide-collisions') < 0) {
-        table.className += ' hide-collisions';
-      }
-    }
-
-    function toggleAnonymous(checkbox) {
-      var anonymous = checkbox.checked;
-      var names = document.querySelectorAll('.pname');
-      for (var i = 0; i < names.length; i += 1) {
-        names[i].textContent = anonymous
-          ? names[i].getAttribute('data-anon')
-          : names[i].getAttribute('data-real');
-      }
-    }
-
-    function exportTableToExcel(button, tableId, filenameBase) {
-      var table = document.getElementById(tableId);
-      if (!table || typeof window.buildTableWorkbook !== 'function') return;
-      var originalLabel = button.getAttribute('data-label') || button.textContent;
-      button.setAttribute('data-label', originalLabel);
-      button.textContent = 'Lager Excel …';
-      window.buildTableWorkbook(readTableMatrix(table), filenameBase).then(function (download) {
-        var link = document.createElement('a');
-        link.href = download.url;
-        link.download = download.filename;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(function () { URL.revokeObjectURL(download.url); }, 10000);
-        button.textContent = 'Lastet ned!';
-        setTimeout(function () { button.textContent = originalLabel; }, 2000);
-      }, function () {
-        button.textContent = 'Eksport feilet';
-        setTimeout(function () { button.textContent = originalLabel; }, 2000);
-      });
-    }
-
-    document.addEventListener('paste', function (event) {
-      var target = event.target;
-      if (!target || !target.className || String(target.className).indexOf('editable-label') < 0) return;
-      event.preventDefault();
-      var clipboard = event.clipboardData || window.clipboardData;
-      var text = clipboard ? clipboard.getData('text') : '';
-      document.execCommand('insertText', false, text.replace(/\\s+/g, ' ').trim());
-      syncLabel(target);
-    });
-  </script>
+  <script src="${escapeHtml(printWindowScriptUrl)}"></script>
 </body>
 </html>`
 }

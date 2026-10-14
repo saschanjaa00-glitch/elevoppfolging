@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   buildDiscussionSchedule,
@@ -7,6 +8,8 @@ import {
   buildTeacherMeetingOverview,
 } from '../src/teacherMatrixPrint'
 import type { AbsenceRecord, PresetRecord } from '../src/types'
+
+const printWindowCss = readFileSync(new URL('../src/teacherMatrixPrintWindow.css', import.meta.url), 'utf8')
 
 function absence(className: string, teacher: string, studentNumber: number): AbsenceRecord {
   return {
@@ -258,23 +261,23 @@ describe('teacher discussion scheduling', () => {
     expect(html).toContain('Forslag til tidsplan for klasselærerråd')
     expect(html).toContain('Rom 1')
     expect(html).toContain('Trinnleder/avdelingsleder: <span class="pname" data-real="Leder A" data-anon="Leder 1">Leder A</span>')
-    expect(html).toContain('.schedule-table td > span {')
+    expect(printWindowCss).toContain('.schedule-table td > span {')
     expect(html).toContain('u/kollisjon')
     expect(html).toContain('m/kollisjon')
     expect(html).toContain('total ·')
     expect(html).toContain('class="schedule-table hide-collisions"')
-    expect(html).toContain('onchange="toggleCollisions(this)"')
+    expect(html).toContain('data-action="toggle-collisions"')
     expect(html).toContain('Vis kollisjoner')
     expect(html).toContain('Lærerfordeling per tidsluke')
     expect(html).toContain('<strong>1A<span class="paren"> (0+1)</span></strong>')
     expect(html).toContain('<b><span class="pname" data-real="Lærer 1A" data-anon="Lærer 1">Lærer 1A</span><span class="paren"> (<u>1</u> / 0)</span></b>')
-    expect(html).toContain("toggleParentheses(this, 'teacher-schedule-table')")
+    expect(html).toContain('data-action="toggle-parentheses" data-table="teacher-schedule-table"')
     expect(html).toContain('Vis tall i parentes')
     expect(html).toContain('class="schedule-table teacher-schedule-table hide-paren"')
     expect(html).toContain('contenteditable="true"')
     expect(html).toContain('Klikk på et rom- eller tidsnavn for å endre det.')
     expect(html).toContain('data-sync-group="room"')
-    expect(html).toContain('oninput="syncLabel(this)"')
+    expect(html).toContain('editable-label')
     expect(html).toContain('data-sync-group="slot" data-sync-index="0"')
     const discussionTable = html.slice(
       html.indexOf('id="discussion-schedule-table"'),
@@ -289,12 +292,12 @@ describe('teacher discussion scheduling', () => {
     expect(html).toContain('<th class="meeting-slot"><span class="sync-label"')
     expect(html).toContain('id="discussion-schedule-table"')
     expect(html).toContain('id="teacher-schedule-table"')
-    expect(html).toContain("copyScheduleTable(this, 'discussion-schedule-table')")
-    expect(html).toContain("copyScheduleTable(this, 'teacher-schedule-table')")
+    expect(html).toContain('data-action="copy-table" data-table="discussion-schedule-table"')
+    expect(html).toContain('data-action="copy-table" data-table="teacher-schedule-table"')
     expect(html).toContain('Møteoversikt per lærer')
     expect(html).toContain('id="teacher-meeting-table"')
-    expect(html).toContain("copyScheduleTable(this, 'teacher-meeting-table')")
-    expect(html).toContain('toggleMeetingCounts(this)')
+    expect(html).toContain('data-action="copy-table" data-table="teacher-meeting-table"')
+    expect(html).toContain('data-action="toggle-meeting-counts"')
     expect(html).toContain('Vis antall elever')
     expect(html).toContain('data-count=')
   })
@@ -316,7 +319,7 @@ describe('teacher discussion scheduling', () => {
 
     const html = buildTeacherMatrixHtml(sections, schedule)
 
-    expect(html).toContain('toggleAnonymous(this)')
+    expect(html).toContain('data-action="toggle-anonymous"')
     expect(html).toContain('Anonymiser')
     expect(html).toContain('data-anon="Elev 1"')
     expect(html).toContain('data-anon="Lærer 1"')
@@ -334,13 +337,33 @@ describe('teacher discussion scheduling', () => {
       expect(html).toContain(`id="${tableId}"`)
       if (tableId.startsWith('matrix-table-')) {
         expect(html).not.toContain(`copyTableAsPng(this, '${tableId}')`)
-        expect(html).not.toContain(`copyScheduleTable(this, '${tableId}')`)
-        expect(html).not.toContain(`exportTableToExcel(this, '${tableId}'`)
+        expect(html).not.toContain(`data-table="${tableId}"`)
       } else {
-        expect(html).toContain(`copyScheduleTable(this, '${tableId}')`)
-        expect(html).toContain(`exportTableToExcel(this, '${tableId}'`)
+        expect(html).toContain(`data-action="copy-table" data-table="${tableId}"`)
+        expect(html).toContain(`data-action="export-excel" data-table="${tableId}"`)
       }
     })
     expect(html).not.toContain('renderTablePng')
+  })
+
+  it('keeps the print window compatible with a CSP that forbids inline code', () => {
+    const classNames = ['1A', '1B']
+    const absences = [absence('1A', 'Anne Berg', 1), absence('1B', 'Bj?rn Dahl', 2)]
+    const presets = [
+      preset('R?dgiver A', 'R?dgiver', ['1A']),
+      preset('R?dgiver B', 'R?dgiver', ['1B']),
+      preset('Leder A', 'Avdelingsleder', ['1A']),
+      preset('Leder B', 'Trinnleder', ['1B']),
+    ]
+    const sections = buildTeacherMatrixSections(absences, classNames)
+    const html = buildTeacherMatrixHtml(sections, buildDiscussionSchedule(absences, classNames, presets))
+
+    expect(html).not.toMatch(/\son[a-z]+\s*=/i)
+    expect(html).not.toMatch(/\sstyle\s*=/i)
+    expect(html).not.toContain('<style')
+    expect(html).not.toMatch(/<script(?![^>]*\ssrc=)/i)
+    expect(html).toContain('<link rel="stylesheet" href="')
+    expect(html).toMatch(/<script src="[^"]*teacherMatrixPrintWindow[^"]*\.js"><\/script>/)
+    expect(html).toContain('data-col-width="')
   })
 })

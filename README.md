@@ -88,6 +88,8 @@ A modern web application for tracking student absences and warning letters issue
 
 All data is stored locally in your browser. No data is sent to external servers or databases. Closing the browser will clear the data - use the "Export Report" feature to save important information.
 
+Production builds (`npm run build`) enforce this with a Content-Security-Policy `<meta>` tag injected by `vite.config.ts`: all network connections (`connect-src 'none'`) and any non-bundled scripts, styles, fonts and frames are blocked. The policy is not applied to `npm run dev`. Keep new code compatible with it: no inline `<script>`, `on*=` handlers or `style="..."` attributes in generated HTML (set styles via `element.style` instead), and no external URLs.
+
 ## Configuration
 
 The absence threshold can be adjusted:

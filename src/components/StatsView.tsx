@@ -732,7 +732,16 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
       addTotaloversikt('T1', t1Data)
     }
 
-    await pptx.writeFile({ fileName: `statistikk_${todayDdMmYyyy()}.pptx` })
+    // pptx.writeFile() hides its download link with an inline style attribute, which the CSP blocks.
+    const blob = (await pptx.write({ outputType: 'blob' })) as Blob
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `statistikk_${todayDdMmYyyy()}.pptx`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
   }
 
   const cycleTableSort = (key: SortKey) => {
