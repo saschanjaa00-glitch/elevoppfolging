@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
+  buildAssignedTeacherSections,
   buildDiscussionSchedule,
   buildTeacherClassRankOverview,
   buildTeacherMatrixHtml,
@@ -340,11 +341,13 @@ describe('teacher discussion scheduling', () => {
       'discussion-schedule-table',
       'teacher-schedule-table',
       'teacher-meeting-table',
+      'assigned-matrix-table-0',
+      'assigned-matrix-table-1',
     ]
     tableIds.forEach(tableId => {
       expect(html).toContain(`id="${tableId}"`)
       expect(html).toContain(`data-action="print-table" data-table="${tableId}">Skriv ut tabell</button>`)
-      if (tableId.startsWith('matrix-table-')) {
+      if (tableId.includes('matrix-table-')) {
         expect(html).not.toContain(`copyTableAsPng(this, '${tableId}')`)
         expect(html).not.toContain(`data-action="copy-table" data-table="${tableId}"`)
         expect(html).not.toContain(`data-action="export-excel" data-table="${tableId}"`)
@@ -356,6 +359,44 @@ describe('teacher discussion scheduling', () => {
     expect(html.match(/class="table-block"|class="sheet table-block/g)).toHaveLength(tableIds.length)
     expect(html).toContain('data-action="print">Skriv ut / lagre som PDF</button>')
     expect(html).not.toContain('renderTablePng')
+  })
+
+  it('appends per-class matrices with only the teachers assigned in the schedule', () => {
+    const classNames = ['1A', '1B']
+    const absences = [
+      absence('1A', 'Anne Berg', 1),
+      absence('1A', 'Felles Lærer', 1),
+      absence('1A', 'Felles Lærer', 2),
+      absence('1B', 'Bjørn Dahl', 3),
+      absence('1B', 'Felles Lærer', 3),
+    ]
+    const presets = [
+      preset('Rådgiver A', 'Rådgiver', ['1A', '1B']),
+      preset('Leder A', 'Avdelingsleder', ['1A', '1B']),
+    ]
+    const sections = buildTeacherMatrixSections(absences, classNames)
+    const schedule = buildDiscussionSchedule(absences, classNames, presets)!
+    const assigned = buildAssignedTeacherSections(sections, schedule)
+
+    const expected = schedule.slots
+      .flatMap(slot => slot.assignments)
+      .map(assignment => ({
+        className: assignment.className,
+        names: (assignment.assignedTeachers ?? []).map(teacher => teacher.name).sort(),
+      }))
+      .filter(item => item.names.length > 0)
+      .sort((a, b) => a.className.localeCompare(b.className))
+    expect(assigned.map(section => ({
+      className: section.className,
+      names: section.teachers.map(teacher => teacher.name).sort(),
+    }))).toEqual(expected)
+
+
+    const html = buildTeacherMatrixHtml(sections, schedule)
+    expect(html).toContain('Lærerliste klasselærerråd – Oppsatte lærere – 1A')
+    expect(html.indexOf('Oppsatte lærere')).toBeGreaterThan(html.indexOf('id="teacher-meeting-table"'))
+    expect(html.slice(html.indexOf('id="assigned-matrix-table-0"'))).not.toContain('class="few"')
+    expect(printWindowCss).not.toMatch(/tr\.few td\.spacer/)
   })
 
   it('keeps the print window compatible with a CSP that forbids inline code', () => {

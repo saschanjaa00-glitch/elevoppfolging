@@ -903,16 +903,53 @@ function buildTeacherMeetingOverviewHtml(
   `
 }
 
+export function buildAssignedTeacherSections(
+  sections: TeacherMatrixSection[],
+  schedule: DiscussionSchedule
+): TeacherMatrixSection[] {
+  const assignedByClass = new Map<string, string[]>()
+  schedule.slots
+    .flatMap(slot => slot.assignments)
+    .forEach(assignment => {
+      const names = (assignment.assignedTeachers ?? []).map(teacher => teacher.name)
+      assignedByClass.set(normalizeMatch(assignment.className), names)
+    })
+
+  return sections
+    .map(section => {
+      const assignedNames = assignedByClass.get(normalizeMatch(section.className)) ?? []
+      const byKey = new Map(section.teachers.map(teacher => [normalizeMatch(teacher.name), teacher]))
+      const teachers = Array.from(
+        new Map(
+          assignedNames.map(name => {
+            const key = normalizeMatch(name)
+            return [key, byKey.get(key) ?? { name, studentKeys: new Set<string>() }]
+          })
+        ).values()
+      ).sort(
+        (a, b) =>
+          b.studentKeys.size - a.studentKeys.size ||
+          a.name.localeCompare(b.name, 'nb', { sensitivity: 'base' })
+      )
+      return { ...section, teachers }
+    })
+    .filter(section => section.teachers.length > 0)
+}
+
 function buildSectionHtml(
   section: TeacherMatrixSection,
   isFirst: boolean,
-  index: number,
-  anonymization: AnonymizationMap | null
+  tableId: string,
+  anonymization: AnonymizationMap | null,
+  variant: 'all' | 'assigned' = 'all'
 ): string {
   const columnCount = section.students.length
   const available = PAGE_CONTENT_WIDTH_MM - TEACHER_COLUMN_MM - HEADER_HEIGHT_MM
   const columnMm = Math.max(MIN_COLUMN_MM, Math.min(MAX_COLUMN_MM, available / Math.max(columnCount, 1)))
-  const tableId = `matrix-table-${index}`
+  const heading = variant === 'assigned'
+    ? `Lærerliste klasselærerråd – Oppsatte lærere – ${escapeHtml(section.className)}`
+    : `Lærerliste klasselærerråd – ${escapeHtml(section.className)}`
+  const teacherLabel = variant === 'assigned' ? 'oppsatte lærere' : 'lærere'
 
   const headerCells = section.students
     .map(
@@ -930,15 +967,15 @@ function buildSectionHtml(
           return `<td class="mark">${teaches ? '✓' : ''}</td>`
         })
         .join('')
-      const rowClass = studentCount <= FEW_STUDENTS_LIMIT ? ' class="few"' : ''
+      const rowClass = variant === 'all' && studentCount <= FEW_STUDENTS_LIMIT ? ' class="few"' : ''
       return `<tr${rowClass}><th class="teacher" scope="row">${personSpan(teacher.name, anonymization)} (${studentCount})</th>${cells}<td class="spacer"></td></tr>`
     })
     .join('')
 
   return `
     <section class="sheet table-block${isFirst ? '' : ' page-break'}">
-      <h2>Lærerliste klasselærerråd – ${escapeHtml(section.className)}</h2>
-      <p class="meta">${section.teachers.length} lærere · ${columnCount} elever · ${escapeHtml(todayDdMmYyyy())}</p>
+      <h2>${heading}</h2>
+      <p class="meta">${section.teachers.length} ${teacherLabel} · ${columnCount} elever · ${escapeHtml(todayDdMmYyyy())}</p>
       <div class="no-print copy-row">
         ${printTableButtonHtml(tableId)}
       </div>
@@ -982,11 +1019,21 @@ export function buildTeacherMatrixHtml(
         .flatMap(assignment => assignment.leaders),
     },
   ])
+  const assignedSections = discussionSchedule
+    ? buildAssignedTeacherSections(sections, discussionSchedule)
+    : []
   const body =
     sections
-      .map((section, index) => buildSectionHtml(section, index === 0, index, anonymization))
+      .map((section, index) =>
+        buildSectionHtml(section, index === 0, `matrix-table-${index}`, anonymization)
+      )
       .join('') +
-    (discussionSchedule ? buildDiscussionScheduleHtml(discussionSchedule, anonymization) : '')
+    (discussionSchedule ? buildDiscussionScheduleHtml(discussionSchedule, anonymization) : '') +
+    assignedSections
+      .map((section, index) =>
+        buildSectionHtml(section, false, `assigned-matrix-table-${index}`, anonymization, 'assigned')
+      )
+      .join('')
 
   return `<!DOCTYPE html>
 <html lang="nb">

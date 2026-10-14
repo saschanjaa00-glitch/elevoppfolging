@@ -76,7 +76,7 @@ th.slant > div > span {
 }
 thead { display: table-header-group; }
 tr { break-inside: avoid; page-break-inside: avoid; }
-tbody tr.few th.teacher, tbody tr.few td.mark, tbody tr.few td.spacer {
+tbody tr.few th.teacher, tbody tr.few td.mark {
   background: #f1f1f1;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
