@@ -212,4 +212,9 @@ tbody tr.few th.teacher, tbody tr.few td.mark, tbody tr.few td.spacer {
   body { padding: 0; }
   .no-print { display: none; }
   .editable-label { outline: none; }
+  /* "Skriv ut tabell": only the chosen table's branch is printed, without a leading page break. */
+  .print-hidden { display: none !important; }
+  .print-path { break-before: auto !important; page-break-before: auto !important; }
+  .sheet.print-path { padding-top: 0; }
+  .table-block.print-path > .schedule-subtitle { margin-top: 0; }
 }

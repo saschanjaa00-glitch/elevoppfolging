@@ -1,10 +1,13 @@
 import { memo, useMemo, useState } from 'react'
-import type { DataStore } from '../types'
+import { AlertTriangle } from 'lucide-react'
+import type { DataStore, PresetRecord } from '../types'
+import { isAdviserRole } from '../teacherMatrixPrint'
 
 interface ClassSelectorProps {
   data: DataStore
   selectedClasses: string[]
   onClassChange: (classNames: string[]) => void
+  presets?: PresetRecord[]
   onPrintClassLists?: () => void
   onPrintGruppeliste?: () => void
   onExportOppfolgingsark?: () => void
@@ -16,6 +19,7 @@ function ClassSelector({
   data,
   selectedClasses,
   onClassChange,
+  presets = [],
   onPrintClassLists,
   onPrintGruppeliste,
   onExportOppfolgingsark,
@@ -26,6 +30,16 @@ function ClassSelector({
     () => Array.from(new Set(data.absences.map(a => a.class))).sort(),
     [data.absences]
   )
+
+  const presetWarning = useMemo(() => {
+    if (presets.length === 0) {
+      return 'Ingen preset-fil er lastet opp. Tidsplanen for klasselærerråd mangler da rådgivere (rom) og trinnledere/avdelingsledere.'
+    }
+    if (!presets.some(preset => isAdviserRole(preset.rolle))) {
+      return 'Preset-filen inneholder ingen rådgivere (rolle «Rådgiver»). Tidsplanen kan ikke knytte klassene til faste rom.'
+    }
+    return null
+  }, [presets])
 
   const [showLaererlisteOptions, setShowLaererlisteOptions] = useState(false)
   const [minStudentsInput, setMinStudentsInput] = useState('')
@@ -195,6 +209,12 @@ function ClassSelector({
               </button>
               {showLaererlisteOptions && selectedClasses.length > 0 && (
                 <div className="mt-2 p-3 rounded-lg border border-sky-200 bg-sky-50 space-y-2">
+                  {presetWarning && (
+                    <div role="alert" className="flex gap-2 p-2 rounded-md border border-amber-300 bg-amber-50 text-[11px] leading-snug text-amber-800">
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" aria-hidden="true" />
+                      <span>{presetWarning}</span>
+                    </div>
+                  )}
                   <label htmlFor="min-students" className="block text-xs font-semibold text-slate-700">
                     Minimum antall elever
                   </label>

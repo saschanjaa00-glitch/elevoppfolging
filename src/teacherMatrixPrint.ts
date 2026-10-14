@@ -253,6 +253,10 @@ export function buildTeacherClassRankOverview(
   return { classes, teachers }
 }
 
+export function isAdviserRole(rolle: string): boolean {
+  return normalizeMatch(rolle).includes('radgiver')
+}
+
 function getPresetOwners(
   presets: PresetRecord[],
   className: string,
@@ -283,7 +287,7 @@ function buildDiscussionClasses(
       const advisers = getPresetOwners(
         presets,
         className,
-        role => role === 'radgiver' || role.includes('radgiver')
+        isAdviserRole
       )
       const leaders = getPresetOwners(
         presets,
@@ -707,6 +711,10 @@ function syncedLabelHtml(
   return `<span class="${classes}" data-sync-group="${group}" data-sync-index="${index}"${editableAttrs}>${escapeHtml(text)}</span>`
 }
 
+function printTableButtonHtml(tableId: string): string {
+  return `<button type="button" data-action="print-table" data-table="${tableId}">Skriv ut tabell</button>`
+}
+
 function buildDiscussionScheduleHtml(
   schedule: DiscussionSchedule,
   anonymization: AnonymizationMap | null
@@ -797,12 +805,14 @@ function buildDiscussionScheduleHtml(
 
   return `
     <section class="sheet page-break schedule-section">
+      <div class="table-block">
       <h2>Forslag til tidsplan for klasselærerråd</h2>
       <p class="meta">Rommene følger rådgiverne. Planen bruker færrest mulige tidsluker, fordeler klassene jevnt og minimerer lærerkonflikter vektet etter antall elever.</p>
       ${warnings}
       <div class="no-print copy-row">
         <button type="button" data-action="copy-table" data-table="discussion-schedule-table">Kopier tabell</button>
         <button type="button" data-action="export-excel" data-table="discussion-schedule-table" data-filename="tidsplan_klasselaererrad">Last ned Excel</button>
+        ${printTableButtonHtml('discussion-schedule-table')}
         <label class="toggle-option"><input type="checkbox" data-action="toggle-collisions"> Vis kollisjoner</label>
         <span class="room-edit-hint">Klikk på et rom- eller tidsnavn for å endre det. Endringen oppdateres i alle tabellene.</span>
       </div>
@@ -815,6 +825,8 @@ function buildDiscussionScheduleHtml(
         </thead>
         <tbody>${rows}</tbody>
       </table>
+      </div>
+      <div class="table-block">
       <h3 class="schedule-subtitle">Lærerfordeling per tidsluke</h3>
       <p class="meta">Tallene bak klassenavnet viser antall kontaktlærere + antall øvrige lærere. Kontaktlærere er plassert i egen klasse. Andre lærere er plassert i klassen der de har flest elever i den aktuelle tidsluken. Tallene i parentes viser antall elever læreren har i hver av klassene i tidsluken (samme rekkefølge som kolonnene), og det understrekede tallet er klassen læreren er plassert i.${
         schedule.minStudents !== null
@@ -828,6 +840,7 @@ function buildDiscussionScheduleHtml(
       <div class="no-print copy-row">
         <button type="button" data-action="copy-table" data-table="teacher-schedule-table">Kopier tabell</button>
         <button type="button" data-action="export-excel" data-table="teacher-schedule-table" data-filename="laererfordeling_tidsluke">Last ned Excel</button>
+        ${printTableButtonHtml('teacher-schedule-table')}
         <label class="toggle-option"><input type="checkbox" data-action="toggle-parentheses" data-table="teacher-schedule-table"> Vis tall i parentes</label>
       </div>
       <table id="teacher-schedule-table" class="schedule-table teacher-schedule-table hide-paren">
@@ -839,6 +852,7 @@ function buildDiscussionScheduleHtml(
         </thead>
         <tbody>${teacherRows}</tbody>
       </table>
+      </div>
       ${buildTeacherMeetingOverviewHtml(buildTeacherMeetingOverview(schedule), anonymization)}
     </section>
   `
@@ -866,11 +880,13 @@ function buildTeacherMeetingOverviewHtml(
     .join('')
 
   return `
+      <div class="table-block">
       <h3 class="schedule-subtitle">Møteoversikt per lærer</h3>
       <p class="meta">Klassen læreren skal møte i hver tidsluke. Siste kolonne viser totalt antall møter læreren skal delta på.</p>
       <div class="no-print copy-row">
         <button type="button" data-action="copy-table" data-table="teacher-meeting-table">Kopier tabell</button>
         <button type="button" data-action="export-excel" data-table="teacher-meeting-table" data-filename="moteoversikt_laerere">Last ned Excel</button>
+        ${printTableButtonHtml('teacher-meeting-table')}
         <label class="toggle-option"><input type="checkbox" data-action="toggle-meeting-counts"> Vis antall elever</label>
       </div>
       <table id="teacher-meeting-table" class="schedule-table meeting-table">
@@ -883,6 +899,7 @@ function buildTeacherMeetingOverviewHtml(
         </thead>
         <tbody>${bodyRows}</tbody>
       </table>
+      </div>
   `
 }
 
@@ -919,9 +936,12 @@ function buildSectionHtml(
     .join('')
 
   return `
-    <section class="sheet${isFirst ? '' : ' page-break'}">
+    <section class="sheet table-block${isFirst ? '' : ' page-break'}">
       <h2>Lærerliste klasselærerråd – ${escapeHtml(section.className)}</h2>
       <p class="meta">${section.teachers.length} lærere · ${columnCount} elever · ${escapeHtml(todayDdMmYyyy())}</p>
+      <div class="no-print copy-row">
+        ${printTableButtonHtml(tableId)}
+      </div>
       <table id="${tableId}" data-col-width="${columnMm.toFixed(2)}mm">
         <thead>
           <tr>

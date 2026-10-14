@@ -1726,6 +1726,7 @@ function App() {
                     data={data}
                     selectedClasses={selectedClasses}
                     onClassChange={setSelectedClasses}
+                    presets={presets}
                     onPrintClassLists={() => setClassListModalOpen(true)}
                     onPrintGruppeliste={() => setGruppelisteModalOpen(true)}
                     onExportOppfolgingsark={handleExportClassOppfolgingsark}

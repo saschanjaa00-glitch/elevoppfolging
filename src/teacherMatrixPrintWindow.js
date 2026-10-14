@@ -238,12 +238,42 @@ document.addEventListener('paste', function (event) {
   syncLabel(target);
 });
 
+function clearSinglePrint() {
+  var marked = document.querySelectorAll('.print-hidden, .print-path');
+  for (var i = 0; i < marked.length; i += 1) {
+    marked[i].classList.remove('print-hidden', 'print-path');
+  }
+}
+
+// Prints one table (with its heading and description) by hiding every other branch of the page.
+function printTable(tableId) {
+  var table = document.getElementById(tableId);
+  var block = table && table.closest('.table-block');
+  if (!block) return;
+  clearSinglePrint();
+  for (var node = block; node && node !== document.body; node = node.parentElement) {
+    node.classList.add('print-path');
+    var siblings = node.parentElement ? node.parentElement.children : [];
+    for (var i = 0; i < siblings.length; i += 1) {
+      if (siblings[i] !== node && siblings[i].tagName !== 'SCRIPT' && !siblings[i].classList.contains('doc-meta')) {
+        siblings[i].classList.add('print-hidden');
+      }
+    }
+  }
+  window.addEventListener('afterprint', clearSinglePrint, { once: true });
+  window.print();
+}
+
 document.addEventListener('click', function (event) {
   var button = event.target && event.target.closest ? event.target.closest('button[data-action]') : null;
   if (!button) return;
   var action = button.getAttribute('data-action');
   var tableId = button.getAttribute('data-table');
-  if (action === 'print') window.print();
+  if (action === 'print') {
+    clearSinglePrint();
+    window.print();
+  }
+  else if (action === 'print-table') printTable(tableId);
   else if (action === 'copy-table') copyScheduleTable(button, tableId);
   else if (action === 'export-excel') exportTableToExcel(button, tableId, button.getAttribute('data-filename'));
 });

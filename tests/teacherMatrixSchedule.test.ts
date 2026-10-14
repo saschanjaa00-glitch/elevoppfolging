@@ -6,6 +6,7 @@ import {
   buildTeacherMatrixHtml,
   buildTeacherMatrixSections,
   buildTeacherMeetingOverview,
+  isAdviserRole,
 } from '../src/teacherMatrixPrint'
 import type { AbsenceRecord, PresetRecord } from '../src/types'
 
@@ -29,6 +30,13 @@ function preset(navn: string, rolle: string, klasser: string[]): PresetRecord {
 }
 
 describe('teacher discussion scheduling', () => {
+  it('recognises adviser roles regardless of case and diacritics', () => {
+    expect(isAdviserRole('Rådgiver')).toBe(true)
+    expect(isAdviserRole(' RADGIVER ')).toBe(true)
+    expect(isAdviserRole('Sosialpedagogisk rådgiver')).toBe(true)
+    expect(isAdviserRole('Avdelingsleder')).toBe(false)
+    expect(isAdviserRole('Trinnleder')).toBe(false)
+  })
   it('keeps adviser rooms fixed and prevents required-person conflicts', () => {
     const classNames = ['1A', '1B', '1C']
     const absences = classNames.map(className => absence(className, `Lærer ${className}`, 1))
@@ -335,14 +343,18 @@ describe('teacher discussion scheduling', () => {
     ]
     tableIds.forEach(tableId => {
       expect(html).toContain(`id="${tableId}"`)
+      expect(html).toContain(`data-action="print-table" data-table="${tableId}">Skriv ut tabell</button>`)
       if (tableId.startsWith('matrix-table-')) {
         expect(html).not.toContain(`copyTableAsPng(this, '${tableId}')`)
-        expect(html).not.toContain(`data-table="${tableId}"`)
+        expect(html).not.toContain(`data-action="copy-table" data-table="${tableId}"`)
+        expect(html).not.toContain(`data-action="export-excel" data-table="${tableId}"`)
       } else {
         expect(html).toContain(`data-action="copy-table" data-table="${tableId}"`)
         expect(html).toContain(`data-action="export-excel" data-table="${tableId}"`)
       }
     })
+    expect(html.match(/class="table-block"|class="sheet table-block/g)).toHaveLength(tableIds.length)
+    expect(html).toContain('data-action="print">Skriv ut / lagre som PDF</button>')
     expect(html).not.toContain('renderTablePng')
   })
 

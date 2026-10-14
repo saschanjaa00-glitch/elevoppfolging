@@ -7,6 +7,8 @@ import { normalizeCellText } from '../securityUtils'
 import { inferGenderFromFodselsnummer } from '../studentInfoUtils'
 import { normalizePhone } from '../examData'
 
+const PRESET_TEMPLATE_ROWS = 200
+
 
 interface FileUploadProps {
   onDataImport: (data: DataStore) => void;
@@ -150,6 +152,66 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Varsler')
     XLSX.writeFile(wb, 'varsler_mal.xlsx')
+  }
+
+  const downloadPresetTemplate = async () => {
+    const ExcelJS = await import('exceljs')
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('Preset')
+    sheet.columns = [
+      { header: 'Navn', key: 'navn', width: 28 },
+      { header: 'Rolle', key: 'rolle', width: 20 },
+      { header: 'Klasser', key: 'klasser', width: 32, style: { numFmt: '@' } },
+    ]
+    sheet.getRow(1).font = { bold: true }
+    sheet.views = [{ state: 'frozen', ySplit: 1 }]
+
+    const lastRow = PRESET_TEMPLATE_ROWS + 1
+    // Range-based rules: ExcelJS merges per-cell rules into overlapping ranges, which Excel reports as corrupt.
+    const validations = (sheet as unknown as {
+      dataValidations: { add: (range: string, validation: import('exceljs').DataValidation) => void }
+    }).dataValidations
+    // showErrorMessage: false keeps the dropdown as suggestions, so any other role can be typed in.
+    validations.add(`B2:B${lastRow}`, {
+      type: 'list',
+      allowBlank: true,
+      formulae: ['"Trinnleder,Rådgiver"'],
+      showErrorMessage: false,
+      showInputMessage: true,
+      promptTitle: 'Rolle',
+      prompt: 'Velg Trinnleder eller Rådgiver, eller skriv inn en annen rolle.',
+    })
+    validations.add(`C2:C${lastRow}`, {
+      type: 'custom',
+      allowBlank: true,
+      formulae: ['TRUE'],
+      showErrorMessage: false,
+      showInputMessage: true,
+      promptTitle: 'Klasser',
+      prompt: 'Skriv klassene adskilt med komma, f.eks. 1STA, 1STB.',
+    })
+
+    const guide = workbook.addWorksheet('Veiledning')
+    guide.getColumn(1).width = 100
+    ;[
+      'Fyll ut arket «Preset». Én rad per person.',
+      'Navn: Personens navn.',
+      'Rolle: velg Trinnleder eller Rådgiver fra listen, eller skriv inn en annen rolle (f.eks. Avdelingsleder).',
+      'Klasser: klassene personen har ansvar for, adskilt med komma (f.eks. 1STA, 1STB).',
+    ].forEach(line => guide.addRow([line]))
+
+    const buffer = await workbook.xlsx.writeBuffer()
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'preset_mal.xlsx'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
   }
 
   const getWarningFileCreatedDate = (workbook: XLSX.WorkBook, file: File): string | undefined => {
@@ -673,6 +735,15 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
                 <ul className={`space-y-0.5 text-xs ${detected ? 'text-green-700' : 'text-slate-500'}`}>
                   {cols.map(c => <li key={c}>· {c}</li>)}
                 </ul>
+                {key === 'preset' && (
+                  <button
+                    type="button"
+                    onClick={() => { void downloadPresetTemplate() }}
+                    className="mt-2 text-xs text-sky-600 hover:underline font-medium"
+                  >
+                    Last ned mal
+                  </button>
+                )}
               </div>
             )
           })}
