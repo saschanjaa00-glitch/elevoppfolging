@@ -8,8 +8,10 @@ import {
   createAbsenceSubjectClassLookup,
   normalizeMatch,
   resolveClassFromSubjectLookup,
+  type GenderCoverage,
 } from '../studentInfoUtils'
 import { fagkodeLookup } from '../fagkodeLookup'
+import GenderAverageToggle from './GenderAverageToggle'
 import { todayDdMmYyyy } from '../dateUtils'
 import { meetsThreshold } from '../thresholdUtils'
 
@@ -205,7 +207,13 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
   const [selectedMetric, setSelectedMetric] = useState<MetricKey | null>(null)
   const [tableSort, setTableSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null)
   const [vgFilter, setVgFilter] = useState<string | null>(null)
-  const [termFilter, setTermFilter] = useState<'1' | '2'>('1')
+  // Start on T2 when the grade file has second half-year grades.
+  const [termFilter, setTermFilter] = useState<'1' | '2'>(() =>
+    data.grades.some(g => {
+      const halvaar = g.halvår?.toString().trim().toLowerCase() ?? ''
+      return halvaar === '2' || halvaar.includes('2')
+    }) ? '2' : '1'
+  )
   const [localThreshold, setLocalThreshold] = useState<number>(propThreshold)
   const [visibleGenderAverages, setVisibleGenderAverages] = useState<Record<StudentGender, boolean>>({ girl: false, boy: false })
   const threshold = localThreshold
@@ -296,6 +304,13 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
     })
     return result
   }, [data.studentInfo])
+
+  const genderCoverage = useMemo((): GenderCoverage => {
+    const pupils = new Set(data.absences.map(a => buildStudentClassKey(a.navn, a.class)))
+    let withGender = 0
+    pupils.forEach(key => { if (studentGenderByKey.has(key)) withGender++ })
+    return { studentInfoLoaded: data.studentInfo.length > 0, total: pupils.size, withGender }
+  }, [data.absences, data.studentInfo, studentGenderByKey])
 
   const averageByGenderFromAbsences = (absences: typeof data.absences): Partial<Record<StudentGender, number>> => {
     const values: Record<StudentGender, number[]> = { girl: [], boy: [] }
@@ -1275,23 +1290,7 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
           <span className="text-sm text-slate-600">%</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
-          <span className="px-2 text-xs font-medium text-slate-500">Kjønnssnitt</span>
-          {GENDER_ORDER.map(gender => (
-            <button
-              key={gender}
-              type="button"
-              onClick={() => toggleGenderAverage(gender)}
-              className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
-                visibleGenderAverages[gender]
-                  ? 'bg-sky-100 text-sky-800'
-                  : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              {GENDER_LABEL[gender]}
-            </button>
-          ))}
-        </div>
+        <GenderAverageToggle visible={visibleGenderAverages} onToggle={toggleGenderAverage} coverage={genderCoverage} />
         <button
           type="button"
           onClick={() => void generateStatsPptx()}

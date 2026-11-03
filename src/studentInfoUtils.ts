@@ -17,6 +17,38 @@ export const inferGenderFromFodselsnummer = (value: string): StudentGender | nul
   return ninthDigit % 2 === 0 ? 'girl' : 'boy'
 }
 
+// How many of the pupils shown have a gender, i.e. a valid fødselsnummer in the Elevfil.
+export interface GenderCoverage {
+  studentInfoLoaded: boolean
+  total: number
+  withGender: number
+}
+
+// Whether the girls/boys averages can be shown, and a sentence saying why not or
+// who is left out. Used as the tooltip on the Kjønnssnitt buttons.
+export const describeGenderCoverage = ({ studentInfoLoaded, total, withGender }: GenderCoverage): { available: boolean; message: string } => {
+  if (!studentInfoLoaded) {
+    return {
+      available: false,
+      message: 'Kjønnssnitt er ikke tilgjengelig: ingen elevfil er lastet opp. Kjønn leses fra fødselsnummeret i elevfilen.',
+    }
+  }
+  if (withGender === 0) {
+    return {
+      available: false,
+      message: 'Kjønnssnitt er ikke tilgjengelig: elevfilen har ingen gyldige fødselsnumre. Legg til kolonnen «Fødselsnummer» (11 siffer) i elevfilen og last opp på nytt.',
+    }
+  }
+  const missing = total - withGender
+  if (missing > 0) {
+    return {
+      available: true,
+      message: `${missing} av ${total} elever mangler fødselsnummer eller finnes ikke i elevfilen, og er ikke med i kjønnssnittet.`,
+    }
+  }
+  return { available: true, message: 'Kjønn leses fra fødselsnummeret i elevfilen.' }
+}
+
 export const buildStudentClassKey = (navn: string, className?: string): string => {
   const normalizedName = normalizeMatch(navn)
   const normalizedClass = normalizeMatch(className ?? '')

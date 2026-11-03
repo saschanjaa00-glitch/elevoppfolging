@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight } from 'lucide-react'
 import type { DataStore, StudentGender } from '../types'
 import KarakterutviklingPanel from './KarakterutviklingPanel'
 import FravaerOverview from './FravaerOverview'
+import GenderAverageToggle from './GenderAverageToggle'
 import { fagkodeLookup } from '../fagkodeLookup'
 import {
   buildStudentClassKey,
@@ -10,6 +11,7 @@ import {
   createStudentInfoLookup,
   normalizeMatch,
   resolveClassFromSubjectLookup,
+  type GenderCoverage,
 } from '../studentInfoUtils'
 
 const subjectDisplayCode = (value: string): string => {
@@ -92,13 +94,6 @@ type SortKey =
   | 'genderDiff'
 type SortDirection = 'asc' | 'desc'
 
-type GenderKey = 'girl' | 'boy'
-
-const GENDER_ORDER: GenderKey[] = ['girl', 'boy']
-const GENDER_LABEL: Record<GenderKey, string> = {
-  girl: 'Jenter',
-  boy: 'Gutter',
-}
 
 const allGrades = ['IV', '1', '2', '3', '4', '5', '6'] as const
 const gradeSortKey: Record<(typeof allGrades)[number], SortKey> = {
@@ -262,10 +257,17 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
       } => Boolean(grade?.teacher && grade.subjectDisplay))
         }, [data.grades, absenceSubjectClassLookup, studentInfoLookup, subjectNameByCode])
 
-  const hasGenderData = useMemo(
-    () => normalizedGrades.some(grade => grade.gender !== null),
-    [normalizedGrades]
-  )
+  // Pupils in the grade file, and how many of them have a gender from the Elevfil.
+  const genderCoverage = useMemo((): GenderCoverage => {
+    const pupils = new Map<string, boolean>()
+    normalizedGrades.forEach(grade => {
+      if (grade.gender) pupils.set(grade.studentKey, true)
+      else if (!pupils.has(grade.studentKey)) pupils.set(grade.studentKey, false)
+    })
+    let withGender = 0
+    pupils.forEach(hasGender => { if (hasGender) withGender++ })
+    return { studentInfoLoaded: data.studentInfo.length > 0, total: pupils.size, withGender }
+  }, [normalizedGrades, data.studentInfo])
 
   const countsForMode = (
     t1: Record<string, number>,
@@ -1002,25 +1004,7 @@ export default function FaginnsiktView({ data, subtab = 'oversikt', onSubtabChan
             >
               Sammenlign
             </button>
-            {hasGenderData && (
-              <div className="ml-2 flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
-                <span className="px-2 text-xs font-medium text-slate-500">Kjønnssnitt</span>
-                {(GENDER_ORDER).map(gender => (
-                  <button
-                    key={gender}
-                    type="button"
-                    onClick={() => toggleGenderAverage(gender)}
-                    className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
-                      visibleGenderAverages[gender]
-                        ? 'bg-sky-100 text-sky-800'
-                        : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    {GENDER_LABEL[gender]}
-                  </button>
-                ))}
-              </div>
-            )}
+            <GenderAverageToggle className="ml-2" visible={visibleGenderAverages} onToggle={toggleGenderAverage} coverage={genderCoverage} />
           </div>
           <input
             type="text"
