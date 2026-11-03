@@ -163,6 +163,24 @@ export default function InnsiktView({ data, threshold }: Props) {
       } => Boolean(grade?.teacher && grade.subjectDisplay))
   }, [data.grades, absenceSubjectClassLookup, studentInfoLookup])
 
+  // Fallback teacher assignments from the fravær file's Lærer column, used only when no grade file provides teachers.
+  const absenceTeacherAssignments = useMemo(() => {
+    return data.absences
+      .map(absence => ({
+        teacher: absence.teacher?.trim() ?? '',
+        subjectDisplay: absence.subjectGroup?.trim() ?? '',
+        subjectNorm: normalizeMatch(absence.subjectGroup),
+        studentKey: buildStudentClassKey(absence.navn, absence.class),
+        gradeValue: null,
+        isT1: false,
+        isT2: false,
+        gender: null,
+      }))
+      .filter(assignment => assignment.teacher && assignment.subjectDisplay)
+  }, [data.absences])
+
+  const usesAbsenceTeachers = normalizedGrades.length === 0 && absenceTeacherAssignments.length > 0
+
   const normalizedWarnings = useMemo(() => {
     return data.warnings
       .map(warning => ({
@@ -204,7 +222,9 @@ export default function InnsiktView({ data, threshold }: Props) {
   }, [data.absences])
 
   const teacherStats = useMemo(() => {
-    // Build teacher and subject statistics from vurderinger (grades) only.
+    // Build teacher and subject statistics from vurderinger (grades). Without a grade file, fall back to
+    // the fravær file's teachers; the two sources are never mixed, so names can't be duplicated.
+    const assignments = usesAbsenceTeachers ? absenceTeacherAssignments : normalizedGrades
     const teacherData = new Map<string, TeacherStats>()
     const teacherSubjects = new Map<string, Map<string, SubjectStats>>()
     const teacherStudents = new Map<string, Set<string>>()
@@ -213,7 +233,7 @@ export default function InnsiktView({ data, threshold }: Props) {
 
     const studentSubjectKey = (studentKey: string, subject: string) => `${studentKey}|||${normalizeMatch(subject)}`
 
-    normalizedGrades.forEach(grade => {
+    assignments.forEach(grade => {
       const teacher = grade.teacher
       const subjectDisplay = grade.subjectDisplay
       const subject = grade.subjectNorm
@@ -276,8 +296,11 @@ export default function InnsiktView({ data, threshold }: Props) {
         })
       }
 
-      const stats = teacherData.get(teacher)!
+      // Fravær-file assignments carry no grade
       const gradeValue = grade.gradeValue
+      if (gradeValue === null) return
+
+      const stats = teacherData.get(teacher)!
       stats.gradeCount += 1
       stats.gradesCounts[gradeValue] = (stats.gradesCounts[gradeValue] ?? 0) + 1
       if (grade.isT1) {
@@ -392,7 +415,7 @@ export default function InnsiktView({ data, threshold }: Props) {
     })
 
     return Array.from(teacherData.values())
-  }, [normalizedGrades, normalizedWarnings, normalizedAbsences, subjectNameByNorm, threshold])
+  }, [normalizedGrades, absenceTeacherAssignments, usesAbsenceTeachers, normalizedWarnings, normalizedAbsences, subjectNameByNorm, threshold])
 
   const allGrades = ['IV', '1', '2', '3', '4', '5', '6'] as const
 
@@ -910,7 +933,13 @@ export default function InnsiktView({ data, threshold }: Props) {
             Eksporter til Excel
           </button>
         </div>
-        
+
+        {usesAbsenceTeachers && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Ingen karakterfil med faglærere er lastet inn. Lærerne er hentet fra fraværsfilen, så varsler og manglende varsler vises, men karakterdata mangler.
+          </div>
+        )}
+
         <div className="mb-4">
           <div className="mb-3 flex flex-wrap gap-1 p-1 bg-slate-100 rounded-xl w-fit">
             <button
