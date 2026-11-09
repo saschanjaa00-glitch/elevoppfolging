@@ -12,6 +12,11 @@ export interface AbsenceRecord {
   subjectGroup: string
   percentageAbsence: number
   hoursAbsence: number
+  // Optional columns from the full fravær report (hours, H1+H2); absent in older/simpler files
+  annualHours?: number
+  documentedHours?: number
+  rHours?: number
+  exclamationHours?: number
   teacher: string
   kontaktlaerer?: string
   avbrudd: boolean

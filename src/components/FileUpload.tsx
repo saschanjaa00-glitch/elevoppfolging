@@ -384,6 +384,15 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
     return hasFornavn && hasEtternavn && hasProgramArea && hasSidemal && hasIntake
   }
 
+  // Optional numeric column, matched on the exact header ('dok' alone would also hit the 'udok' column).
+  // Returns undefined when the column is missing or empty.
+  const getOptionalNumber = (row: Record<string, any>, aliases: string[]): number | undefined => {
+    const value = getRowValue(row, aliases)
+    if (!value) return undefined
+    const parsed = parseFloat(value.replace(',', '.'))
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+
   const parseAbsenceSheet = (sheet: Record<string, any>[]): AbsenceRecord[] => {
     return sheet
       .map(row => {
@@ -401,6 +410,10 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
           subjectGroup: getRowValue(row, ['faggruppe', 'fagkode', 'code']),
           percentageAbsence: percentage,
           hoursAbsence: hours,
+          annualHours: getOptionalNumber(row, ['årstimer', 'arstimer']),
+          documentedHours: getOptionalNumber(row, ['H1+H2 timer dok. fravær (D)', 'H1+H2 timer dok. fravær']),
+          rHours: getOptionalNumber(row, ['H1+H2 timer fravær (R)']),
+          exclamationHours: getOptionalNumber(row, ['H1+H2 timer fravær (!)']),
           teacher: getRowValue(row, ['lærer', 'larer', 'teacher', 'leder']),
           kontaktlaerer: getRowValue(row, ['kontaktlærer', 'kontaktansvarlig lærer', 'kontaktlaerer']) || undefined,
           avbrudd: getRowValueByTokens(row, [['avbrudd'], ['discontinued']]).toLowerCase() === 'ja',

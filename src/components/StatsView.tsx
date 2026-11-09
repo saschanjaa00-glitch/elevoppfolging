@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef } from 'react'
 import type { ReactNode } from 'react'
-import { Download, BarChart2 } from 'lucide-react'
+import { Download, BarChart2, Loader2 } from 'lucide-react'
 import type { DataStore, StudentGender } from '../types'
 import {
   buildStudentClassKey,
@@ -215,6 +215,7 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
     }) ? '2' : '1'
   )
   const [localThreshold, setLocalThreshold] = useState<number>(propThreshold)
+  const [isExportingPptx, setIsExportingPptx] = useState(false)
   const [visibleGenderAverages, setVisibleGenderAverages] = useState<Record<StudentGender, boolean>>({ girl: false, boy: false })
   const threshold = localThreshold
   const summaryRef = useRef<HTMLDivElement>(null)
@@ -749,9 +750,131 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
       }
     }
 
+    // Class order shared by every per-class chart, so columns line up across slides
+    const allLabels = stats.perClass.map(c => c.className)
+
+    // ── Slides: Totalt fravær (only when the file has Årstimer and the hour columns) ──
+    // Each type is hours / årstimer per elev–fag; the averages are over elev–fag rows, like the udok average.
+    const fullAbsenceRows = data.absences.filter(r => (r.annualHours ?? 0) > 0 && r.documentedHours !== undefined)
+    if (fullAbsenceRows.length > 0) {
+      const pctOf = (hours: number | undefined, r: (typeof fullAbsenceRows)[number]) => ((hours ?? 0) / r.annualHours!) * 100
+      const breakdown = (inScope: (className: string) => boolean) => {
+        const rows = fullAbsenceRows.filter(r => inScope(r.class))
+        const mean = (pick: (r: (typeof rows)[number]) => number) => rows.length > 0 ? rows.reduce((s, r) => s + pick(r), 0) / rows.length : 0
+        const udok = mean(r => pctOf(r.hoursAbsence, r))
+        const dok = mean(r => pctOf(r.documentedHours, r))
+        const bang = mean(r => pctOf(r.exclamationHours, r))
+        const rPct = mean(r => pctOf(r.rHours, r))
+        // Pupils with more than 10% total (excl. R) in at least one subject
+        const over10 = new Set(rows
+          .filter(r => pctOf(r.hoursAbsence + (r.documentedHours ?? 0) + (r.exclamationHours ?? 0), r) > 10)
+          .map(r => buildStudentClassKey(r.navn, r.class))).size
+        return { rows: rows.length, udok, dok, bang, rPct, exclR: udok + dok + bang, inclR: udok + dok + bang + rPct, over10 }
+      }
+      const fullScopes = [
+        { label: 'Totalt', inScope: () => true },
+        ...levelStats.map(ls => ({ label: `Vg${ls.level}`, inScope: (cls: string) => cls.startsWith(ls.level) })),
+      ].map(scope => ({ label: scope.label, b: breakdown(scope.inScope) }))
+      const classBreakdowns = stats.perClass.map(c => breakdown(cls => cls === c.className))
+      const fullNote = 'Timer fravær / årstimer per fag, snitt over alle elev–fag. Udokumentert fravær på de andre slidene er prosenten fra fraværsfilen.'
+
+      const addFullCards = (slide: any, cards: { label: string; value: number; lines: string[] }[]) => {
+        const cardW = (9.4 - 0.2 * (cards.length - 1)) / cards.length
+        cards.forEach((card, i) => {
+          const x = 0.3 + i * (cardW + 0.2)
+          const y = 0.82
+          addCard(slide, x, y, cardW, 1.0)
+          slide.addText(card.label, { x, y: y + 0.03, w: cardW, h: 0.24, fontSize: 8, color: MUTED, align: 'center' })
+          slide.addText(`${fmt(card.value, 1)}%`, { x, y: y + 0.26, w: cardW, h: 0.36, fontSize: 16, bold: true, color: ACCENT, align: 'center', valign: 'middle' })
+          card.lines.forEach((line, li) => {
+            slide.addText(line, { x, y: y + 0.62 + li * 0.17, w: cardW, h: 0.17, fontSize: 7, bold: li === 0, color: li === 0 ? INK : MUTED, align: 'center' })
+          })
+        })
+      }
+      const stackedOpts = (title: string) => ({
+        x: 0.3, y: 1.95, w: 9.4, h: 3.4, barDir: 'col', barGrouping: 'stacked',
+        showValue: false, catAxisLabelFontSize: 8, valAxisLabelFormatCode: '0"%"', valAxisMinVal: 0,
+        showTitle: true, title, titleFontSize: 10, showLegend: true, legendFontSize: 8, legendPos: 'b',
+      })
+
+      // Uten R
+      const sfa = addContentSlide('Totalt fravær – udokumentert, dokumentert og (!), uten R')
+      addFullCards(sfa, fullScopes.map(s => ({
+        label: s.label,
+        value: s.b.exclR,
+        lines: [`Udok ${fmt(s.b.udok, 1)}% · Dok ${fmt(s.b.dok, 1)}% · ! ${fmt(s.b.bang, 1)}%`, `${s.b.over10} elever over 10% i minst ett fag`],
+      })))
+      addChart(sfa, 'bar', [
+        { name: 'Udokumentert (X, M)', labels: allLabels, values: classBreakdowns.map(b => parseFloat(b.udok.toFixed(1))) },
+        { name: 'Dokumentert (D)', labels: allLabels, values: classBreakdowns.map(b => parseFloat(b.dok.toFixed(1))) },
+        { name: '(!)', labels: allLabels, values: classBreakdowns.map(b => parseFloat(b.bang.toFixed(1))) },
+      ], { ...stackedOpts('Gj.snitt totalt fravær per klasse uten R (%)'), chartColors: [ACCENT, '8CC3BE', 'B5ADA3'] })
+      sfa.addText(fullNote, { x: 0.3, y: 5.36, w: 9.4, h: 0.22, fontSize: 7.5, color: MUTED, align: 'right' })
+
+
+      // Histogram: pupils per 1-point band of overall fravær (all their hours of the chosen types / all their årstimer)
+      const HIST_MAX = 20
+      const addHistogramSlide = (title: string, chartTitle: string, note: string, hoursOf: (r: (typeof fullAbsenceRows)[number]) => number) => {
+        const pupilTotals = new Map<string, { hours: number; annual: number }>()
+        fullAbsenceRows.forEach(r => {
+          const key = buildStudentClassKey(r.navn, r.class)
+          const entry = pupilTotals.get(key) ?? { hours: 0, annual: 0 }
+          entry.hours += hoursOf(r)
+          entry.annual += r.annualHours!
+          pupilTotals.set(key, entry)
+        })
+        const pupilPcts = Array.from(pupilTotals.values()).map(p => (p.hours / p.annual) * 100)
+        const binCounts = new Array(HIST_MAX + 1).fill(0)
+        pupilPcts.forEach(pct => { binCounts[Math.min(HIST_MAX, Math.floor(pct))]++ })
+        const binLabels = binCounts.map((_, i) => i === HIST_MAX ? `${HIST_MAX}+` : `${i}–${i + 1}`)
+        const sortedPcts = [...pupilPcts].sort((a, b) => a - b)
+        const median = sortedPcts.length === 0 ? 0
+          : sortedPcts.length % 2 === 1 ? sortedPcts[(sortedPcts.length - 1) / 2]
+          : (sortedPcts[sortedPcts.length / 2 - 1] + sortedPcts[sortedPcts.length / 2]) / 2
+        const countOver = (limit: number) => pupilPcts.filter(p => p > limit).length
+        const shareOver = (limit: number) => pupilPcts.length > 0 ? (countOver(limit) / pupilPcts.length) * 100 : 0
+
+        const slide = addContentSlide(title)
+        addFullCards(slide, [
+          { label: `Elever (${pupilPcts.length})`, value: median, lines: ['Median fravær per elev'] },
+          ...[5, 10, 15].map(limit => ({ label: `Over ${limit}%`, value: shareOver(limit), lines: [`${countOver(limit)} elever`] })),
+        ])
+        addChart(slide, 'bar', [{ name: 'Elever', labels: binLabels, values: binCounts }], {
+          x: 0.3, y: 1.95, w: 9.4, h: 3.4, barDir: 'col', chartColors: [ACCENT], barGapWidthPct: 20,
+          showValue: true, dataLabelFontSize: 8, dataLabelFormatCode: '0;;', catAxisLabelFontSize: 8, valAxisMinVal: 0,
+          showTitle: true, title: chartTitle, titleFontSize: 10,
+        })
+        slide.addText(`${note} Intervallet 1–2 betyr fra og med 1 % til under 2 %.`, { x: 0.3, y: 5.36, w: 9.4, h: 0.22, fontSize: 7.5, color: MUTED, align: 'right' })
+      }
+      addHistogramSlide(
+        'Totalt fravær uten R – fordeling av elever',
+        'Antall elever per fraværsintervall (% uten R, alle fag samlet)',
+        'Per elev: alle fraværstimer (udok + dok + !) / alle årstimer.',
+        r => r.hoursAbsence + (r.documentedHours ?? 0) + (r.exclamationHours ?? 0),
+      )
+      addHistogramSlide(
+        'Udokumentert fravær – fordeling av elever',
+        'Antall elever per fraværsintervall (% udokumentert, alle fag samlet)',
+        'Per elev: udokumenterte timer (X, M) / alle årstimer.',
+        r => r.hoursAbsence,
+      )
+
+      // Med R
+      const sfr = addContentSlide('Totalt fravær inkludert R')
+      addFullCards(sfr, fullScopes.map(s => ({
+        label: s.label,
+        value: s.b.inclR,
+        lines: [`Uten R ${fmt(s.b.exclR, 1)}% · R ${fmt(s.b.rPct, 1)}%`],
+      })))
+      addChart(sfr, 'bar', [
+        { name: 'Fravær uten R', labels: allLabels, values: classBreakdowns.map(b => parseFloat(b.exclR.toFixed(1))) },
+        { name: 'R-fravær', labels: allLabels, values: classBreakdowns.map(b => parseFloat(b.rPct.toFixed(1))) },
+      ], { ...stackedOpts('Gj.snitt totalt fravær per klasse inkl. R (%)'), chartColors: [ACCENT, 'B5ADA3'] })
+      sfr.addText(fullNote, { x: 0.3, y: 5.36, w: 9.4, h: 0.22, fontSize: 7.5, color: MUTED, align: 'right' })
+    }
+
     // ── Slide: Varsler ──────────────────────────────────────────────────
     const sv = addContentSlide('Varsler – oversikt')
-    const allLabels = stats.perClass.map(c => c.className)
     addChart(sv, 'bar', [
       { name: 'Fraværsvarsler (F)', labels: allLabels, values: stats.perClass.map(c => c.fWarnings) },
       { name: 'Karaktervarsler (G)', labels: allLabels, values: stats.perClass.map(c => c.gWarnings) },
@@ -1030,7 +1153,23 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+    // Revoking right after click() can cancel or stall the download in some browsers
+    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  }
+
+  const handleExportPptx = async () => {
+    if (isExportingPptx) return
+    setIsExportingPptx(true)
+    try {
+      // Let the busy state paint before chart generation blocks the main thread
+      await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)))
+      await generateStatsPptx()
+    } catch (error) {
+      console.error('PowerPoint export failed:', error)
+      alert('Kunne ikke lage PowerPoint. Prøv på nytt.')
+    } finally {
+      setIsExportingPptx(false)
+    }
   }
 
   const cycleTableSort = (key: SortKey) => {
@@ -1567,11 +1706,13 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
         <GenderAverageToggle visible={visibleGenderAverages} onToggle={toggleGenderAverage} coverage={genderCoverage} />
         <button
           type="button"
-          onClick={() => void generateStatsPptx()}
-          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors shadow-sm"
+          onClick={() => void handleExportPptx()}
+          disabled={isExportingPptx}
+          aria-busy={isExportingPptx}
+          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors shadow-sm disabled:opacity-70 disabled:cursor-wait"
         >
-          <BarChart2 className="w-4 h-4" />
-          Eksporter som PowerPoint
+          {isExportingPptx ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart2 className="w-4 h-4" />}
+          {isExportingPptx ? 'Lager PowerPoint…' : 'Eksporter som PowerPoint'}
         </button>
         <button
           type="button"
