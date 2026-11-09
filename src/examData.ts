@@ -189,20 +189,7 @@ export async function parseExamFile(file: File, data: DataStore): Promise<Parsed
     return byName.get(`${orderInvariantNameKey(navn)}::${nKey}`) ?? ''
   }
 
-  // Resolve a student's class from absences/grades, by name (and subject when available).
-  const classMap = new Map<string, string>()
-  const addClass = (navn: string, subjectGroup: string, className?: string) => {
-    const cls = className?.trim()
-    if (!cls) return
-    const subjectKey = buildNameSubjectKey(navn, subjectGroup)
-    if (!classMap.has(subjectKey)) classMap.set(subjectKey, cls)
-    const nameKey = orderInvariantNameKey(navn)
-    if (nameKey && !classMap.has(nameKey)) classMap.set(nameKey, cls)
-  }
-  data.absences.forEach(a => addClass(a.navn, a.subjectGroup, a.class))
-  data.grades.forEach(g => addClass(g.navn, g.subjectGroup || g.fagkode, g.class))
-  const resolveClass = (navn: string, subjectGroup: string): string | undefined =>
-    classMap.get(buildNameSubjectKey(navn, subjectGroup)) ?? classMap.get(orderInvariantNameKey(navn))
+  const resolveClass = buildClassResolver(data)
 
   // Resolve a student's subject teacher from grades (subjectTeacher) and
   // absences (teacher), keyed by name+subject (code and base subject name).
@@ -280,16 +267,47 @@ export async function parseExamFile(file: File, data: DataStore): Promise<Parsed
   }
 
   // Add students who failed standpunkt (IM/IV/1) but have no exam in that
-  // subject, so they still surface on the "Ikke bestått" tab. These rows are
-  // flagged noExam so the Eksamen tab can exclude them.
-  const FAILING_STANDPUNKT = new Set(['IM', 'IV', '1'])
+  // subject, so they still surface on the "Ikke bestått" tab.
   const examKeys = new Set<string>()
   parsed.forEach(p => {
     examKeys.add(buildNameSubjectKey(p.navn, p.subjectGroup))
     const nk = subjectNameKey(p.subject)
     if (nk) examKeys.add(`${orderInvariantNameKey(p.navn)}::${nk}`)
   })
-  const syntheticSeen = new Set<string>()
+  parsed.push(...buildStandpunktOnlyRows(data, (codeKey, nameKey) => examKeys.has(codeKey) || (nameKey !== '' && examKeys.has(nameKey))))
+
+  return parsed
+}
+
+// Resolve a student's class from absences/grades, by name (and subject when available).
+const buildClassResolver = (data: DataStore) => {
+  const classMap = new Map<string, string>()
+  const addClass = (navn: string, subjectGroup: string, className?: string) => {
+    const cls = className?.trim()
+    if (!cls) return
+    const subjectKey = buildNameSubjectKey(navn, subjectGroup)
+    if (!classMap.has(subjectKey)) classMap.set(subjectKey, cls)
+    const nameKey = orderInvariantNameKey(navn)
+    if (nameKey && !classMap.has(nameKey)) classMap.set(nameKey, cls)
+  }
+  data.absences.forEach(a => addClass(a.navn, a.subjectGroup, a.class))
+  data.grades.forEach(g => addClass(g.navn, g.subjectGroup || g.fagkode, g.class))
+  return (navn: string, subjectGroup: string): string | undefined =>
+    classMap.get(buildNameSubjectKey(navn, subjectGroup)) ?? classMap.get(orderInvariantNameKey(navn))
+}
+
+const FAILING_STANDPUNKT = new Set(['IM', 'IV', '1'])
+
+// Rows for students who failed standpunkt (IM/IV/1) in the vurderingsfile, flagged
+// noExam. Used on their own when no exam file is loaded. `isCovered` lets the exam
+// parser skip student+subject pairs that already have an exam row.
+export function buildStandpunktOnlyRows(
+  data: DataStore,
+  isCovered: (codeKey: string, nameKey: string) => boolean = () => false,
+): ParsedExamRow[] {
+  const resolveClass = buildClassResolver(data)
+  const rows: ParsedExamRow[] = []
+  const seen = new Set<string>()
   data.grades.forEach(g => {
     if (!isFinalGrade(g)) return
     const standpunkt = canonicalGrade(g.grade ?? '')
@@ -300,11 +318,10 @@ export async function parseExamFile(file: File, data: DataStore): Promise<Parsed
     const codeKey = buildNameSubjectKey(g.navn, subjectGroup)
     const nk = subjectNameKey(subjectName)
     const nameKey = nk ? `${orderInvariantNameKey(g.navn)}::${nk}` : ''
-    // Skip when an exam row already covers this student+subject.
-    if (examKeys.has(codeKey) || (nameKey && examKeys.has(nameKey))) return
-    if (syntheticSeen.has(codeKey)) return
-    syntheticSeen.add(codeKey)
-    parsed.push({
+    if (isCovered(codeKey, nameKey)) return
+    if (seen.has(codeKey)) return
+    seen.add(codeKey)
+    rows.push({
       navn: g.navn,
       klasse: g.class || resolveClass(g.navn, subjectGroup),
       telefon: undefined,
@@ -316,6 +333,5 @@ export async function parseExamFile(file: File, data: DataStore): Promise<Parsed
       noExam: true,
     })
   })
-
-  return parsed
+  return rows
 }

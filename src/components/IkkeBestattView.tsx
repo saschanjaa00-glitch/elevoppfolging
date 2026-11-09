@@ -4,6 +4,7 @@ import type { DataStore } from '../types'
 import {
   type ParsedExamRow,
   parseExamFile,
+  buildStandpunktOnlyRows,
   gradeRank,
   formatExamGrade,
   truncate,
@@ -120,8 +121,13 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
     }
   }
 
+  // Without an exam file, fall back to failed standpunkt from the vurderingsfile and leave exam out.
+  const usingFallback = rows === null
+  const sourceRows = useMemo(() => rows ?? buildStandpunktOnlyRows(data), [rows, data])
+  const columns = useMemo(() => (usingFallback ? COLUMNS.filter(col => col.key !== 'grade') : COLUMNS), [usingFallback])
+
   // Only the students who didn't pass (or whose grade changed) are shown here.
-  const failingRows = useMemo(() => (rows ?? []).filter(isIkkeBestatt), [rows])
+  const failingRows = useMemo(() => sourceRows.filter(isIkkeBestatt), [sourceRows])
 
   const sortedRows = useMemo(() => {
     const copy = [...failingRows]
@@ -137,10 +143,12 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
 
   const visibleRows = useMemo(() => {
     let result = sortedRows
-    if (hideBestatt) result = result.filter(r => !isPassedAfter(r))
-    if (showOnlyIM) result = result.filter(r => r.grade === 'IM')
-    if (hideImDok) result = result.filter(r => !(r.grade === 'IM' && r.imDoc === 'dok'))
-    if (hideImUdok) result = result.filter(r => !(r.grade === 'IM' && r.imDoc === 'udok'))
+    if (!usingFallback) {
+      if (hideBestatt) result = result.filter(r => !isPassedAfter(r))
+      if (showOnlyIM) result = result.filter(r => r.grade === 'IM')
+      if (hideImDok) result = result.filter(r => !(r.grade === 'IM' && r.imDoc === 'dok'))
+      if (hideImUdok) result = result.filter(r => !(r.grade === 'IM' && r.imDoc === 'udok'))
+    }
     if (showOnlyIvImUdok) result = result.filter(isIvOrImUdok)
     if (showOnlyNus) result = result.filter(r => !isIvOrImUdok(r) && !isPassedOnExam(r))
     result = result.filter(r => {
@@ -148,9 +156,9 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
       if (lvl === null) return showNus
       return showVg[lvl]
     })
-    result = result.filter(r => COLUMNS.every(col => fieldMatchesQuery(columnValue(r, col.key), filters[col.key])))
+    result = result.filter(r => columns.every(col => fieldMatchesQuery(columnValue(r, col.key), filters[col.key])))
     return result
-  }, [sortedRows, hideBestatt, showOnlyIM, hideImDok, hideImUdok, showOnlyIvImUdok, showOnlyNus, showVg, showNus, filters])
+  }, [sortedRows, usingFallback, columns, hideBestatt, showOnlyIM, hideImDok, hideImUdok, showOnlyIvImUdok, showOnlyNus, showVg, showNus, filters])
 
   // Total unique students per trinn across the whole school (from the roster).
   const totalStudentsByLevel = useMemo(() => {
@@ -187,8 +195,8 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
   const exportExcel = () => {
     if (visibleRows.length === 0) return
     const aoa = [
-      ['Elev', 'Klasse', 'Telefon', 'Fag', 'T2 / Standpunkt', 'Eksamen'],
-      ...visibleRows.map(r => [r.navn, r.klasse || 'NUS', r.telefon || '', r.subject || r.subjectGroup, r.standpunkt || '', formatExamGrade(r)]),
+      ['Elev', 'Klasse', 'Telefon', 'Fag', 'T2 / Standpunkt', ...(usingFallback ? [] : ['Eksamen'])],
+      ...visibleRows.map(r => [r.navn, r.klasse || 'NUS', r.telefon || '', r.subject || r.subjectGroup, r.standpunkt || '', ...(usingFallback ? [] : [formatExamGrade(r)])]),
     ]
     const ws = XLSX.utils.aoa_to_sheet(aoa)
     const wb = XLSX.utils.book_new()
@@ -206,8 +214,8 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
     const marginTop = 36
     const marginBottom = 30
     const rowHeight = 20
-    const headers = ['#', 'Elev', 'Klasse', 'Telefon', 'Fag', 'T2 / Standpunkt', 'Eksamen']
-    const widths = [24, 120, 55, 80, 120, 70, 70]
+    const headers = ['#', 'Elev', 'Klasse', 'Telefon', 'Fag', 'T2 / Standpunkt', ...(usingFallback ? [] : ['Eksamen'])]
+    const widths = [24, 120, 55, 80, 120, 70, ...(usingFallback ? [] : [70])]
     let y = marginTop
 
     const fillFor = (r: ParsedExamRow): [number, number, number] | null => {
@@ -284,7 +292,7 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
         r.telefon || '',
         r.subject || r.subjectGroup,
         r.standpunkt || '-',
-        formatExamGrade(r),
+        ...(usingFallback ? [] : [formatExamGrade(r)]),
       ]
       let x = marginX
       cells.forEach((c, idx) => {
@@ -326,7 +334,7 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
         groups.get(navn)!.forEach(r => {
           children.push(
             new Paragraph({
-              children: [new TextRun({ text: `${r.subject || r.subjectGroup} (${formatExamGrade(r)})` })],
+              children: [new TextRun({ text: `${r.subject || r.subjectGroup} (${usingFallback ? r.standpunkt : formatExamGrade(r)})` })],
             }),
           )
         })
@@ -379,6 +387,13 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
         Systemet kobler eleven via for- og etternavn og faget via fagkode/fagnavn, og viser elever med karakterene
         IM, IV eller 1.
       </p>
+      {usingFallback && (
+        <div className="text-sky-800 bg-sky-50 border border-sky-200 rounded-md px-3 py-2 mb-4 text-sm">
+          {data.grades.length > 0
+            ? 'Ingen eksamensfil er lastet inn. Listen viser elever med IM, IV eller 1 i standpunkt (halvår 2) fra vurderingsfilen, uten eksamen. Last opp eksamensfilen for å ta med eksamenskarakterer.'
+            : 'Ingen eksamensfil eller vurderingsfil er lastet inn. Last opp vurderingsfilen for å se standpunkt, eller eksamensfilen nedenfor.'}
+        </div>
+      )}
 
       <div
         onDragOver={e => {
@@ -421,6 +436,7 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
             <span className="font-medium text-slate-700">{visibleRows.length}</span> fag
           </div>
           <div className="mb-3 flex flex-wrap items-center gap-4">
+            {!usingFallback && (<>
             <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
               <input
                 type="checkbox"
@@ -457,6 +473,7 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
               />
               Skjul IM (udok)
             </label>
+            </>)}
             <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
               <input
                 type="checkbox"
@@ -529,7 +546,7 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
             <thead>
               <tr className="text-left text-xs text-slate-500">
                 <th className="py-2 pr-4 w-10">#</th>
-                {COLUMNS.map(col => {
+                {columns.map(col => {
                   const active = sortKey === col.key
                   return (
                     <th key={col.key} className="py-2 pr-4">
@@ -549,7 +566,7 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
               </tr>
               <tr>
                 <th className="py-1 pr-4"></th>
-                {COLUMNS.map(col => (
+                {columns.map(col => (
                   <th key={col.key} className="py-1 pr-4">
                     <input
                       type="search"
@@ -587,7 +604,7 @@ export default function IkkeBestattView({ data, rows, fileName, onParsed }: Ikke
                     <td className="py-2 pr-4">{r.telefon || '-'}</td>
                     <td className="py-2 pr-4">{truncate(r.subject || r.subjectGroup, 25)}</td>
                     <td className="py-2 pr-4">{r.standpunkt || '-'}</td>
-                    <td className="py-2 pr-4">{formatExamGrade(r)}</td>
+                    {!usingFallback && <td className="py-2 pr-4">{formatExamGrade(r)}</td>}
                   </tr>
                 )
               })}
