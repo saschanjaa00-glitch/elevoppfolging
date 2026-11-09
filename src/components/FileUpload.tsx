@@ -2,16 +2,17 @@ import { useState } from 'react'
 import * as XLSX from 'xlsx'
 import { Upload, X, AlertTriangle } from 'lucide-react'
 import type { DataStore, AbsenceRecord, WarningRecord, StudentInfoRecord, PresetRecord } from '../types'
-import { anonymizeData } from '../anonymizeNames'
+import { anonymizeData, anonymizeExamRows } from '../anonymizeNames'
 import { normalizeCellText } from '../securityUtils'
 import { inferGenderFromFodselsnummer } from '../studentInfoUtils'
-import { normalizePhone } from '../examData'
+import { normalizePhone, parseExamFile, type ParsedExamRow } from '../examData'
 
 const PRESET_TEMPLATE_ROWS = 200
 
 
 interface FileUploadProps {
-  onDataImport: (data: DataStore) => void;
+  // exam is set when an (optional) eksamensfil was among the uploaded files
+  onDataImport: (data: DataStore, exam?: { rows: ParsedExamRow[]; fileName: string }) => void;
   onPresetImport?: (presets: PresetRecord[]) => void;
   onOpenKarakterutvikling?: () => void;
 }
@@ -372,6 +373,18 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
     return hasFaggruppe && (hasVarselType || (hasSendt && hasKlasse))
   }
 
+  // Eksamensregistreringer: separate first/last name plus a grade per subject. The elevfil also
+  // has Fornavn/Etternavn but no grade, and the karakterfil has a single Elev column.
+  const looksLikeExamWorkbook = (sheet: Record<string, any>[]): boolean => {
+    if (sheet.length === 0) return false
+    const headers = Object.keys(sheet[0]).map(h => normalizeHeader(h))
+    const hasFornavn = headers.some(h => h.includes('fornavn') || h.includes('firstname'))
+    const hasEtternavn = headers.some(h => h.includes('etternavn') || h.includes('lastname'))
+    const hasGrade = headers.some(h => h.includes('karakter') || h.includes('grade') || h.includes('resultat'))
+    const hasSubject = headers.some(h => h.includes('fagkode') || h.includes('fagnavn'))
+    return hasFornavn && hasEtternavn && hasGrade && hasSubject && !looksLikeStudentInfoWorkbook(sheet)
+  }
+
   const looksLikeStudentInfoWorkbook = (sheet: Record<string, any>[]): boolean => {
     if (sheet.length === 0) return false
     const first = sheet[0]
@@ -512,6 +525,8 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
       // Process all files and detect by content
       const missingWarnings: { fileName: string; fileType: string; missing: string[] }[] = []
       const detected = new Set<string>()
+      // The exam file is parsed last: it needs the grades to resolve standpunkt
+      let examFile: File | null = null
       for (const file of selectedFiles) {
         try {
           const buffer = await file.arrayBuffer()
@@ -533,6 +548,9 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
             data.warnings = parsed
             data.warningFileCreatedDate = getWarningFileCreatedDate(wb, file) ?? data.warningFileCreatedDate
             detected.add('warnings')
+          } else if (looksLikeExamWorkbook(sheetRaw)) {
+            examFile = file
+            detected.add('exam')
           } else if (looksLikeGradeWorkbook(sheetRaw)) {
             const missing = getMissingGradeColumns(sheetRaw)
             if (missing.length > 0) missingWarnings.push({ fileName: file.name, fileType: 'Karakterfil', missing })
@@ -589,8 +607,19 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
 
       setDetectedTypes(detected)
       const finalData = anonymize ? anonymizeData(data) : data
+      let exam: { rows: ParsedExamRow[]; fileName: string } | undefined
+      if (examFile) {
+        try {
+          // Parse against the real names, then anonymize with the same mapping as the rest of the data
+          const rows = await parseExamFile(examFile, data)
+          exam = { rows: anonymize ? anonymizeExamRows(data, rows) : rows, fileName: examFile.name }
+        } catch (err) {
+          console.error('Error processing exam file:', err)
+          setMissingColumns(prev => [...prev, { fileName: examFile!.name, fileType: 'Eksamensfil', missing: ['Filen kunne ikke leses'] }])
+        }
+      }
       await new Promise(resolve => setTimeout(resolve, 2000))
-      onDataImport(finalData)
+      onDataImport(finalData, exam)
     } catch (err) {
       setError('Feil ved behandling av filer: ' + (err instanceof Error ? err.message : String(err)))
     } finally {
@@ -721,12 +750,13 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
 
         <div className="mt-7">
           <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">Støttede filtyper</h3>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 text-sm">
           {([
             { key: 'absence', label: 'Fravær', sub: 'Fraværsrapport', cols: ['Navn', 'Klasse', 'Fagnavn', 'Faggruppe', 'H1+H2 % udok. fravær', 'H1+H2 timer udok. fravær', 'Lærer', 'Kontaktlærer', 'Avbrudd i skoleåret'] },
             { key: 'warnings', label: 'Varsler', sub: 'Varseloversikt*', cols: ['Elevnavn', 'Klasse', 'Faggruppe', 'Type varsel', 'Sendt dato', 'Fødselsdato'] },
             { key: 'grades', label: 'Karakterer', sub: 'Karakterrapport', cols: ['Elev', 'Klassegruppe', 'Gruppe', 'Fagkode', 'Karakter', 'Faglærer', 'Halvår'] },
             { key: 'studentInfo', label: 'Elevfil', sub: 'Elevliste', cols: ['Fornavn', 'Etternavn', 'Fødselsdato', 'Programområde', 'Fritak i sidemål', 'Inntakspoeng', 'Klasse', 'Fødselsnummer (valgfri)', 'Mobilnummer (valgfri)'] },
+            { key: 'exam', label: 'Eksamensregistreringer', sub: 'Valgfri', cols: ['Fornavn', 'Etternavn', 'Fagkode', 'Fagnavn', 'Karakter'] },
             { key: 'preset', label: 'Preset-fil', sub: 'Valgfri', cols: ['Navn', 'Rolle', 'Klasser'] },
           ] as const).map(({ key, label, sub, cols }) => {
             const detected = detectedTypes.has(key)
@@ -741,7 +771,7 @@ export default function FileUpload({ onDataImport, onPresetImport, onOpenKarakte
                     <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 10 10"><path d="M2 5l2.5 2.5L8 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                   </span>
                 )}
-                <h4 className={`font-semibold text-xs mb-0.5 pr-5 ${ detected ? 'text-green-800' : 'text-slate-800'}`}>
+                <h4 className={`font-semibold text-xs mb-0.5 pr-5 break-words ${ detected ? 'text-green-800' : 'text-slate-800'}`}>
                   {label}
                 </h4>
                 <span className={`block text-xs mb-2 ${detected ? 'text-green-500' : 'text-slate-400'}`}>{sub}</span>

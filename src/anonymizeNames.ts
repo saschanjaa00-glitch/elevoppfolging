@@ -1,5 +1,6 @@
 import type { DataStore } from './types'
 import { normalizeMatch } from './studentInfoUtils'
+import { type ParsedExamRow, orderInvariantNameKey } from './examData'
 
 const FIRST_NAMES: string[] = [
   'James', 'Emma', 'Oliver', 'Sophia', 'William', 'Ava', 'Benjamin', 'Isabella',
@@ -57,6 +58,72 @@ function buildFakeName(index: number): string {
 }
 
 export function anonymizeData(data: DataStore): DataStore {
+  const { fakeStudent, fakeTeacher } = buildAnonymizer(data)
+  return {
+    absences: data.absences.map(r => ({
+      ...r,
+      navn: fakeStudent(r.navn),
+      teacher: r.teacher ? fakeTeacher(r.teacher) : r.teacher,
+      kontaktlaerer: r.kontaktlaerer ? fakeTeacher(r.kontaktlaerer) : r.kontaktlaerer,
+    })),
+    warnings: data.warnings.map(r => ({
+      ...r,
+      navn: fakeStudent(r.navn),
+    })),
+    grades: data.grades.map(r => ({
+      ...r,
+      navn: fakeStudent(r.navn),
+      subjectTeacher: r.subjectTeacher ? fakeTeacher(r.subjectTeacher) : r.subjectTeacher,
+    })),
+    studentInfo: data.studentInfo.map(r => {
+      const fake = fakeStudent(r.navn)
+      const parts = fake.split(' ')
+      const fornavn = parts[0] ?? r.fornavn
+      const etternavn = parts.slice(1).join(' ') || r.etternavn
+      return {
+        ...r,
+        navn: fake,
+        fornavn,
+        etternavn,
+      }
+    }),
+    warningFileCreatedDate: data.warningFileCreatedDate,
+  }
+}
+
+// Anonymize exam rows with the same fake names anonymizeData gives `data` (the un-anonymized
+// source). Exam files write "Fornavn Etternavn", so names are matched order-independently;
+// students not found in `data` still get a fake name rather than keeping their real one.
+export function anonymizeExamRows(data: DataStore, rows: ParsedExamRow[]): ParsedExamRow[] {
+  const { fakeStudent, fakeTeacher, studentCount } = buildAnonymizer(data)
+  const byInvariantKey = new Map<string, string>()
+  const addReal = (navn: string) => {
+    const key = orderInvariantNameKey(navn)
+    if (key && !byInvariantKey.has(key)) byInvariantKey.set(key, fakeStudent(navn))
+  }
+  data.absences.forEach(r => addReal(r.navn))
+  data.warnings.forEach(r => addReal(r.navn))
+  data.grades.forEach(r => addReal(r.navn))
+  data.studentInfo.forEach(r => addReal(r.navn))
+
+  let extra = 0
+  const fakeExamStudent = (navn: string): string => {
+    const key = orderInvariantNameKey(navn)
+    const known = byInvariantKey.get(key)
+    if (known) return known
+    const fake = buildFakeName(studentCount + extra++)
+    byInvariantKey.set(key, fake)
+    return fake
+  }
+  return rows.map(r => ({
+    ...r,
+    navn: fakeExamStudent(r.navn),
+    teacher: r.teacher ? fakeTeacher(r.teacher) : r.teacher,
+    telefon: undefined,
+  }))
+}
+
+function buildAnonymizer(data: DataStore) {
   // Collect all unique student names
   const studentNamesSet = new Set<string>()
   data.absences.forEach(r => { if (r.navn) studentNamesSet.add(r.navn) })
@@ -104,34 +171,5 @@ export function anonymizeData(data: DataStore): DataStore {
   const fakeTeacher = (name: string): string =>
     teacherMap.get(normalizeMatch(name)) ?? name
 
-  return {
-    absences: data.absences.map(r => ({
-      ...r,
-      navn: fakeStudent(r.navn),
-      teacher: r.teacher ? fakeTeacher(r.teacher) : r.teacher,
-      kontaktlaerer: r.kontaktlaerer ? fakeTeacher(r.kontaktlaerer) : r.kontaktlaerer,
-    })),
-    warnings: data.warnings.map(r => ({
-      ...r,
-      navn: fakeStudent(r.navn),
-    })),
-    grades: data.grades.map(r => ({
-      ...r,
-      navn: fakeStudent(r.navn),
-      subjectTeacher: r.subjectTeacher ? fakeTeacher(r.subjectTeacher) : r.subjectTeacher,
-    })),
-    studentInfo: data.studentInfo.map(r => {
-      const fake = fakeStudent(r.navn)
-      const parts = fake.split(' ')
-      const fornavn = parts[0] ?? r.fornavn
-      const etternavn = parts.slice(1).join(' ') || r.etternavn
-      return {
-        ...r,
-        navn: fake,
-        fornavn,
-        etternavn,
-      }
-    }),
-    warningFileCreatedDate: data.warningFileCreatedDate,
-  }
+  return { fakeStudent, fakeTeacher, studentCount: studentNames.length }
 }

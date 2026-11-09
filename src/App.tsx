@@ -239,8 +239,10 @@ function App() {
     idleDeadlineRef.current = null
   }
 
-  const handleDataImport = (importedData: DataStore) => {
+  const handleDataImport = (importedData: DataStore, exam?: { rows: ParsedExamRow[]; fileName: string }) => {
     setData(importedData)
+    setExamRows(exam?.rows ?? null)
+    setExamFileName(exam?.fileName ?? null)
     setAllowInsightsWithoutAbsence(false)
     const allClasses = Array.from(new Set(importedData.absences.map(a => a.class))).sort()
     setSelectedClasses(allClasses)
