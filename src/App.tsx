@@ -25,7 +25,9 @@ registerLocale('nb', nb)
 import FileUpload from './components/FileUpload'
 import ErrorBoundary from './components/ErrorBoundary'
 import ClassSelector from './components/ClassSelector'
+import ExportMenu from './components/ExportMenu'
 import StudentList from './components/StudentList'
+import type { StudentListExportHandle } from './components/StudentList'
 import type { DataStore, PresetRecord } from './types'
 import type { ParsedExamRow } from './examData'
 import './index.css'
@@ -131,8 +133,10 @@ function App() {
   const [missingWarningsOnly, setMissingWarningsOnly] = useState<boolean>(false)
   const [warnedOnVurdering, setWarnedOnVurdering] = useState<boolean>(false)
   const [vurderingFromDate, setVurderingFromDate] = useState<string>('')
-  const [oversiktModalOpen, setOversiktModalOpen] = useState<boolean>(false)
+  const studentListExportRef = useRef<StudentListExportHandle>(null)
+  const [visibleStudentCount, setVisibleStudentCount] = useState<number>(0)
   const [klasseradSeasonModalOpen, setKlasseradSeasonModalOpen] = useState<boolean>(false)
+  const [klasseradSplit, setKlasseradSplit] = useState<'samlet' | 'per-klasse'>('samlet')
   const [classListModalOpen, setClassListModalOpen] = useState<boolean>(false)
   const [classListIncludePhone, setClassListIncludePhone] = useState<boolean>(false)
   const [classListSortBy, setClassListSortBy] = useState<'first' | 'last'>('first')
@@ -735,8 +739,12 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
-  const handleExportKlasseradsskjema = async (season: 'host' | 'var') => {
-    if (selectedClasses.length === 0) return
+  const handleExportKlasseradsskjema = async (
+    season: 'host' | 'var',
+    classes: string[] = selectedClasses,
+    { download = true }: { download?: boolean } = {}
+  ): Promise<{ blob: Blob; fileName: string } | null> => {
+    if (classes.length === 0) return null
 
     const {
       AlignmentType,
@@ -756,7 +764,7 @@ function App() {
       WidthType,
     } = await import('docx')
 
-    const orderedClasses = [...selectedClasses].sort((a, b) =>
+    const orderedClasses = [...classes].sort((a, b) =>
       a.localeCompare(b, 'nb-NO', { numeric: true })
     )
     const seasonLabel = season === 'host' ? 'HØST' : 'VÅR'
@@ -1286,12 +1294,35 @@ function App() {
     })
 
     const blob = await Packer.toBlob(doc)
+    const fileName = `klasseradsskjema_${orderedClasses.join('-')}_${todayDdMmYyyy()}.docx`
+    if (download) downloadBlob(blob, fileName)
+    return { blob, fileName }
+  }
+
+  const downloadBlob = (blob: Blob, fileName: string) => {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `klasseradsskjema_${selectedClasses.join('-')}_${todayDdMmYyyy()}.docx`
+    a.download = fileName
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const runKlasseradExport = async (season: 'host' | 'var') => {
+    if (klasseradSplit === 'samlet') {
+      await handleExportKlasseradsskjema(season)
+      return
+    }
+    // One document per class, delivered together in a single zip file.
+    const orderedClasses = [...selectedClasses].sort((a, b) => a.localeCompare(b, 'nb-NO', { numeric: true }))
+    const { default: JSZip } = await import('jszip')
+    const zip = new JSZip()
+    for (const className of orderedClasses) {
+      const file = await handleExportKlasseradsskjema(season, [className], { download: false })
+      if (file) zip.file(file.fileName, file.blob)
+    }
+    const zipBlob = await zip.generateAsync({ type: 'blob' })
+    downloadBlob(zipBlob, `klasseradsskjema_per_klasse_${season === 'host' ? 'host' : 'var'}_${todayDdMmYyyy()}.zip`)
   }
 
   const generateStudentListDocx = async (
@@ -1645,14 +1676,6 @@ function App() {
               )}
 
               <div className="ml-auto flex items-center gap-2 pb-0.5">
-                {hasAbsenceData && (
-                  <button
-                    onClick={() => setOversiktModalOpen(true)}
-                    className="px-3 py-1.5 text-sm font-medium text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 rounded-lg transition-colors"
-                  >
-                    Generer oppfølgingsoversikt
-                  </button>
-                )}
                 <button
                   onClick={clearImportedData}
                   className="px-3 py-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 text-sm font-medium rounded-lg transition-colors"
@@ -1728,14 +1751,22 @@ function App() {
                     data={data}
                     selectedClasses={selectedClasses}
                     onClassChange={setSelectedClasses}
-                    presets={presets}
-                    onPrintClassLists={() => setClassListModalOpen(true)}
-                    onPrintGruppeliste={() => setGruppelisteModalOpen(true)}
-                    onExportOppfolgingsark={handleExportClassOppfolgingsark}
-                    onExportKlasseradsskjema={() => setKlasseradSeasonModalOpen(true)}
-                    onPrintLaererliste={handlePrintLaererliste}
                   />
 
+                  <div className="mt-4">
+                    <ExportMenu
+                      selectedClassCount={selectedClasses.length}
+                      visibleStudentCount={selectedClasses.length > 0 ? visibleStudentCount : null}
+                      missingWarningsOnly={!isNameSearchActive && missingWarningsOnly}
+                      presets={presets}
+                      getListActions={() => studentListExportRef.current}
+                      onPrintClassLists={() => setClassListModalOpen(true)}
+                      onPrintGruppeliste={() => setGruppelisteModalOpen(true)}
+                      onExportClassOppfolgingsark={() => void handleExportClassOppfolgingsark()}
+                      onExportKlasseradsskjema={() => setKlasseradSeasonModalOpen(true)}
+                      onPrintLaererliste={handlePrintLaererliste}
+                    />
+                  </div>
                   {classListModalOpen && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setClassListModalOpen(false)}>
                       <div className="bg-white rounded-xl shadow-xl p-6 w-80 flex flex-col gap-4" onClick={e => e.stopPropagation()}>
@@ -1883,13 +1914,24 @@ function App() {
                   {klasseradSeasonModalOpen && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setKlasseradSeasonModalOpen(false)}>
                       <div className="bg-white rounded-xl shadow-xl p-6 w-80 flex flex-col gap-3" onClick={e => e.stopPropagation()}>
-                        <h2 className="text-base font-semibold text-slate-900">Velg termin</h2>
-                        <p className="text-sm text-slate-600">Velg hvilken mal som skal brukes for Klasselærerråd.</p>
+                        <h2 className="text-base font-semibold text-slate-900">Klasselærerråd-skjema</h2>
+                        <div className="space-y-1.5">
+                          <p className="text-sm font-medium text-slate-700">Filer</p>
+                          <label className="flex items-center gap-2 text-sm text-slate-700">
+                            <input type="radio" name="klasserad-split" checked={klasseradSplit === 'samlet'} onChange={() => setKlasseradSplit('samlet')} />
+                            Én samlet fil
+                          </label>
+                          <label className="flex items-center gap-2 text-sm text-slate-700">
+                            <input type="radio" name="klasserad-split" checked={klasseradSplit === 'per-klasse'} onChange={() => setKlasseradSplit('per-klasse')} />
+                            Én fil per klasse, samlet i en zip-fil ({selectedClasses.length} {selectedClasses.length === 1 ? 'fil' : 'filer'})
+                          </label>
+                        </div>
+                        <p className="text-sm text-slate-600 border-t border-slate-100 pt-3">Velg hvilken mal som skal brukes for Klasselærerråd.</p>
                         <button
                           className="w-full px-4 py-2 bg-sky-600 text-white text-sm font-medium rounded-lg hover:bg-sky-700 transition-colors"
                           onClick={() => {
                             setKlasseradSeasonModalOpen(false)
-                            void handleExportKlasseradsskjema('host')
+                            void runKlasseradExport('host')
                           }}
                         >
                           Høst
@@ -1898,7 +1940,7 @@ function App() {
                           className="w-full px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
                           onClick={() => {
                             setKlasseradSeasonModalOpen(false)
-                            void handleExportKlasseradsskjema('var')
+                            void runKlasseradExport('var')
                           }}
                         >
                           Vår
@@ -2290,8 +2332,8 @@ function App() {
                       includeFravaerWarnings={includeFravaerWarnings}
                       includeGrunnlagWarnings={includeGrunnlagWarnings}
                       presets={presets}
-                      oversiktModalOpen={oversiktModalOpen}
-                      onOversiktModalClose={() => setOversiktModalOpen(false)}
+                      exportRef={studentListExportRef}
+                      onVisibleCountChange={setVisibleStudentCount}
                     />
                   )}
 

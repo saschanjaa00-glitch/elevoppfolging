@@ -1,62 +1,21 @@
-import { memo, useMemo, useState } from 'react'
-import { AlertTriangle } from 'lucide-react'
-import type { DataStore, PresetRecord } from '../types'
-import { isAdviserRole } from '../teacherMatrixPrint'
+import { memo, useMemo } from 'react'
+import type { DataStore } from '../types'
 
 interface ClassSelectorProps {
   data: DataStore
   selectedClasses: string[]
   onClassChange: (classNames: string[]) => void
-  presets?: PresetRecord[]
-  onPrintClassLists?: () => void
-  onPrintGruppeliste?: () => void
-  onExportOppfolgingsark?: () => void
-  onExportKlasseradsskjema?: () => void
-  onPrintLaererliste?: (minStudents: number | null, maxMeetings: number | null) => void
 }
 
 function ClassSelector({
   data,
   selectedClasses,
   onClassChange,
-  presets = [],
-  onPrintClassLists,
-  onPrintGruppeliste,
-  onExportOppfolgingsark,
-  onExportKlasseradsskjema,
-  onPrintLaererliste,
 }: ClassSelectorProps) {
   const classes = useMemo(
     () => Array.from(new Set(data.absences.map(a => a.class))).sort(),
     [data.absences]
   )
-
-  const presetWarning = useMemo(() => {
-    if (presets.length === 0) {
-      return 'Ingen preset-fil er lastet opp. Tidsplanen for klasselærerråd mangler da rådgivere (rom) og trinnledere/avdelingsledere.'
-    }
-    if (!presets.some(preset => isAdviserRole(preset.rolle))) {
-      return 'Preset-filen inneholder ingen rådgivere (rolle «Rådgiver»). Tidsplanen kan ikke knytte klassene til faste rom.'
-    }
-    return null
-  }, [presets])
-
-  const [showLaererlisteOptions, setShowLaererlisteOptions] = useState(false)
-  const [minStudentsInput, setMinStudentsInput] = useState('')
-  const [maxMeetingsInput, setMaxMeetingsInput] = useState('')
-
-  const startLaererliste = () => {
-    const parsedMinStudents = Number.parseInt(minStudentsInput, 10)
-    const minStudents = Number.isFinite(parsedMinStudents) && parsedMinStudents > 0
-      ? parsedMinStudents
-      : null
-    const parsedMaxMeetings = Number.parseInt(maxMeetingsInput, 10)
-    const maxMeetings = Number.isFinite(parsedMaxMeetings) && parsedMaxMeetings > 0
-      ? parsedMaxMeetings
-      : null
-    setShowLaererlisteOptions(false)
-    onPrintLaererliste?.(minStudents, maxMeetings)
-  }
 
   const { vg1, vg2, vg3, other } = useMemo(() => {
     const nextVg1 = classes.filter(c => /^1/i.test(c))
@@ -149,139 +108,6 @@ function ClassSelector({
         ))}
       </div>
 
-      {(onPrintClassLists || onPrintGruppeliste || onExportOppfolgingsark || onExportKlasseradsskjema || onPrintLaererliste) && (
-        <div className="mt-4 space-y-2 border-t border-slate-100 pt-4">
-          {onPrintClassLists && (
-            <button
-              type="button"
-              onClick={onPrintClassLists}
-              disabled={selectedClasses.length === 0}
-              className={`w-full px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                selectedClasses.length > 0
-                  ? 'bg-slate-800 text-white hover:bg-slate-700 shadow-sm'
-                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-              }`}
-            >
-              Skriv ut klasselister
-            </button>
-          )}
-          {onExportOppfolgingsark && (
-            <button
-              type="button"
-              onClick={onExportOppfolgingsark}
-              disabled={selectedClasses.length === 0}
-              className={`w-full px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                selectedClasses.length > 0
-                  ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm'
-                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-              }`}
-            >
-              Oppfølgingsark for valgte klasser
-            </button>
-          )}
-          {onExportKlasseradsskjema && (
-            <button
-              type="button"
-              onClick={onExportKlasseradsskjema}
-              disabled={selectedClasses.length === 0}
-              className={`w-full px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                selectedClasses.length > 0
-                  ? 'bg-sky-700 text-white hover:bg-sky-800 shadow-sm'
-                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-              }`}
-            >
-              Klasselærerråd for valgte klasser
-            </button>
-          )}
-          {onPrintLaererliste && (
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowLaererlisteOptions(prev => !prev)}
-                disabled={selectedClasses.length === 0}
-                className={`w-full px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                  selectedClasses.length > 0
-                    ? 'bg-sky-600 text-white hover:bg-sky-700 shadow-sm'
-                    : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                }`}
-              >
-                Lærerliste klasselærerråd
-              </button>
-              {showLaererlisteOptions && selectedClasses.length > 0 && (
-                <div className="mt-2 p-3 rounded-lg border border-sky-200 bg-sky-50 space-y-2">
-                  {presetWarning && (
-                    <div role="alert" className="flex gap-2 p-2 rounded-md border border-amber-300 bg-amber-50 text-[11px] leading-snug text-amber-800">
-                      <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" aria-hidden="true" />
-                      <span>{presetWarning}</span>
-                    </div>
-                  )}
-                  <label htmlFor="min-students" className="block text-xs font-semibold text-slate-700">
-                    Minimum antall elever
-                  </label>
-                  <input
-                    id="min-students"
-                    type="number"
-                    min={1}
-                    value={minStudentsInput}
-                    placeholder="Ingen filter"
-                    onChange={event => setMinStudentsInput(event.target.value)}
-                    onKeyDown={event => {
-                      if (event.key === 'Enter') startLaererliste()
-                    }}
-                    className="w-full px-2 py-1.5 text-sm rounded-lg border border-slate-300 bg-white"
-                  />
-                  <p className="text-[11px] leading-snug text-slate-600">
-                    Lærere med færre elever enn dette slipper møtet. Kontaktlærere deltar alltid. Tomt felt = ingen filter.
-                  </p>
-                  <label htmlFor="max-meetings" className="block text-xs font-semibold text-slate-700">
-                    Maksimum antall møter
-                  </label>
-                  <input
-                    id="max-meetings"
-                    type="number"
-                    min={1}
-                    value={maxMeetingsInput}
-                    placeholder="Ingen grense"
-                    onChange={event => setMaxMeetingsInput(event.target.value)}
-                    onKeyDown={event => {
-                      if (event.key === 'Enter') startLaererliste()
-                    }}
-                    className="w-full px-2 py-1.5 text-sm rounded-lg border border-slate-300 bg-white"
-                  />
-                  <p className="text-[11px] leading-snug text-slate-600">
-                    Ved for mange møter beholdes klassene med flest elever. Ved likt elevtall prioriteres klassen alfabetisk. Kontaktlærermøter beholdes alltid.
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={startLaererliste}
-                      className="flex-1 px-2 py-1.5 text-xs font-medium bg-sky-600 text-white hover:bg-sky-700 rounded-lg transition-colors"
-                    >
-                      Åpne
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowLaererlisteOptions(false)}
-                      className="flex-1 px-2 py-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
-                    >
-                      Avbryt
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-          {onPrintGruppeliste && (
-            <button
-              type="button"
-              onClick={onPrintGruppeliste}
-              className="w-full px-3 py-2 text-sm font-medium rounded-lg transition-colors bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
-            >
-              Gruppeliste
-            </button>
-          )}
-        </div>
-      )}
     </div>
   )
 }

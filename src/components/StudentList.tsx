@@ -1,6 +1,7 @@
-import { useEffect, useDeferredValue, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useImperativeHandle, useMemo, useState } from 'react'
+import type { Ref } from 'react'
 import type { DataStore, PresetRecord, StudentAbsenceSummary } from '../types'
-import { Eye, X, Printer, FileText } from 'lucide-react'
+import { Eye, X, FileText } from 'lucide-react'
 import StudentDetail from './StudentDetail'
 import { resolveTeacher } from '../teacherUtils'
 import {
@@ -43,8 +44,18 @@ interface StudentListProps {
   includeFravaerWarnings: boolean
   includeGrunnlagWarnings: boolean
   presets?: PresetRecord[]
-  oversiktModalOpen?: boolean
-  onOversiktModalClose?: () => void
+  // Lets the sidebar export menu run the list exports; the buttons live there, the logic stays here.
+  exportRef?: Ref<StudentListExportHandle>
+  onVisibleCountChange?: (count: number) => void
+}
+
+export interface StudentListExportHandle {
+  exportPdf: (layout: 'combined' | 'per-student') => void
+  openSamletOversikt: () => void
+  exportExcelliste: () => void
+  exportOppfolgingsark: () => void
+  openOppfolgingsoversikt: () => void
+  exportMissingWarnings: (mode: 'detailed' | 'summary') => void
 }
 
 const LOW_GRADES = ['IV', '1', '2']
@@ -131,22 +142,18 @@ export default function StudentList({
   includeFravaerWarnings,
   includeGrunnlagWarnings,
   presets = [],
-  oversiktModalOpen = false,
-  onOversiktModalClose,
+  exportRef,
+  onVisibleCountChange,
 }: StudentListProps) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
-  const [showPdfMenu, setShowPdfMenu] = useState(false)
-  const [showMissingWarningsMenu, setShowMissingWarningsMenu] = useState(false)
   const [showOversiktModal, setShowOversiktModal] = useState(false)
-
-  // Sync external open trigger
-  const prevOversiktModalOpen = useRef(false)
-  useEffect(() => {
-    if (oversiktModalOpen && !prevOversiktModalOpen.current) {
-      setShowOversiktModal(true)
-    }
-    prevOversiktModalOpen.current = oversiktModalOpen
-  }, [oversiktModalOpen])
+  const [showSamletDialog, setShowSamletDialog] = useState(false)
+  const [samletMode, setSamletMode] = useState<'samlet' | 'per-person'>('samlet')
+  // null = default selection (Rådgiver and Trinnleder roles)
+  const [samletRoles, setSamletRoles] = useState<string[] | null>(null)
+  // People unticked in the per-person list, keyed by rolle + navn.
+  const [samletExcluded, setSamletExcluded] = useState<string[]>([])
+  const [isExportingSamlet, setIsExportingSamlet] = useState(false)
   const deferredStudentSearch = useDeferredValue(studentSearch)
   const selectedClassSet = useMemo(() => new Set(selectedClasses), [selectedClasses])
   const classData = useMemo(
@@ -206,6 +213,13 @@ export default function StudentList({
     })
     return result
   }, [presets])
+
+  const presetRoles = useMemo(
+    () => Object.keys(presetRoleMappings).sort((a, b) => a.localeCompare(b, 'nb-NO')),
+    [presetRoleMappings]
+  )
+  const activeSamletRoles = samletRoles
+    ?? presetRoles.filter(role => /radgiver|trinnleder/.test(normalizeMatch(role)))
 
   const ownerForClass = (className: string, mapping: Record<string, string[]>) => {
     const found = Object.entries(mapping).find(([, classes]) => classes.includes(className))
@@ -620,23 +634,18 @@ export default function StudentList({
     return kontaktlaererByStudentKey.get(key) ?? 'Ukjent'
   }
 
-  if (atRiskStudents.length === 0) {
-    return (
-      <div className="card p-12 text-center">
-        <div className="flex justify-center mb-4">
-          <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-            <span className="text-2xl">✓</span>
-          </div>
-        </div>
-        <p className="text-slate-600 text-lg font-medium">Gode nyheter!</p>
-        <p className="text-slate-500">
-          Ingen elever overstiger fraværsgrensen på {threshold.toFixed(1)}%
-        </p>
-      </div>
-    )
-  }
+  useEffect(() => {
+    onVisibleCountChange?.(atRiskStudents.length)
+  }, [atRiskStudents.length, onVisibleCountChange])
 
-  const generatePDF = async (layout: 'combined' | 'per-student' = 'combined') => {
+  // `scope` narrows the PDF to one person's classes (Rolle filter); without it the whole list is exported.
+  // With `collect`, the PDF is returned instead of downloaded so several can be zipped together.
+  const generatePDF = async (
+    layout: 'combined' | 'per-student' = 'combined',
+    scope?: { students: StudentAbsenceSummary[]; classes: string[]; title: string; fileLabel: string; collect?: boolean }
+  ): Promise<{ blob: Blob; fileName: string } | null> => {
+    const students = scope?.students ?? atRiskStudents
+    const classes = scope?.classes ?? selectedClasses
     const { jsPDF } = await loadJsPdf()
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
     const pageW = 210
@@ -677,17 +686,17 @@ export default function StudentList({
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(13)
     doc.setTextColor(255, 255, 255)
-    doc.text('Oppfølging - Elever', marginX, 11)
+    doc.text(scope ? `Oppfølging - ${scope.title}` : 'Oppfølging - Elever', marginX, 11)
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(8)
     doc.text(
-      `Klasser: ${selectedClasses.join(', ')}   |   Grense: ${threshold.toFixed(1)}%   |   ${atRiskStudents.length} elever   |   ${new Date().toLocaleDateString('nb-NO')}`,
+      `Klasser: ${classes.join(', ')}   |   Grense: ${threshold.toFixed(1)}%   |   ${students.length} elever   |   ${new Date().toLocaleDateString('nb-NO')}`,
       marginX, 16
     )
     y = 24
     doc.setTextColor(0, 0, 0)
 
-    atRiskStudents.forEach((student, index) => {
+    students.forEach((student, index) => {
       if (layout === 'per-student' && index > 0) {
         doc.addPage()
         y = 24
@@ -881,7 +890,12 @@ export default function StudentList({
       y = cardY + cardHeight + 3
     })
 
-    doc.save(`oppfolging_${selectedClasses.join('-')}_${todayDdMmYyyy()}.pdf`)
+    const fileName = scope
+      ? `oppfolging_${sanitizeFilenamePart(scope.fileLabel)}_${todayDdMmYyyy()}.pdf`
+      : `oppfolging_${selectedClasses.join('-')}_${todayDdMmYyyy()}.pdf`
+    if (scope?.collect) return { blob: doc.output('blob'), fileName }
+    doc.save(fileName)
+    return null
   }
 
   const generateOppfolgingsarkForUtvalg = async () => {
@@ -2056,8 +2070,255 @@ export default function StudentList({
     URL.revokeObjectURL(url)
   }
 
+  // Placed after the export functions (so the handle can call them) and before the empty-list return (hook order).
+  useImperativeHandle(exportRef, () => ({
+    exportPdf: layout => {
+      if (atRiskStudents.length > 0) void generatePDF(layout)
+    },
+    openSamletOversikt: () => {
+      if (atRiskStudents.length > 0) setShowSamletDialog(true)
+    },
+    exportExcelliste: () => {
+      if (atRiskStudents.length > 0) void generateExcelOversikt()
+    },
+    exportOppfolgingsark: () => void generateOppfolgingsarkForUtvalg(),
+    openOppfolgingsoversikt: () => setShowOversiktModal(true),
+    exportMissingWarnings: mode => void generateMissingWarningsDocx(mode),
+  }))
+
+  const closeOversiktModal = () => setShowOversiktModal(false)
+
+  // One file per person in the selected Rolle filters, each with the listed students in that person's classes.
+  const samletPeople = presets
+    .filter(person => activeSamletRoles.includes(person.rolle))
+    .map(person => {
+      const personClasses = new Set(person.klasser)
+      const students = atRiskStudents.filter(student => personClasses.has(student.className))
+      const shownClasses = person.klasser
+        .filter(className => selectedClassSet.has(className))
+        .sort((a, b) => a.localeCompare(b, 'nb-NO', { numeric: true }))
+      return {
+        key: `${person.rolle}|${person.navn}`,
+        person,
+        students,
+        shownClasses,
+        missingClasses: person.klasser.length - shownClasses.length,
+      }
+    })
+    .sort((a, b) => a.person.rolle.localeCompare(b.person.rolle, 'nb-NO') || a.person.navn.localeCompare(b.person.navn, 'nb-NO'))
+  const isSamletIncluded = (entry: (typeof samletPeople)[number]) =>
+    entry.students.length > 0 && !samletExcluded.includes(entry.key)
+  const samletFileCount = samletPeople.filter(isSamletIncluded).length
+  const anyMissingClasses = samletPeople.some(entry => entry.missingClasses > 0)
+  const toggleSamletPerson = (key: string) => {
+    setSamletExcluded(current => current.includes(key) ? current.filter(k => k !== key) : [...current, key])
+  }
+  const setAllSamletPeople = (include: boolean) => {
+    const shownKeys = samletPeople.map(entry => entry.key)
+    setSamletExcluded(current => include
+      ? current.filter(key => !shownKeys.includes(key))
+      : Array.from(new Set([...current, ...shownKeys])))
+  }
+
+  const runSamletExport = async () => {
+    if (samletMode === 'samlet') {
+      setShowSamletDialog(false)
+      await generatePDF('combined')
+      return
+    }
+    setIsExportingSamlet(true)
+    try {
+      const { default: JSZip } = await import('jszip')
+      const zip = new JSZip()
+      for (const entry of samletPeople) {
+        if (!isSamletIncluded(entry)) continue
+        const file = await generatePDF('combined', {
+          students: entry.students,
+          classes: entry.shownClasses,
+          title: `${entry.person.navn} (${entry.person.rolle})`,
+          fileLabel: `${entry.person.rolle}_${entry.person.navn}`,
+          collect: true,
+        })
+        if (file) zip.file(file.fileName, file.blob)
+      }
+      const zipBlob = await zip.generateAsync({ type: 'blob' })
+      const url = URL.createObjectURL(zipBlob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `oppfolging_per_person_${todayDdMmYyyy()}.zip`
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setIsExportingSamlet(false)
+      setShowSamletDialog(false)
+    }
+  }
+
+  const toggleSamletRole = (role: string) => {
+    setSamletRoles(activeSamletRoles.includes(role)
+      ? activeSamletRoles.filter(r => r !== role)
+      : [...activeSamletRoles, role])
+  }
+
+  const samletDialog = showSamletDialog && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { if (!isExportingSamlet) setShowSamletDialog(false) }}>
+      <div className="bg-white rounded-xl shadow-xl p-6 w-[26rem] max-h-[85vh] flex flex-col gap-4" onClick={e => e.stopPropagation()}>
+        <h2 className="text-base font-semibold text-slate-900">Samlet oversikt (PDF)</h2>
+        <div className="space-y-2">
+          <label className="flex items-start gap-2 text-sm text-slate-700">
+            <input type="radio" name="samlet-mode" checked={samletMode === 'samlet'} onChange={() => setSamletMode('samlet')} className="mt-0.5" />
+            <span>
+              <span className="font-medium">Én samlet fil</span>
+              <span className="block text-xs text-slate-500">Alle {atRiskStudents.length} elever i listen</span>
+            </span>
+          </label>
+          <label className={`flex items-start gap-2 text-sm ${presets.length > 0 ? 'text-slate-700' : 'text-slate-300'}`}>
+            <input
+              type="radio"
+              name="samlet-mode"
+              checked={samletMode === 'per-person'}
+              disabled={presets.length === 0}
+              onChange={() => setSamletMode('per-person')}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="font-medium">Én fil per person i Rolle-filteret, samlet i en zip-fil</span>
+              <span className="block text-xs text-slate-500">
+                {presets.length > 0
+                  ? 'Hver fil har elevene i listen fra personens klasser'
+                  : 'Krever preset-fil med roller og klasser'}
+              </span>
+            </span>
+          </label>
+        </div>
+
+        {samletMode === 'per-person' && presets.length > 0 && (
+          <div className="flex flex-col gap-2 min-h-0">
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {presetRoles.map(role => (
+                <label key={role} className="inline-flex items-center gap-1.5 text-sm text-slate-700">
+                  <input type="checkbox" checked={activeSamletRoles.includes(role)} onChange={() => toggleSamletRole(role)} className="rounded border-slate-300" />
+                  {role}
+                </label>
+              ))}
+            </div>
+            {samletPeople.length > 0 && (
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <span>Personer:</span>
+                <button type="button" onClick={() => setAllSamletPeople(true)} className="text-sky-700 hover:underline">Alle</button>
+                <span>·</span>
+                <button type="button" onClick={() => setAllSamletPeople(false)} className="text-sky-700 hover:underline">Ingen</button>
+              </div>
+            )}
+            <div className="overflow-auto rounded border border-slate-200 text-xs">
+              {samletPeople.length === 0 ? (
+                <p className="p-2 text-slate-500">Velg minst én rolle.</p>
+              ) : samletPeople.map(entry => {
+                const hasStudents = entry.students.length > 0
+                const included = isSamletIncluded(entry)
+                return (
+                  <label
+                    key={entry.key}
+                    className={`flex items-baseline justify-between gap-2 px-2 py-1 odd:bg-slate-50 ${hasStudents ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+                  >
+                    <span className={`inline-flex items-baseline gap-1.5 ${included ? 'text-slate-700' : 'text-slate-400'}`}>
+                      <input
+                        type="checkbox"
+                        checked={included}
+                        disabled={!hasStudents}
+                        onChange={() => toggleSamletPerson(entry.key)}
+                        className="rounded border-slate-300 self-center"
+                      />
+                      <span className="font-medium">{entry.person.navn}</span>
+                      <span className="text-slate-400"> · {entry.person.rolle}</span>
+                    </span>
+                    <span className={`whitespace-nowrap ${included ? 'text-slate-600' : 'text-slate-400'}`}>
+                      {hasStudents ? `${entry.students.length} elever` : 'ingen elever, hoppes over'}
+                      {entry.missingClasses > 0 && (
+                        <span className="text-amber-700"> · {entry.missingClasses} {entry.missingClasses === 1 ? 'klasse' : 'klasser'} ikke valgt</span>
+                      )}
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+            {anyMissingClasses && (
+              <p className="text-xs text-amber-700">
+                Bare valgte klasser tas med. Velg alle klasser for å få med alle elevene til hver person.
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={isExportingSamlet || (samletMode === 'per-person' && samletFileCount === 0)}
+            onClick={() => void runSamletExport()}
+            className="flex-1 px-4 py-2 bg-sky-600 text-white text-sm font-medium rounded-lg hover:bg-sky-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {isExportingSamlet
+              ? 'Lager filer…'
+              : samletMode === 'per-person' ? `Last ned zip (${samletFileCount} ${samletFileCount === 1 ? 'fil' : 'filer'})` : 'Last ned'}
+          </button>
+          <button
+            type="button"
+            disabled={isExportingSamlet}
+            onClick={() => setShowSamletDialog(false)}
+            className="px-4 py-2 text-sm font-medium text-slate-600 rounded-lg hover:bg-slate-100"
+          >
+            Avbryt
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+  const oversiktModal = showOversiktModal && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={closeOversiktModal}>
+      <div className="bg-white rounded-xl shadow-xl p-6 w-80 flex flex-col gap-4" onClick={e => e.stopPropagation()}>
+        <h2 className="text-base font-semibold text-slate-900">Oppfølgingsoversikt</h2>
+        <p className="text-sm text-slate-600">Velg om du vil ha en tom mal eller en oversikt fylt med de filtrerte elevene og fagene.</p>
+        <button
+          className="w-full px-4 py-2 bg-sky-600 text-white text-sm font-medium rounded-lg hover:bg-sky-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          disabled={atRiskStudents.length === 0}
+          onClick={() => { closeOversiktModal(); void generateOppfolgingsoversikt('populated') }}
+        >
+          Fyll med filtrerte elever og fag
+        </button>
+        <button
+          className="w-full px-4 py-2 bg-white text-slate-700 text-sm font-medium rounded-lg border border-slate-300 hover:bg-slate-50 transition-colors"
+          onClick={() => { closeOversiktModal(); void generateOppfolgingsoversikt('mal') }}
+        >
+          Tom mal (300 blanke rader)
+        </button>
+        <button className="text-xs text-slate-400 hover:text-slate-600 mt-1" onClick={closeOversiktModal}>Avbryt</button>
+      </div>
+    </div>
+  )
+
+  if (atRiskStudents.length === 0) {
+    return (
+      <>
+        {oversiktModal}
+        <div className="card p-12 text-center">
+          <div className="flex justify-center mb-4">
+            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+              <span className="text-2xl">✓</span>
+            </div>
+          </div>
+          <p className="text-slate-600 text-lg font-medium">Gode nyheter!</p>
+          <p className="text-slate-500">
+            Ingen elever overstiger fraværsgrensen på {threshold.toFixed(1)}%
+          </p>
+        </div>
+      </>
+    )
+  }
+
   return (
     <div className="space-y-4">
+      {oversiktModal}
+      {samletDialog}
       {/* Print header — only visible when printing */}
       <div className="print-header hidden">
         <h1 className="text-lg font-bold text-slate-900">Oppfølging - Elever</h1>
@@ -2070,112 +2331,9 @@ export default function StudentList({
         <h2 className="text-xl font-bold text-slate-900">
           Elever ({atRiskStudents.length})
         </h2>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-slate-600">
-            Grense: {threshold.toFixed(1)}%
-          </span>
-          {missingWarningsOnly && (
-            <div className="relative">
-              <button
-                onClick={() => setShowMissingWarningsMenu(prev => !prev)}
-                className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
-              >
-                <FileText className="w-4 h-4" />
-                Generer melding om manglende varsler
-              </button>
-              {showMissingWarningsMenu && (
-                <div className="absolute right-0 mt-2 w-44 rounded-lg border border-slate-200 bg-white shadow-lg z-20">
-                  <button
-                    onClick={() => {
-                      setShowMissingWarningsMenu(false)
-                      void generateMissingWarningsDocx('detailed')
-                    }}
-                    className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-t-lg"
-                  >
-                    Detaljert
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowMissingWarningsMenu(false)
-                      void generateMissingWarningsDocx('summary')
-                    }}
-                    className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-b-lg"
-                  >
-                    Oppsummert
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-          <button
-            onClick={() => void generateOppfolgingsarkForUtvalg()}
-            className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
-          >
-            <FileText className="w-4 h-4" />
-            Oppfølgingsark for utvalg
-          </button>
-          {showOversiktModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setShowOversiktModal(false); onOversiktModalClose?.() }}>
-              <div className="bg-white rounded-xl shadow-xl p-6 w-80 flex flex-col gap-4" onClick={e => e.stopPropagation()}>
-                <h2 className="text-base font-semibold text-slate-900">Oppfølgingsoversikt</h2>
-                <p className="text-sm text-slate-600">Velg om du vil ha en tom mal eller en oversikt fylt med de filtrerte elevene og fagene.</p>
-                <button
-                  className="w-full px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
-                  onClick={() => { setShowOversiktModal(false); onOversiktModalClose?.(); void generateOppfolgingsoversikt('populated') }}
-                >
-                  Fyll med filtrerte elever og fag
-                </button>
-                <button
-                  className="w-full px-4 py-2 bg-white text-slate-700 text-sm font-medium rounded-lg border border-slate-300 hover:bg-slate-50 transition-colors"
-                  onClick={() => { setShowOversiktModal(false); onOversiktModalClose?.(); void generateOppfolgingsoversikt('mal') }}
-                >
-                  Tom mal (300 blanke rader)
-                </button>
-                <button className="text-xs text-slate-400 hover:text-slate-600 mt-1" onClick={() => { setShowOversiktModal(false); onOversiktModalClose?.() }}>Avbryt</button>
-              </div>
-            </div>
-          )}
-          <div className="relative">
-            <button
-              onClick={() => setShowPdfMenu(prev => !prev)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors"
-            >
-              <Printer className="w-4 h-4" />
-              Eksporter
-            </button>
-            {showPdfMenu && (
-              <div className="absolute right-0 mt-2 w-52 rounded-lg border border-slate-200 bg-white shadow-lg z-20">
-                <button
-                  onClick={() => {
-                    setShowPdfMenu(false)
-                    void generatePDF('combined')
-                  }}
-                  className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-t-lg"
-                >
-                  Samlet oversikt <span className="text-slate-400">(PDF)</span>
-                </button>
-                <button
-                  onClick={() => {
-                    setShowPdfMenu(false)
-                    void generatePDF('per-student')
-                  }}
-                  className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-b-lg"
-                >
-                  Side per elev <span className="text-slate-400">(PDF)</span>
-                </button>
-                <button
-                  onClick={() => {
-                    setShowPdfMenu(false)
-                    void generateExcelOversikt()
-                  }}
-                  className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-b-lg border-t border-slate-100"
-                >
-                  Excelliste <span className="text-slate-400">(Excel)</span>
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+        <span className="text-sm text-slate-600">
+          Grense: {threshold.toFixed(1)}%
+        </span>
       </div>
 
       {warningCountFilterEnabled && (
