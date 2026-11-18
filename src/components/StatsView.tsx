@@ -12,6 +12,7 @@ import {
 } from '../studentInfoUtils'
 import { fagkodeLookup } from '../fagkodeLookup'
 import GenderAverageToggle from './GenderAverageToggle'
+import KarakterFravaerView from './KarakterFravaerView'
 import { todayDdMmYyyy } from '../dateUtils'
 import { meetsThreshold } from '../thresholdUtils'
 
@@ -204,6 +205,7 @@ const GENDER_TONE: Record<StudentGender, string> = {
 }
 
 export default function StatsView({ data, threshold: propThreshold }: Props) {
+  const [activeSubtab, setActiveSubtab] = useState<'oversikt' | 'karakterFravaer'>('oversikt')
   const [selectedMetric, setSelectedMetric] = useState<MetricKey | null>(null)
   const [tableSort, setTableSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null)
   const [vgFilter, setVgFilter] = useState<string | null>(null)
@@ -1688,6 +1690,29 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center gap-1">
+        {([
+          ['oversikt', 'Oversikt'],
+          ['karakterFravaer', 'Karakter vs. fravær'],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setActiveSubtab(key)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+              activeSubtab === key
+                ? 'bg-sky-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {activeSubtab === 'karakterFravaer' ? (
+        <KarakterFravaerView data={data} />
+      ) : (
+      <>
       <div className="flex flex-wrap justify-between items-center gap-3 mb-2">
         <div className="flex items-center gap-2">
           <label className="text-sm font-medium text-slate-700 whitespace-nowrap">Fraværsgrense:</label>
@@ -2117,6 +2142,8 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
           </table>
         </div>
       </div>
+      </>
+      )}
     </div>
   )
 }
