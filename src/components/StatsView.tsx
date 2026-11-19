@@ -13,6 +13,7 @@ import {
 import { fagkodeLookup } from '../fagkodeLookup'
 import GenderAverageToggle from './GenderAverageToggle'
 import KarakterFravaerView from './KarakterFravaerView'
+import KarakterutviklingView from './KarakterutviklingView'
 import { todayDdMmYyyy } from '../dateUtils'
 import { meetsThreshold } from '../thresholdUtils'
 
@@ -205,7 +206,7 @@ const GENDER_TONE: Record<StudentGender, string> = {
 }
 
 export default function StatsView({ data, threshold: propThreshold }: Props) {
-  const [activeSubtab, setActiveSubtab] = useState<'oversikt' | 'karakterFravaer'>('oversikt')
+  const [activeSubtab, setActiveSubtab] = useState<'oversikt' | 'karakterFravaer' | 'karakterutviklingFravaer' | 'karakterutviklingInntak'>('oversikt')
   const [selectedMetric, setSelectedMetric] = useState<MetricKey | null>(null)
   const [tableSort, setTableSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null)
   const [vgFilter, setVgFilter] = useState<string | null>(null)
@@ -1694,6 +1695,8 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
         {([
           ['oversikt', 'Oversikt'],
           ['karakterFravaer', 'Karakter vs. fravær'],
+          ['karakterutviklingFravaer', 'Karakterutvikling vs. fravær'],
+          ['karakterutviklingInntak', 'Karakterutvikling vs. inntakspoeng'],
         ] as const).map(([key, label]) => (
           <button
             key={key}
@@ -1711,6 +1714,10 @@ export default function StatsView({ data, threshold: propThreshold }: Props) {
       </div>
       {activeSubtab === 'karakterFravaer' ? (
         <KarakterFravaerView data={data} />
+      ) : activeSubtab === 'karakterutviklingFravaer' ? (
+        <KarakterutviklingView key="fravaer" data={data} xAxis="fravaer" />
+      ) : activeSubtab === 'karakterutviklingInntak' ? (
+        <KarakterutviklingView key="inntak" data={data} xAxis="inntak" />
       ) : (
       <>
       <div className="flex flex-wrap justify-between items-center gap-3 mb-2">

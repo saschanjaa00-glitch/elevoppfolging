@@ -1,92 +1,71 @@
 import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { RotateCcw, Table2 } from 'lucide-react'
-import type { AbsenceRecord, DataStore, StudentGender } from '../types'
+import { Table2 } from 'lucide-react'
+import type { DataStore, StudentGender } from '../types'
+import { normalizeMatch } from '../studentInfoUtils'
 import {
-  buildStudentClassKey,
-  buildStudentSubjectKey,
-  createAbsenceSubjectClassLookup,
-  createStudentInfoLookup,
-  normalizeMatch,
-  resolveClassFromSubjectLookup,
-} from '../studentInfoUtils'
-import { resolveTeacher } from '../teacherUtils'
-import { fagkodeLookup } from '../fagkodeLookup'
+  CHART_MODE_LABEL,
+  CHART_MODE_SINGULAR,
+  CHART_MODE_UNIT,
+  FRAVAER_AVERAGE_COLOR,
+  FRAVAER_ROUNDING_OPTIONS,
+  FRAVAER_TYPE_INFO,
+  GENDER_COLOR,
+  GENDER_LABEL,
+  GRADE_COLOR,
+  GRADE_LABELS,
+  MARGIN,
+  PLOT_RIGHT,
+  PLOT_WIDTH,
+  SINGLE_DOT_COLOR,
+  UNKNOWN_GENDER_COLOR,
+  bucketX,
+  computeBoxStats,
+  emptyParts,
+  fmt,
+  fmtPct,
+  groupIntoBuckets,
+  jitter,
+  linearRegression,
+  makeXScale,
+  median,
+  mostCommon,
+  niceMax,
+  trinnColor,
+  useGradeAbsenceData,
+} from '../gradeAbsenceUtils'
+import type {
+  AverageVariant,
+  ChartMode,
+  DataPoint,
+  DotColorBy,
+  FravaerType,
+  GradeLabel,
+  HistogramMode,
+  Regression,
+  XScale,
+} from '../gradeAbsenceUtils'
+import {
+  AxisFrame,
+  ChartCard,
+  ChartSvg,
+  GradeAbsenceFilterSidebar,
+  GradeAbsenceOptionsBar,
+  LegendDot,
+  SummaryCard,
+  ToggleButton,
+  XAxisBackground,
+} from './GradeAbsenceKit'
 
 interface Props {
   data: DataStore
 }
 
-type Term = '1' | '2'
-type GenderFilter = 'all' | StudentGender
-type HistogramMode = 'antall' | 'andel'
-type ChartMode = 'elev' | 'fag' | 'faggruppe'
-
-const CHART_MODE_UNIT: Record<ChartMode, string> = { elev: 'elever', fag: 'fag', faggruppe: 'faggrupper' }
-const CHART_MODE_SINGULAR: Record<ChartMode, string> = { elev: 'elev', fag: 'fag', faggruppe: 'faggruppe' }
-const CHART_MODE_LABEL: Record<ChartMode, string> = { elev: 'Elev', fag: 'Fag', faggruppe: 'Faggruppe' }
 const CHART_MODE_DESCRIPTION: Record<ChartMode, string> = {
   elev: 'Per elev: snitt av fraværsprosenten i elevens fag mot snitt av elevens tallkarakterer.',
   fag: 'Per fag: snitt av fraværet mot snittkarakteren for alle elever i faget.',
   faggruppe: 'Per faggruppe: snitt av fraværet mot snittkarakteren for alle elever i faggruppen.',
 }
-type CompareBy = 'none' | 'kjonn' | 'trinn'
-type DotColorBy = 'gender' | 'trinn' | 'single'
-type AverageVariant = 'bars' | 'box'
-
-// One student's grade in one subject, paired with the fravær in that same subject.
-interface DataPoint {
-  id: string
-  navn: string
-  studentKey: string
-  className: string
-  level: string
-  subject: string
-  subjectGroup: string
-  teacher: string
-  gender: StudentGender | null
-  // Fravær on the x-axis: sum of the selected fravær types (% of årstimer, X straight from the file).
-  absence: number
-  parts: Record<FravaerType, number>
-  gradeLabel: GradeLabel
-  grade: number | null
-}
-
-const GRADE_LABELS = ['IV', '1', '2', '3', '4', '5', '6'] as const
-type GradeLabel = (typeof GRADE_LABELS)[number]
-
-const GRADE_COLOR: Record<GradeLabel, string> = {
-  IV: '#7f1d1d',
-  '1': '#dc2626',
-  '2': '#f97316',
-  '3': '#facc15',
-  '4': '#a3e635',
-  '5': '#22c55e',
-  '6': '#15803d',
-}
-
-const GENDER_LABEL: Record<StudentGender, string> = { girl: 'Jenter', boy: 'Gutter' }
-const GENDER_COLOR: Record<StudentGender, string> = { girl: '#e11d48', boy: '#0284c7' }
-const UNKNOWN_GENDER_COLOR = '#64748b'
-const SINGLE_DOT_COLOR = '#0369a1'
-const TRINN_COLOR: Record<string, string> = { '1': '#059669', '2': '#d97706', '3': '#0891b2' }
-const OTHER_TRINN_COLOR = '#64748b'
-const trinnColor = (level: string) => TRINN_COLOR[level] ?? OTHER_TRINN_COLOR
-
-const STEP_OPTIONS = [1, 2, 2.5, 5, 10]
-const CAP_OPTIONS = [10, 15, 20, 25, 30, 40, 50]
-const FRAVAER_ROUNDING_OPTIONS = [0.25, 0.5, 1, 2]
-const FRAVAER_AVERAGE_COLOR = '#6d28d9'
-
-type FravaerType = 'X' | 'D' | '!' | 'R'
-const FRAVAER_TYPES: FravaerType[] = ['X', 'D', '!', 'R']
-const FRAVAER_TYPE_INFO: Record<FravaerType, { label: string; title: string }> = {
-  X: { label: 'X, M', title: 'Udokumentert fravær (X, M), prosent fra fraværsfilen' },
-  D: { label: 'D', title: 'Dokumentert fravær (D): timer / årstimer' },
-  '!': { label: '!', title: 'Fravær (!): timer / årstimer' },
-  R: { label: 'R', title: 'Fravær (R): timer / årstimer' },
-}
-const emptyParts = (): Record<FravaerType, number> => ({ X: 0, D: 0, '!': 0, R: 0 })
 
 // What the Tabell under the scatter plot lists for each dot.
 interface PointRow {
@@ -147,40 +126,14 @@ interface Bucket<T extends BasePoint = DataPoint> {
   negativeShare: number | null
 }
 
-interface Regression {
-  r: number | null
-  slope: number | null
-  intercept: number | null
-}
-
 function computeBuckets<T extends BasePoint>(points: T[], step: number, cap: number): Bucket<T>[] {
-  const regularCount = Math.max(1, Math.ceil(cap / step - 1e-9))
-  const ranges: Array<{ lo: number; hi: number; overflow: boolean }> = []
-  for (let i = 0; i < regularCount; i++) {
-    ranges.push({ lo: i * step, hi: Math.min((i + 1) * step, cap), overflow: false })
-  }
-  ranges.push({ lo: cap, hi: Infinity, overflow: true })
-
-  const grouped: T[][] = ranges.map(() => [])
-  points.forEach(point => {
-    const index = point.absence >= cap
-      ? ranges.length - 1
-      : Math.min(regularCount - 1, Math.floor(point.absence / step + 1e-9))
-    grouped[index].push(point)
-  })
-
-  return ranges.map((range, index) => {
-    const bucketPoints = grouped[index]
+  return groupIntoBuckets(points, step, cap).map(range => {
+    const bucketPoints = range.points
     const counts = emptyCounts()
     bucketPoints.forEach(p => { counts[p.gradeLabel]++ })
     const numeric = bucketPoints.flatMap(p => (p.grade === null ? [] : [p.grade]))
     return {
-      key: `${range.lo}`,
-      label: range.overflow ? `≥ ${fmtPct(range.lo)} %` : `${fmtPct(range.lo)}–${fmtPct(range.hi)} %`,
-      lo: range.lo,
-      hi: range.hi,
-      overflow: range.overflow,
-      points: bucketPoints,
+      ...range,
       studentCount: new Set(bucketPoints.map(p => p.studentKey)).size,
       numericCount: numeric.length,
       avgGrade: numeric.length > 0 ? numeric.reduce((sum, g) => sum + g, 0) / numeric.length : null,
@@ -193,326 +146,26 @@ function computeBuckets<T extends BasePoint>(points: T[], step: number, cap: num
 
 // Pearson correlation and least-squares line between fravær % and grade (points without a numeric grade excluded).
 function computeRegression(points: BasePoint[]): Regression {
-  const numeric = points.filter(p => p.grade !== null)
-  const n = numeric.length
-  if (n < 3) return { r: null, slope: null, intercept: null }
-  const meanX = numeric.reduce((s, p) => s + p.absence, 0) / n
-  const meanY = numeric.reduce((s, p) => s + p.grade!, 0) / n
-  let sxy = 0, sxx = 0, syy = 0
-  numeric.forEach(p => {
-    const dx = p.absence - meanX
-    const dy = p.grade! - meanY
-    sxy += dx * dy
-    sxx += dx * dx
-    syy += dy * dy
-  })
-  if (sxx === 0) return { r: null, slope: null, intercept: null }
-  const slope = sxy / sxx
-  return { r: syy > 0 ? sxy / Math.sqrt(sxx * syy) : null, slope, intercept: meanY - slope * meanX }
-}
-
-// D, ! and R are hours / årstimer. Without Årstimer, derive it from udok. timer and udok. %.
-function annualHoursOf(absence: AbsenceRecord): number | null {
-  if ((absence.annualHours ?? 0) > 0) return absence.annualHours!
-  if (absence.percentageAbsence > 0 && absence.hoursAbsence > 0) return absence.hoursAbsence / (absence.percentageAbsence / 100)
-  return null
-}
-
-const isT1 = (halvaar: string) => halvaar === '1' || (halvaar.includes('1') && !halvaar.includes('2'))
-const isT2 = (halvaar: string) => halvaar === '2' || (halvaar.includes('2') && !halvaar.includes('1'))
-
-function parseGradeLabel(raw: string): GradeLabel | null {
-  const value = raw.trim().toUpperCase()
-  return (GRADE_LABELS as readonly string[]).includes(value) ? (value as GradeLabel) : null
-}
-
-function fmt(n: number | null, decimals = 2): string {
-  return n === null || Number.isNaN(n) ? '—' : n.toFixed(decimals).replace('.', ',')
-}
-
-function fmtPct(n: number): string {
-  return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2))).replace('.', ',')
-}
-
-function quantile(sorted: number[], q: number): number {
-  const pos = (sorted.length - 1) * q
-  const lower = Math.floor(pos)
-  const upper = Math.ceil(pos)
-  return sorted[lower] + (sorted[upper] - sorted[lower]) * (pos - lower)
-}
-
-interface BoxStats {
-  n: number
-  min: number
-  max: number
-  q1: number
-  median: number
-  q3: number
-  mean: number
-  whiskerLow: number
-  whiskerHigh: number
-  outliers: number[]
-}
-
-// Tukey box plot: whiskers reach the furthest values within 1.5 × IQR of the box; anything beyond is an outlier.
-function computeBoxStats(values: number[]): BoxStats | null {
-  if (values.length === 0) return null
-  const sorted = [...values].sort((a, b) => a - b)
-  const q1 = quantile(sorted, 0.25)
-  const q3 = quantile(sorted, 0.75)
-  const iqr = q3 - q1
-  const lowFence = q1 - 1.5 * iqr
-  const highFence = q3 + 1.5 * iqr
-  const inside = sorted.filter(v => v >= lowFence && v <= highFence)
-  return {
-    n: sorted.length,
-    min: sorted[0],
-    max: sorted[sorted.length - 1],
-    q1,
-    median: quantile(sorted, 0.5),
-    q3,
-    mean: sorted.reduce((s, v) => s + v, 0) / sorted.length,
-    whiskerLow: inside[0] ?? q1,
-    whiskerHigh: inside[inside.length - 1] ?? q3,
-    outliers: sorted.filter(v => v < lowFence || v > highFence),
-  }
-}
-
-function mostCommon(values: string[]): string {
-  const counts = new Map<string, number>()
-  values.forEach(v => counts.set(v, (counts.get(v) ?? 0) + 1))
-  let best = values[0] ?? ''
-  counts.forEach((count, value) => { if (count > (counts.get(best) ?? 0)) best = value })
-  return best
-}
-
-function median(values: number[]): number | null {
-  if (values.length === 0) return null
-  const sorted = [...values].sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+  return linearRegression(points.flatMap(p => (p.grade === null ? [] : [[p.absence, p.grade] as [number, number]])))
 }
 
 function emptyCounts(): Record<GradeLabel, number> {
   return { IV: 0, '1': 0, '2': 0, '3': 0, '4': 0, '5': 0, '6': 0 }
 }
 
-// Deterministic jitter in [-1, 1] so points don't move between renders.
-function jitter(seed: string): number {
-  let hash = 2166136261
-  for (let i = 0; i < seed.length; i++) {
-    hash ^= seed.charCodeAt(i)
-    hash = Math.imul(hash, 16777619)
-  }
-  return ((hash >>> 0) / 4294967295) * 2 - 1
-}
-
-function compareClassNames(a: string, b: string): number {
-  return a.localeCompare(b, 'nb-NO', { numeric: true })
-}
-
-function niceMax(value: number): number {
-  if (value <= 5) return 5
-  const magnitude = Math.pow(10, Math.floor(Math.log10(value)))
-  const normalized = value / magnitude
-  const nice = normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10
-  return nice * magnitude
-}
-
-function ToggleButton({ active, disabled, title, onClick, children }: {
-  active: boolean
-  disabled?: boolean
-  title?: string
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      aria-pressed={active}
-      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-        disabled
-          ? 'text-slate-300 cursor-not-allowed'
-          : active
-            ? 'bg-sky-600 text-white shadow-sm'
-            : 'text-slate-600 hover:bg-slate-100'
-      }`}
-    >
-      {children}
-    </button>
-  )
-}
-
-function FilterGroup({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-center gap-1">
-      <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide mr-1">{label}</span>
-      {children}
-    </div>
-  )
-}
-
-function SummaryCard({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4" title={hint}>
-      <p className="text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">{label}</p>
-      <div className="text-xl font-bold leading-tight text-slate-900">{value}</div>
-    </div>
-  )
-}
-
 export default function KarakterFravaerView({ data }: Props) {
-  const hasT1 = useMemo(() => data.grades.some(g => isT1(g.halvår?.toString().trim().toLowerCase() ?? '')), [data.grades])
-  const hasT2 = useMemo(() => data.grades.some(g => isT2(g.halvår?.toString().trim().toLowerCase() ?? '')), [data.grades])
-  const [term, setTerm] = useState<Term>(() => (hasT2 ? '2' : '1'))
-  const [levelFilter, setLevelFilter] = useState<string | null>(null)
-  const [genderFilter, setGenderFilter] = useState<GenderFilter>('all')
-  const [selectedClasses, setSelectedClasses] = useState<string[]>([])
-  const [step, setStep] = useState(2.5)
-  const [cap, setCap] = useState(20)
+  const state = useGradeAbsenceData(data)
+  const {
+    term, step, cap, compareBy, genderFilter, hasGenderData,
+    activeTypes, onlyX, activeTypesLabel, allPoints, points, graphSourcePoints,
+  } = state
   const [histogramMode, setHistogramMode] = useState<HistogramMode>('antall')
   const [chartMode, setChartMode] = useState<ChartMode>('elev')
   const [averageVariant, setAverageVariant] = useState<AverageVariant>('bars')
   const [showTrend, setShowTrend] = useState(true)
   const [showFravaerAverage, setShowFravaerAverage] = useState(false)
   const [fravaerRounding, setFravaerRounding] = useState(0.5)
-  const [compareBy, setCompareBy] = useState<CompareBy>('none')
-  const [fravaerTypes, setFravaerTypes] = useState<Record<FravaerType, boolean>>({ X: true, D: true, '!': true, R: false })
   const [showPointTable, setShowPointTable] = useState(false)
-  const [excludeHighD, setExcludeHighD] = useState(false)
-  const [maxD, setMaxD] = useState(2)
-  const [excludeIv, setExcludeIv] = useState(false)
-
-  const absenceSubjectClassLookup = useMemo(() => createAbsenceSubjectClassLookup(data.absences), [data.absences])
-  const studentInfoLookup = useMemo(() => createStudentInfoLookup(data.studentInfo), [data.studentInfo])
-
-  const absenceByStudentSubject = useMemo(() => {
-    const result = new Map<string, AbsenceRecord>()
-    data.absences.forEach(record => {
-      if (record.avbrudd) return
-      const key = buildStudentSubjectKey(record.navn, record.class, record.subjectGroup)
-      if (!result.has(key)) result.set(key, record)
-    })
-    return result
-  }, [data.absences])
-
-  const fravaerAvailable = useMemo<Record<FravaerType, boolean>>(() => ({
-    X: true,
-    D: data.absences.some(a => a.documentedHours !== undefined),
-    '!': data.absences.some(a => a.exclamationHours !== undefined),
-    R: data.absences.some(a => a.rHours !== undefined),
-  }), [data.absences])
-  const activeTypes = useMemo(
-    () => FRAVAER_TYPES.filter(type => fravaerTypes[type] && fravaerAvailable[type]),
-    [fravaerTypes, fravaerAvailable]
-  )
-  const onlyX = activeTypes.length === 1 && activeTypes[0] === 'X'
-  const activeTypesLabel = activeTypes.map(type => FRAVAER_TYPE_INFO[type].label).join(' + ')
-  const toggleFravaerType = (type: FravaerType) => {
-    // Keep at least one type selected so there is always a fravær value.
-    if (fravaerTypes[type] && activeTypes.length === 1 && activeTypes[0] === type) return
-    setFravaerTypes(current => ({ ...current, [type]: !current[type] }))
-  }
-
-  const { points: allPoints, missingAnnualHours } = useMemo(() => {
-    const result: DataPoint[] = []
-    const seen = new Set<string>()
-    let missingAnnual = 0
-    data.grades.forEach(grade => {
-      const halvaar = grade.halvår?.toString().trim().toLowerCase() ?? ''
-      if (term === '1' ? !isT1(halvaar) : !isT2(halvaar)) return
-      // Exam grades say nothing about fravær in the subject; only use halvår/standpunkt.
-      if ((grade.assessmentType ?? '').toLowerCase().includes('eksam')) return
-
-      const gradeLabel = parseGradeLabel(grade.grade)
-      if (!gradeLabel) return
-
-      const className = grade.class?.trim() || resolveClassFromSubjectLookup(absenceSubjectClassLookup, grade.navn, grade.subjectGroup)
-      if (!className) return
-
-      const key = buildStudentSubjectKey(grade.navn, className, grade.subjectGroup)
-      if (seen.has(key)) return
-      const absence = absenceByStudentSubject.get(key)
-      if (!absence) return
-
-      const studentKey = buildStudentClassKey(grade.navn, className)
-      const subject = absence.subject?.trim()
-        || fagkodeLookup[(grade.fagkode ?? '').trim().toUpperCase()]
-        || grade.subjectGroup.trim()
-      const teacher = grade.subjectTeacher?.trim()
-        || resolveTeacher(absence.subject ?? '', absence.teacher ?? '').trim()
-        || '—'
-
-      const parts = emptyParts()
-      parts.X = Math.max(0, absence.percentageAbsence)
-      const hoursOf: Record<FravaerType, number | undefined> = {
-        X: undefined,
-        D: absence.documentedHours,
-        '!': absence.exclamationHours,
-        R: absence.rHours,
-      }
-      if (activeTypes.some(type => type !== 'X' && (hoursOf[type] ?? 0) > 0)) {
-        const annualHours = annualHoursOf(absence)
-        if (annualHours === null) {
-          missingAnnual++
-          return
-        }
-        activeTypes.forEach(type => {
-          if (type !== 'X') parts[type] = ((hoursOf[type] ?? 0) / annualHours) * 100
-        })
-      }
-      seen.add(key)
-
-      result.push({
-        id: key,
-        navn: grade.navn,
-        studentKey,
-        className: absence.class.trim() || className,
-        level: className.trim().match(/^(\d)/)?.[1] ?? '',
-        subject,
-        subjectGroup: absence.subjectGroup?.trim() || grade.subjectGroup.trim(),
-        teacher,
-        gender: studentInfoLookup.get(studentKey)?.gender ?? null,
-        absence: activeTypes.reduce((sum, type) => sum + parts[type], 0),
-        parts,
-        gradeLabel,
-        grade: gradeLabel === 'IV' ? null : Number(gradeLabel),
-      })
-    })
-    return { points: result, missingAnnualHours: missingAnnual }
-  }, [data.grades, term, activeTypes, absenceSubjectClassLookup, absenceByStudentSubject, studentInfoLookup])
-
-  const hasGenderData = useMemo(() => allPoints.some(p => p.gender !== null), [allPoints])
-  const levelOptions = useMemo(
-    () => Array.from(new Set(allPoints.map(p => p.level).filter(Boolean))).sort(),
-    [allPoints]
-  )
-
-  // Filters cascade: trinn + kjønn → klasser → lærer / fag.
-  const levelGenderPoints = useMemo(
-    () => allPoints.filter(p =>
-      (!levelFilter || p.level === levelFilter)
-      && (genderFilter === 'all' || p.gender === genderFilter)
-    ),
-    [allPoints, levelFilter, genderFilter]
-  )
-  const classOptions = useMemo(
-    () => Array.from(new Set(levelGenderPoints.map(p => p.className))).sort(compareClassNames),
-    [levelGenderPoints]
-  )
-  const activeClasses = useMemo(
-    () => selectedClasses.filter(c => classOptions.includes(c)),
-    [selectedClasses, classOptions]
-  )
-  const points = useMemo(
-    () => activeClasses.length === 0
-      ? levelGenderPoints
-      : levelGenderPoints.filter(p => activeClasses.includes(p.className)),
-    [levelGenderPoints, activeClasses]
-  )
 
   const buckets = useMemo(() => computeBuckets(points, step, cap), [points, step, cap])
 
@@ -536,56 +189,6 @@ export default function KarakterFravaerView({ data }: Props) {
       ...computeRegression(points),
     }
   }, [points])
-
-  // Each student's D-fravær: mean of D-timer / årstimer over all their fag in the fravær file.
-  // Rows where årstimer can't be found are skipped; students with no usable row are never removed.
-  const studentDShare = useMemo(() => {
-    const sums = new Map<string, { sum: number; n: number }>()
-    data.absences.forEach(record => {
-      if (record.avbrudd || record.documentedHours === undefined) return
-      const annualHours = annualHoursOf(record)
-      if (annualHours === null && record.documentedHours > 0) return
-      const share = annualHours === null ? 0 : (record.documentedHours / annualHours) * 100
-      const key = buildStudentClassKey(record.navn, record.class)
-      const entry = sums.get(key)
-      if (entry) {
-        entry.sum += share
-        entry.n++
-      } else {
-        sums.set(key, { sum: share, n: 1 })
-      }
-    })
-    const result = new Map<string, number>()
-    sums.forEach(({ sum, n }, key) => result.set(key, sum / n))
-    return result
-  }, [data.absences])
-
-  const useDFilter = excludeHighD && fravaerAvailable.D
-  const { graphSourcePoints, removedByD, removedByIv } = useMemo(() => {
-    if (!useDFilter && !excludeIv) return { graphSourcePoints: points, removedByD: 0, removedByIv: 0 }
-    // IV in any fag this term removes the student from the graphs.
-    const ivStudents = excludeIv
-      ? new Set(points.filter(p => p.gradeLabel === 'IV').map(p => p.studentKey))
-      : new Set<string>()
-    const droppedByD = new Set<string>()
-    const droppedByIv = new Set<string>()
-    const kept = points.filter(p => {
-      let drop = false
-      if (useDFilter) {
-        const share = studentDShare.get(p.studentKey)
-        if (share !== undefined && share > maxD) {
-          droppedByD.add(p.studentKey)
-          drop = true
-        }
-      }
-      if (ivStudents.has(p.studentKey)) {
-        droppedByIv.add(p.studentKey)
-        drop = true
-      }
-      return !drop
-    })
-    return { graphSourcePoints: kept, removedByD: droppedByD.size, removedByIv: droppedByIv.size }
-  }, [points, useDFilter, maxD, studentDShare, excludeIv])
 
   // One point per elev, fag or faggruppe: mean fravær vs. mean of the numeric grades (IV excluded).
   // In fag/faggruppe mode each unit is split by kjønn or trinn when comparing, so group trendlines use like-for-like points.
@@ -727,18 +330,6 @@ export default function KarakterFravaerView({ data }: Props) {
       .sort((a, b) => a.absence - b.absence)
   }, [chartPoints, fravaerRounding])
 
-  const filtersActive = levelFilter !== null || genderFilter !== 'all' || activeClasses.length > 0
-  const resetFilters = () => {
-    setLevelFilter(null)
-    setGenderFilter('all')
-    setSelectedClasses([])
-  }
-  const toggleClass = (className: string) => {
-    setSelectedClasses(current =>
-      current.includes(className) ? current.filter(c => c !== className) : [...current, className]
-    )
-  }
-
   if (data.grades.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 text-sm text-slate-600">
@@ -749,106 +340,7 @@ export default function KarakterFravaerView({ data }: Props) {
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 items-start">
-      {/* Side menu with filters */}
-      <aside className="w-full lg:w-60 shrink-0 lg:sticky lg:top-4 bg-white rounded-lg shadow-sm border border-slate-100 p-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-900">Filtre</h2>
-          {filtersActive && (
-            <button
-              type="button"
-              onClick={resetFilters}
-              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md"
-            >
-              <RotateCcw className="w-3 h-3" />
-              Nullstill
-            </button>
-          )}
-        </div>
-        <SideGroup label="Termin">
-          <ToggleButton active={term === '1'} disabled={!hasT1} onClick={() => setTerm('1')}>T1</ToggleButton>
-          <ToggleButton active={term === '2'} disabled={!hasT2} onClick={() => setTerm('2')}>T2</ToggleButton>
-        </SideGroup>
-        <SideGroup label="Trinn">
-          <ToggleButton active={levelFilter === null} onClick={() => setLevelFilter(null)}>Alle</ToggleButton>
-          {levelOptions.map(level => (
-            <ToggleButton key={level} active={levelFilter === level} onClick={() => setLevelFilter(level)}>
-              VG{level}
-            </ToggleButton>
-          ))}
-        </SideGroup>
-        <SideGroup label="Kjønn">
-          <ToggleButton active={genderFilter === 'all'} onClick={() => setGenderFilter('all')}>Alle</ToggleButton>
-          {(['girl', 'boy'] as StudentGender[]).map(gender => (
-            <ToggleButton
-              key={gender}
-              active={genderFilter === gender}
-              disabled={!hasGenderData}
-              title={hasGenderData ? undefined : 'Krever elevfil med gyldige fødselsnumre'}
-              onClick={() => setGenderFilter(gender)}
-            >
-              {GENDER_LABEL[gender]}
-            </ToggleButton>
-          ))}
-        </SideGroup>
-        <SideGroup label="Klasser">
-          <button
-            type="button"
-            onClick={() => setSelectedClasses([])}
-            aria-pressed={activeClasses.length === 0}
-            className={`px-2 py-1 rounded-md text-xs font-medium border transition-colors ${
-              activeClasses.length === 0
-                ? 'bg-sky-600 text-white border-sky-600'
-                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-            }`}
-          >
-            Alle
-          </button>
-          {classOptions.map(className => {
-            const active = activeClasses.includes(className)
-            return (
-              <button
-                key={className}
-                type="button"
-                onClick={() => toggleClass(className)}
-                aria-pressed={active}
-                className={`px-2 py-1 rounded-md text-xs font-medium border transition-colors ${
-                  active
-                    ? 'bg-sky-100 text-sky-800 border-sky-300'
-                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                }`}
-              >
-                {className}
-              </button>
-            )
-          })}
-        </SideGroup>
-        <div className="space-y-2 border-t border-slate-100 pt-3">
-          <label className="flex items-center justify-between gap-2 text-sm text-slate-700">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Intervall</span>
-            <select
-              value={step}
-              onChange={e => setStep(Number(e.target.value))}
-              className="rounded border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
-            >
-              {STEP_OPTIONS.map(option => (
-                <option key={option} value={option}>{fmtPct(option)} %</option>
-              ))}
-            </select>
-          </label>
-          <label className="flex items-center justify-between gap-2 text-sm text-slate-700">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Samle over</span>
-            <select
-              value={cap}
-              onChange={e => setCap(Number(e.target.value))}
-              className="rounded border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
-            >
-              {CAP_OPTIONS.map(option => (
-                <option key={option} value={option}>{option} %</option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </aside>
+      <GradeAbsenceFilterSidebar state={state} />
 
       <div className="flex-1 min-w-0 space-y-6">
       {points.length === 0 ? (
@@ -966,103 +458,7 @@ export default function KarakterFravaerView({ data }: Props) {
                 <ToggleButton active={chartMode === 'faggruppe'} onClick={() => setChartMode('faggruppe')}>Per faggruppe</ToggleButton>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
-              <FilterGroup label="Sammenlign trendlinjer">
-                <ToggleButton active={compareBy === 'none'} onClick={() => setCompareBy('none')}>Ingen</ToggleButton>
-                <ToggleButton
-                  active={compareBy === 'kjonn'}
-                  disabled={!hasGenderData}
-                  title={hasGenderData ? undefined : 'Krever elevfil med gyldige fødselsnumre'}
-                  onClick={() => setCompareBy('kjonn')}
-                >
-                  Kjønn
-                </ToggleButton>
-                <ToggleButton active={compareBy === 'trinn'} onClick={() => setCompareBy('trinn')}>Trinn</ToggleButton>
-              </FilterGroup>
-              <FilterGroup label="Fravær">
-                {FRAVAER_TYPES.map(type => {
-                  const available = fravaerAvailable[type]
-                  const checked = fravaerTypes[type] && available
-                  const locked = checked && activeTypes.length === 1
-                  return (
-                    <label
-                      key={type}
-                      className={`inline-flex items-center gap-1 mr-2 text-sm ${available ? 'text-slate-700' : 'text-slate-300 cursor-not-allowed'}`}
-                      title={available
-                        ? `${FRAVAER_TYPE_INFO[type].title}${locked ? '. Minst én type må være valgt.' : ''}`
-                        : 'Fraværsfilen mangler denne kolonnen.'}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={!available}
-                        onChange={() => toggleFravaerType(type)}
-                        className="rounded border-slate-300"
-                      />
-                      <span className="font-semibold">{FRAVAER_TYPE_INFO[type].label}</span>
-                    </label>
-                  )
-                })}
-              </FilterGroup>
-              {missingAnnualHours > 0 && (
-                <span className="text-xs text-amber-700">
-                  {missingAnnualHours} {missingAnnualHours === 1 ? 'karakter' : 'karakterer'} med {activeTypes.filter(t => t !== 'X').join('/')}-fravær mangler årstimer og er ikke med.
-                </span>
-              )}
-              <div
-                className={`flex flex-wrap items-center gap-2 text-sm ${fravaerAvailable.D ? 'text-slate-700' : 'text-slate-300 cursor-not-allowed'}`}
-                title={fravaerAvailable.D
-                  ? 'Tar bort elever med høyt dokumentert fravær (snitt av D-timer / årstimer over alle elevens fag) fra grafene og tabellen under den første grafen.'
-                  : 'Fraværsfilen mangler kolonnen for D-fravær.'}
-              >
-                <label className="inline-flex items-center gap-1.5">
-                  <input
-                    type="checkbox"
-                    checked={useDFilter}
-                    disabled={!fravaerAvailable.D}
-                    onChange={e => setExcludeHighD(e.target.checked)}
-                    className="rounded border-slate-300"
-                  />
-                  Fjern elever med D-fravær over
-                </label>
-                <input
-                  type="range"
-                  min={0}
-                  max={20}
-                  step={0.5}
-                  value={maxD}
-                  disabled={!useDFilter}
-                  onChange={e => setMaxD(Number(e.target.value))}
-                  aria-label="Grense for D-fravær"
-                  className="w-36 accent-sky-600 disabled:opacity-40"
-                />
-                <span className={`w-12 tabular-nums font-semibold ${useDFilter ? 'text-sky-700' : 'text-slate-300'}`}>{fmtPct(maxD)} %</span>
-                {useDFilter && (
-                  <span className="text-xs text-slate-500">
-                    {removedByD} {removedByD === 1 ? 'elev' : 'elever'} fjernet fra grafene
-                  </span>
-                )}
-              </div>
-              <div
-                className="flex flex-wrap items-center gap-2 text-sm text-slate-700"
-                title="Tar bort elever som har IV i minst ett fag denne terminen fra grafene og tabellen under den første grafen."
-              >
-                <label className="inline-flex items-center gap-1.5">
-                  <input
-                    type="checkbox"
-                    checked={excludeIv}
-                    onChange={e => setExcludeIv(e.target.checked)}
-                    className="rounded border-slate-300"
-                  />
-                  Fjern elever med IV
-                </label>
-                {excludeIv && (
-                  <span className="text-xs text-slate-500">
-                    {removedByIv} {removedByIv === 1 ? 'elev' : 'elever'} fjernet fra grafene
-                  </span>
-                )}
-              </div>
-            </div>
+            <GradeAbsenceOptionsBar state={state} />
           </div>
 
           <ChartCard
@@ -1252,48 +648,6 @@ export default function KarakterFravaerView({ data }: Props) {
   )
 }
 
-function SideGroup({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div>
-      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">{label}</p>
-      <div className="flex flex-wrap gap-1">{children}</div>
-    </div>
-  )
-}
-
-function LegendDot({ color, label }: { color: string; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
-      {label}
-    </span>
-  )
-}
-
-function ChartCard({ title, subtitle, controls, legend, footer, children }: {
-  title: string
-  subtitle?: string
-  controls?: ReactNode
-  legend?: ReactNode
-  footer?: ReactNode
-  children: ReactNode
-}) {
-  return (
-    <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-2">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
-          {subtitle && <p className="text-xs text-slate-500 mt-1">{subtitle}</p>}
-        </div>
-        {controls}
-      </div>
-      {children}
-      {legend && <div className="flex flex-wrap items-center gap-x-5 gap-y-1 mt-3 text-xs text-slate-600">{legend}</div>}
-      {footer}
-    </div>
-  )
-}
-
 type PointSortKey = 'name' | 'detail' | 'group' | 'students' | 'grades' | 'absence' | FravaerType | 'grade' | 'iv'
 
 // Compact list of the dots currently plotted in the scatter chart.
@@ -1403,89 +757,6 @@ function PointTable({ points, mode, activeTypes, showParts, showGroup }: {
         </tbody>
       </table>
     </div>
-  )
-}
-
-const CHART_WIDTH = 960
-const MARGIN = { left: 52, right: 16, top: 16, bottom: 40 }
-const PLOT_WIDTH = CHART_WIDTH - MARGIN.left - MARGIN.right
-const PLOT_RIGHT = CHART_WIDTH - MARGIN.right
-
-// Shared fravær axis: regular intervals up to the cap, then one overflow band of the same width.
-interface XScale {
-  step: number
-  cap: number
-  span: number
-  title: string
-  boundaries: number[]
-  labelEvery: number
-  lin: (value: number) => number
-  xOfAbsence: (value: number) => number
-}
-
-function makeXScale(points: BasePoint[], step: number, cap: number, title: string): XScale {
-  const span = cap + step
-  const lin = (value: number) => MARGIN.left + (value / span) * PLOT_WIDTH
-  // Values above the cap are squeezed into the overflow band so a few extreme values don't flatten the rest.
-  const maxAbsence = points.reduce((max, p) => Math.max(max, p.absence), 0)
-  const xOfAbsence = (value: number) => {
-    if (value < cap) return lin(value)
-    const range = maxAbsence - cap
-    const fraction = range > 0 ? Math.min(1, (value - cap) / range) : 0
-    return lin(cap + step * (0.08 + 0.84 * fraction))
-  }
-  const boundaries: number[] = []
-  for (let value = 0; value < cap - 1e-9; value += step) boundaries.push(value)
-  boundaries.push(cap)
-  const labelEvery = boundaries.length > 16 ? Math.ceil(boundaries.length / 12) : 1
-  return { step, cap, span, title, boundaries, labelEvery, lin, xOfAbsence }
-}
-
-function bucketX(scale: XScale, bucket: Bucket<BasePoint>): { x1: number; x2: number } {
-  return { x1: scale.lin(bucket.lo), x2: scale.lin(bucket.overflow ? scale.span : bucket.hi) }
-}
-
-function ChartSvg({ height, label, children }: { height: number; label: string; children: ReactNode }) {
-  return (
-    <div className="w-full overflow-x-auto">
-      <svg viewBox={`0 0 ${CHART_WIDTH} ${height}`} className="w-full min-w-[640px] h-auto select-none" role="img" aria-label={label}>
-        {children}
-      </svg>
-    </div>
-  )
-}
-
-// Overflow-band background, vertical interval lines and fravær labels; drawn first so data sits on top.
-function XAxisBackground({ scale, yTop, yBottom }: { scale: XScale; yTop: number; yBottom: number }) {
-  return (
-    <g>
-      <rect x={scale.lin(scale.cap)} y={yTop} width={scale.lin(scale.span) - scale.lin(scale.cap)} height={yBottom - yTop} fill="#f8fafc" />
-      {scale.boundaries.map((value, index) => (
-        <g key={value}>
-          <line x1={scale.lin(value)} x2={scale.lin(value)} y1={yTop} y2={yBottom} stroke="#e2e8f0" strokeWidth={1} />
-          {(index % scale.labelEvery === 0 || index === scale.boundaries.length - 1) && (
-            <text x={scale.lin(value)} y={yBottom + 14} textAnchor="middle" fontSize={10} fill="#64748b">{fmtPct(value)}</text>
-          )}
-        </g>
-      ))}
-      <text x={scale.lin(scale.cap + scale.step / 2)} y={yBottom + 14} textAnchor="middle" fontSize={10} fill="#64748b">
-        ≥{fmtPct(scale.cap)}
-      </text>
-      <text x={MARGIN.left + PLOT_WIDTH / 2} y={yBottom + 32} textAnchor="middle" fontSize={11} fill="#475569">
-        {scale.title}
-      </text>
-    </g>
-  )
-}
-
-function AxisFrame({ yTop, yBottom, yTitle }: { yTop: number; yBottom: number; yTitle: string }) {
-  const mid = (yTop + yBottom) / 2
-  return (
-    <g pointerEvents="none">
-      <line x1={MARGIN.left} x2={MARGIN.left} y1={yTop} y2={yBottom} stroke="#94a3b8" />
-      <line x1={MARGIN.left} x2={PLOT_RIGHT} y1={yBottom} y2={yBottom} stroke="#94a3b8" />
-      <text x={14} y={mid} transform={`rotate(-90 14 ${mid})`} textAnchor="middle" fontSize={11} fill="#475569">{yTitle}</text>
-    </g>
   )
 }
 
