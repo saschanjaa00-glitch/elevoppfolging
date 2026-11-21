@@ -56,6 +56,9 @@ export interface StudentAbsenceSummary {
     subjectGroup: string
     teacher?: string
     percentageAbsence: number
+    // Udok. + D + (!) as % of årstimer; only set when the fravær file has the hour columns
+    totalPercentage?: number
+    rPercentage?: number
     warnings: Array<{ warningType: string; sentDate: string }>
     grade?: string
     gradeT2?: string

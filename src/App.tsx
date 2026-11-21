@@ -115,6 +115,9 @@ function App() {
   const [presets, setPresets] = useState<PresetRecord[]>([])
   const [absenceThreshold, setAbsenceThreshold] = useState<number>(5)
   const [thresholdEnabled, setThresholdEnabled] = useState<boolean>(true)
+  const [showTotalAbsence, setShowTotalAbsence] = useState<boolean>(false)
+  const [includeRInTotal, setIncludeRInTotal] = useState<boolean>(false)
+  const [filterByTotalAbsence, setFilterByTotalAbsence] = useState<boolean>(false)
   const [noFilter, setNoFilter] = useState<boolean>(false)
   const [activeTab, setActiveTab] = useState<AppTab>('elever')
   const [examRows, setExamRows] = useState<ParsedExamRow[] | null>(null)
@@ -269,6 +272,11 @@ function App() {
   )
   const isNameSearchActive = studentSearch.trim().length > 0
   const filtersDisabled = isNameSearchActive || noFilter
+  const hasTotalAbsenceData = useMemo(
+    () => data.absences.some(a => a.documentedHours !== undefined || a.exclamationHours !== undefined || a.rHours !== undefined),
+    [data.absences]
+  )
+  const hasRAbsenceData = useMemo(() => data.absences.some(a => a.rHours !== undefined), [data.absences])
   const prefetchedChunks = useRef<Set<string>>(new Set())
   const idleCountdownLabel = useMemo(() => {
     const totalSeconds = Math.max(0, Math.ceil(idleRemainingMs / 1000))
@@ -2081,6 +2089,41 @@ function App() {
                             </div>
                           </div>
                         </div>
+                        <div
+                          className={`mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm ${hasTotalAbsenceData ? 'text-slate-700' : 'text-slate-400'}`}
+                          title={hasTotalAbsenceData ? 'Totalfravær = udokumentert + dokumentert (D) + (!), i parentes etter fraværet' : 'Krever fraværsfil med timer for D, (!) og R'}
+                        >
+                          <label className={`inline-flex items-center gap-2 ${hasTotalAbsenceData ? 'cursor-pointer' : 'opacity-40'}`}>
+                            <input
+                              type="checkbox"
+                              checked={hasTotalAbsenceData && showTotalAbsence}
+                              onChange={e => setShowTotalAbsence(e.currentTarget.checked)}
+                              disabled={!hasTotalAbsenceData}
+                              className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                            />
+                            Vis totalfravær
+                          </label>
+                          <label className={`inline-flex items-center gap-2 ${hasRAbsenceData && showTotalAbsence ? 'cursor-pointer' : 'opacity-40'}`}>
+                            <input
+                              type="checkbox"
+                              checked={hasRAbsenceData && includeRInTotal}
+                              onChange={e => setIncludeRInTotal(e.currentTarget.checked)}
+                              disabled={!hasRAbsenceData || !showTotalAbsence}
+                              className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                            />
+                            Inkl. R
+                          </label>
+                          <label className={`inline-flex items-center gap-2 ${hasTotalAbsenceData && showTotalAbsence && !filtersDisabled && thresholdEnabled ? 'cursor-pointer' : 'opacity-40'}`}>
+                            <input
+                              type="checkbox"
+                              checked={hasTotalAbsenceData && filterByTotalAbsence}
+                              onChange={e => setFilterByTotalAbsence(e.currentTarget.checked)}
+                              disabled={!hasTotalAbsenceData || !showTotalAbsence || filtersDisabled || !thresholdEnabled}
+                              className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                            />
+                            Filtrer på totalfravær
+                          </label>
+                        </div>
                       </div>
 
                       <div className={data.grades.length === 0 || filtersDisabled ? 'opacity-40 pointer-events-none' : ''}>
@@ -2331,6 +2374,9 @@ function App() {
                       sortByWarningCountDesc={sortByWarningCountDesc}
                       includeFravaerWarnings={includeFravaerWarnings}
                       includeGrunnlagWarnings={includeGrunnlagWarnings}
+                      showTotalAbsence={hasTotalAbsenceData && showTotalAbsence}
+                      includeRInTotal={hasRAbsenceData && showTotalAbsence && includeRInTotal}
+                      filterByTotalAbsence={hasTotalAbsenceData && showTotalAbsence && filterByTotalAbsence}
                       presets={presets}
                       exportRef={studentListExportRef}
                       onVisibleCountChange={setVisibleStudentCount}

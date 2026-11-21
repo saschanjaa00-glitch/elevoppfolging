@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useImperativeHandle, useMemo, useState } from 'react'
 import type { Ref } from 'react'
-import type { DataStore, PresetRecord, StudentAbsenceSummary } from '../types'
+import type { AbsenceRecord, DataStore, PresetRecord, StudentAbsenceSummary } from '../types'
 import { Eye, X, FileText } from 'lucide-react'
 import StudentDetail from './StudentDetail'
 import { resolveTeacher } from '../teacherUtils'
@@ -21,6 +21,7 @@ import {
 import { compareDateStrings, formatDateDdMmYyyy, parseFlexibleDate, todayDdMmYyyy, warningDateColorClass } from '../dateUtils'
 import { sanitizeFilenamePart } from '../securityUtils'
 import { meetsThreshold } from '../thresholdUtils'
+import { annualHoursOf } from '../gradeAbsenceUtils'
 
 interface StudentListProps {
   data: DataStore
@@ -43,6 +44,9 @@ interface StudentListProps {
   sortByWarningCountDesc: boolean
   includeFravaerWarnings: boolean
   includeGrunnlagWarnings: boolean
+  showTotalAbsence?: boolean
+  includeRInTotal?: boolean
+  filterByTotalAbsence?: boolean
   presets?: PresetRecord[]
   // Lets the sidebar export menu run the list exports; the buttons live there, the logic stays here.
   exportRef?: Ref<StudentListExportHandle>
@@ -59,6 +63,26 @@ export interface StudentListExportHandle {
 }
 
 const LOW_GRADES = ['IV', '1', '2']
+
+type TotalAbsence = { totalPercentage?: number; rPercentage?: number }
+
+// Udok. % plus D and (!) hours as % of årstimer. R is kept separate so it can be toggled.
+const totalAbsenceOf = (record: AbsenceRecord): TotalAbsence => {
+  if (record.documentedHours === undefined && record.exclamationHours === undefined && record.rHours === undefined) return {}
+  const extraHours = (record.documentedHours ?? 0) + (record.exclamationHours ?? 0)
+  const rHours = record.rHours ?? 0
+  const annualHours = annualHoursOf(record)
+  if (annualHours === null) {
+    return extraHours === 0 && rHours === 0 ? { totalPercentage: record.percentageAbsence, rPercentage: 0 } : {}
+  }
+  return {
+    totalPercentage: record.percentageAbsence + (extraHours / annualHours) * 100,
+    rPercentage: (rHours / annualHours) * 100,
+  }
+}
+
+const displayedTotalOf = (totals: TotalAbsence, includeR: boolean): number | undefined =>
+  totals.totalPercentage === undefined ? undefined : totals.totalPercentage + (includeR ? totals.rPercentage ?? 0 : 0)
 
 let jsPdfModulePromise: Promise<typeof import('jspdf')> | null = null
 let docxModulePromise: Promise<typeof import('docx')> | null = null
@@ -141,6 +165,9 @@ export default function StudentList({
   sortByWarningCountDesc,
   includeFravaerWarnings,
   includeGrunnlagWarnings,
+  showTotalAbsence = false,
+  includeRInTotal = false,
+  filterByTotalAbsence = false,
   presets = [],
   exportRef,
   onVisibleCountChange,
@@ -326,6 +353,9 @@ export default function StudentList({
       return overThreshold
     }
 
+    const filterPercentageOf = (percentageAbsence: number, totals: TotalAbsence): number =>
+      filterByTotalAbsence ? displayedTotalOf(totals, includeRInTotal) ?? percentageAbsence : percentageAbsence
+
     const summaryMap = new Map<string, StudentAbsenceSummary>()
     const subjectKeysBySummary = new Map<string, Set<string>>()
     const studentInfoCache = new Map<string, ReturnType<typeof findStudentInfoInLookup>>()
@@ -340,7 +370,8 @@ export default function StudentList({
       const grade = gradeMap.get(warningKey)
       const gradeT2 = gradeMapT2.get(warningKey)
       const subjectTeacher = subjectTeacherMap.get(warningKey) ?? record.teacher
-      const includeSubject = shouldIncludeSubject(record.percentageAbsence, grade, gradeT2)
+      const totals = totalAbsenceOf(record)
+      const includeSubject = shouldIncludeSubject(filterPercentageOf(record.percentageAbsence, totals), grade, gradeT2)
 
       const studentInfoKey = buildStudentClassKey(record.navn, record.class)
       if (!studentInfoCache.has(studentInfoKey)) {
@@ -365,7 +396,7 @@ export default function StudentList({
           maxPercentage: record.percentageAbsence,
           totalHours: record.hoursAbsence,
           subjects: includeSubject
-            ? [{ subject: record.subject, subjectGroup: record.subjectGroup, teacher: subjectTeacher, percentageAbsence: record.percentageAbsence, warnings, grade, gradeT2 }]
+            ? [{ subject: record.subject, subjectGroup: record.subjectGroup, teacher: subjectTeacher, percentageAbsence: record.percentageAbsence, ...totals, warnings, grade, gradeT2 }]
             : [],
           avbrudd: record.avbrudd,
           hasWarnings: includeSubject ? hasSubjectWarning : false,
@@ -383,7 +414,7 @@ export default function StudentList({
 
         if (includeSubject) {
           if (!subjectKeys?.has(subjectDedupKey)) {
-            summary.subjects.push({ subject: record.subject, subjectGroup: record.subjectGroup, teacher: subjectTeacher, percentageAbsence: record.percentageAbsence, warnings, grade, gradeT2 })
+            summary.subjects.push({ subject: record.subject, subjectGroup: record.subjectGroup, teacher: subjectTeacher, percentageAbsence: record.percentageAbsence, ...totals, warnings, grade, gradeT2 })
             subjectKeys?.add(subjectDedupKey)
           }
           if (hasSubjectWarning) summary.hasWarnings = true
@@ -429,6 +460,10 @@ export default function StudentList({
         summary.subjects.find(s => isNorskSubject(s.subject))
 
       const sourceAbsencePercentage = nor1267RawRecord?.percentageAbsence ?? norskHovedmalSource?.percentageAbsence ?? 0
+      const sourceTotals: TotalAbsence = nor1267RawRecord
+        ? totalAbsenceOf(nor1267RawRecord)
+        : { totalPercentage: norskHovedmalSource?.totalPercentage, rPercentage: norskHovedmalSource?.rPercentage }
+      const sourceFilterPercentage = filterPercentageOf(sourceAbsencePercentage, sourceTotals)
       const sourceSubjectName = nor1267RawRecord?.subject ?? norskHovedmalSource?.subject
 
       const sourceFravaerWarnings = (norskHovedmalSource?.warnings ?? []).filter(w =>
@@ -453,7 +488,7 @@ export default function StudentList({
         if (!noFilter && fullRapport) includeSubject = matchesFullRapportGrade
         else if (!noFilter && lowGradeFilter.length > 0) {
           includeSubject = filterLogic === 'og'
-            ? matchesSelectedGrade && meetsThreshold(sourceAbsencePercentage, threshold)
+            ? matchesSelectedGrade && meetsThreshold(sourceFilterPercentage, threshold)
             : matchesSelectedGrade
         }
         if (!includeSubject) return
@@ -472,6 +507,7 @@ export default function StudentList({
           subjectGroup: code,
           teacher,
           percentageAbsence: sourceAbsencePercentage,
+          ...sourceTotals,
           warnings: sourceFravaerWarnings.length > 0 ? sourceFravaerWarnings : warnings,
           grade,
           gradeT2: gradeMapT2.get(gradeKey),
@@ -483,7 +519,7 @@ export default function StudentList({
     })
 
     return Array.from(summaryMap.values())
-  }, [classData, warningLookup, gradeLookup, threshold, lowGradeFilter, filterLogic, fullRapport, fullRapportInclude2, noFilter, gradeHalvaar, studentInfoLookup])
+  }, [classData, warningLookup, gradeLookup, threshold, lowGradeFilter, filterLogic, fullRapport, fullRapportInclude2, noFilter, gradeHalvaar, studentInfoLookup, filterByTotalAbsence, includeRInTotal])
 
   const kontaktlaererByStudentKey = useMemo(() => {
     const explicitMap = new Map<string, string>()
@@ -2453,8 +2489,16 @@ export default function StudentList({
                                     ? 'bg-amber-100 text-amber-700'
                                     : 'bg-slate-100 text-slate-600'
                                 }`}
+                                title={showTotalAbsence && subjectEntry.totalPercentage !== undefined
+                                  ? `I parentes: totalfravær (udokumentert + dokumentert (D) + (!)${includeRInTotal ? ' + R' : ''}), i % av årstimer`
+                                  : undefined}
                               >
                                 {subjectEntry.percentageAbsence.toFixed(1)}%
+                                {showTotalAbsence && subjectEntry.totalPercentage !== undefined && (
+                                  <span className="ml-1 opacity-75">
+                                    ({displayedTotalOf(subjectEntry, includeRInTotal)!.toFixed(1)}%)
+                                  </span>
+                                )}
                               </span>
                               {subjectEntry.grade && (
                                 <span className={`w-fit px-2 py-0.5 rounded text-xs font-bold ${['1', '2', 'iv'].includes(subjectEntry.grade.toLowerCase()) ? 'bg-orange-200 text-orange-900' : 'bg-slate-100 text-slate-600'}`}>
