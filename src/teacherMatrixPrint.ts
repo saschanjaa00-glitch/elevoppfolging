@@ -805,7 +805,7 @@ function buildDiscussionScheduleHtml(
 
   return `
     <section class="sheet page-break schedule-section">
-      <div class="table-block">
+      <div class="table-block" data-tab="tidsplan" data-print-group="Tidsplan" data-print-label="Forslag til tidsplan">
       <h2>Forslag til tidsplan for klasselærerråd</h2>
       <p class="meta">Rommene følger rådgiverne. Planen bruker færrest mulige tidsluker, fordeler klassene jevnt og minimerer lærerkonflikter vektet etter antall elever.</p>
       ${warnings}
@@ -826,7 +826,7 @@ function buildDiscussionScheduleHtml(
         <tbody>${rows}</tbody>
       </table>
       </div>
-      <div class="table-block">
+      <div class="table-block" data-tab="laererfordeling" data-print-group="Tidsplan" data-print-label="Lærerfordeling per tidsluke">
       <h3 class="schedule-subtitle">Lærerfordeling per tidsluke</h3>
       <p class="meta">Tallene bak klassenavnet viser antall kontaktlærere + antall øvrige lærere. Kontaktlærere er plassert i egen klasse. Andre lærere er plassert i klassen der de har flest elever i den aktuelle tidsluken. Tallene i parentes viser antall elever læreren har i hver av klassene i tidsluken (samme rekkefølge som kolonnene), og det understrekede tallet er klassen læreren er plassert i.${
         schedule.minStudents !== null
@@ -880,7 +880,7 @@ function buildTeacherMeetingOverviewHtml(
     .join('')
 
   return `
-      <div class="table-block">
+      <div class="table-block" data-tab="moteoversikt" data-print-group="Tidsplan" data-print-label="Møteoversikt per lærer">
       <h3 class="schedule-subtitle">Møteoversikt per lærer</h3>
       <p class="meta">Klassen læreren skal møte i hver tidsluke. Siste kolonne viser totalt antall møter læreren skal delta på.</p>
       <div class="no-print copy-row">
@@ -950,6 +950,7 @@ function buildSectionHtml(
     ? `Lærerliste klasselærerråd – Oppsatte lærere – ${escapeHtml(section.className)}`
     : `Lærerliste klasselærerråd – ${escapeHtml(section.className)}`
   const teacherLabel = variant === 'assigned' ? 'oppsatte lærere' : 'lærere'
+  const printGroup = variant === 'assigned' ? 'Oppsatte lærere per klasse' : 'Lærerliste per klasse'
 
   const headerCells = section.students
     .map(
@@ -973,7 +974,7 @@ function buildSectionHtml(
     .join('')
 
   return `
-    <section class="sheet table-block${isFirst ? '' : ' page-break'}">
+    <section class="sheet table-block${isFirst ? '' : ' page-break'}" data-tab="${variant === 'assigned' ? 'oppsatte' : 'laererliste'}" data-print-group="${printGroup}" data-print-label="${escapeHtml(section.className)}">
       <h2>${heading}</h2>
       <p class="meta">${section.teachers.length} ${teacherLabel} · ${columnCount} elever · ${escapeHtml(todayDdMmYyyy())}</p>
       <div class="no-print copy-row">
@@ -1035,6 +1036,24 @@ export function buildTeacherMatrixHtml(
       )
       .join('')
 
+  const tabs: Array<{ id: string; label: string }> = [
+    { id: 'laererliste', label: 'Lærerliste' },
+    ...(discussionSchedule
+      ? [
+          { id: 'tidsplan', label: 'Tidsplan' },
+          { id: 'laererfordeling', label: 'Lærerfordeling' },
+          { id: 'moteoversikt', label: 'Møteoversikt' },
+        ]
+      : []),
+    ...(assignedSections.length > 0 ? [{ id: 'oppsatte', label: 'Oppsatte lærere' }] : []),
+  ]
+  const tabBar = tabs
+    .map(
+      (tab, index) =>
+        `<button type="button" role="tab" data-action="select-tab" data-tab="${tab.id}" aria-selected="${index === 0 ? 'true' : 'false'}">${tab.label}</button>`
+    )
+    .join('')
+
   return `<!DOCTYPE html>
 <html lang="nb">
 <head>
@@ -1042,13 +1061,16 @@ export function buildTeacherMatrixHtml(
 <title>${title} – ${escapeHtml(todayDdMmYyyy())}</title>
 <link rel="stylesheet" href="${escapeHtml(printWindowCssUrl)}" />
 </head>
-<body>
+<body data-active-tab="${tabs[0].id}">
   <div class="no-print toolbar">
     <button type="button" data-action="print">Skriv ut / lagre som PDF</button>
+    <button type="button" data-action="toggle-print-panel" aria-expanded="false">Velg tabeller til utskrift …</button>
     <label class="toggle-option"><input type="checkbox" data-action="toggle-anonymous"> Anonymiser</label>
   </div>
+  <div class="no-print print-panel" id="print-panel" hidden></div>
   <h1>${title}</h1>
   <p class="doc-meta">Dato: ${escapeHtml(todayDdMmYyyy())}</p>
+  <nav class="no-print tab-bar" role="tablist">${tabBar}</nav>
   ${body}
   <script src="${escapeHtml(printWindowScriptUrl)}"></script>
 </body>

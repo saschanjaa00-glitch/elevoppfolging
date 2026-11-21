@@ -239,41 +239,190 @@ document.addEventListener('paste', function (event) {
 });
 
 function clearSinglePrint() {
-  var marked = document.querySelectorAll('.print-hidden, .print-path');
+  var marked = document.querySelectorAll('.print-hidden, .print-path, .print-first');
   for (var i = 0; i < marked.length; i += 1) {
-    marked[i].classList.remove('print-hidden', 'print-path');
+    marked[i].classList.remove('print-hidden', 'print-path', 'print-first');
   }
 }
 
-// Prints one table (with its heading and description) by hiding every other branch of the page.
-function printTable(tableId) {
-  var table = document.getElementById(tableId);
-  var block = table && table.closest('.table-block');
-  if (!block) return;
-  clearSinglePrint();
-  for (var node = block; node && node !== document.body; node = node.parentElement) {
-    node.classList.add('print-path');
-    var siblings = node.parentElement ? node.parentElement.children : [];
-    for (var i = 0; i < siblings.length; i += 1) {
-      if (siblings[i] !== node && siblings[i].tagName !== 'SCRIPT' && !siblings[i].classList.contains('doc-meta')) {
-        siblings[i].classList.add('print-hidden');
-      }
+function isBlockPrinted(block) {
+  if (block.closest('.print-hidden')) return false;
+  if (block.classList.contains('print-path')) return true;
+  var tab = block.getAttribute('data-tab');
+  return !tab || tab === document.body.getAttribute('data-active-tab');
+}
+
+// Every table block starts on a new page; the first one that is printed must not, or page 1 is blank.
+function markFirstPrintedBlock() {
+  var previous = document.querySelectorAll('.print-first');
+  for (var p = 0; p < previous.length; p += 1) previous[p].classList.remove('print-first');
+  var blocks = document.querySelectorAll('.table-block');
+  for (var i = 0; i < blocks.length; i += 1) {
+    if (isBlockPrinted(blocks[i])) {
+      blocks[i].classList.add('print-first');
+      return;
     }
   }
+}
+
+function selectTab(tab) {
+  document.body.setAttribute('data-active-tab', tab);
+  var buttons = document.querySelectorAll('.tab-bar button[data-tab]');
+  for (var i = 0; i < buttons.length; i += 1) {
+    buttons[i].setAttribute('aria-selected', buttons[i].getAttribute('data-tab') === tab ? 'true' : 'false');
+  }
+}
+
+// Prints the given table blocks (with headings and descriptions) by hiding every other branch of the page.
+function printBlocks(blocks) {
+  if (blocks.length === 0) return;
+  clearSinglePrint();
+  for (var b = 0; b < blocks.length; b += 1) {
+    for (var node = blocks[b]; node && node !== document.body; node = node.parentElement) {
+      node.classList.add('print-path');
+    }
+  }
+  var paths = document.querySelectorAll('.print-path');
+  for (var p = 0; p < paths.length; p += 1) {
+    var siblings = paths[p].parentElement ? paths[p].parentElement.children : [];
+    for (var i = 0; i < siblings.length; i += 1) {
+      var sibling = siblings[i];
+      if (sibling.classList.contains('print-path') || sibling.tagName === 'SCRIPT' || sibling.classList.contains('doc-meta')) continue;
+      sibling.classList.add('print-hidden');
+    }
+  }
+  markFirstPrintedBlock();
   window.addEventListener('afterprint', clearSinglePrint, { once: true });
   window.print();
 }
+
+function printTable(tableId) {
+  var table = document.getElementById(tableId);
+  var block = table && table.closest('.table-block');
+  if (block) printBlocks([block]);
+}
+
+function buildPrintPanel(panel) {
+  var blocks = document.querySelectorAll('.table-block[data-print-group]');
+  var groups = [];
+  var byName = {};
+  for (var i = 0; i < blocks.length; i += 1) {
+    var name = blocks[i].getAttribute('data-print-group');
+    if (!byName[name]) {
+      byName[name] = { name: name, items: [] };
+      groups.push(byName[name]);
+    }
+    byName[name].items.push(blocks[i]);
+  }
+
+  var list = document.createElement('div');
+  list.className = 'print-panel-groups';
+  groups.forEach(function (group) {
+    var fieldset = document.createElement('fieldset');
+    fieldset.className = 'print-panel-group';
+    var legend = document.createElement('legend');
+    var groupLabel = document.createElement('label');
+    var groupBox = document.createElement('input');
+    groupBox.type = 'checkbox';
+    groupBox.checked = true;
+    groupBox.setAttribute('data-print-group-toggle', '');
+    groupLabel.appendChild(groupBox);
+    groupLabel.appendChild(document.createTextNode(' ' + group.name));
+    legend.appendChild(groupLabel);
+    fieldset.appendChild(legend);
+    group.items.forEach(function (block) {
+      var label = document.createElement('label');
+      label.className = 'print-panel-item';
+      var box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = true;
+      box.setAttribute('data-print-item', '');
+      box.printBlock = block;
+      label.appendChild(box);
+      label.appendChild(document.createTextNode(' ' + block.getAttribute('data-print-label')));
+      fieldset.appendChild(label);
+    });
+    list.appendChild(fieldset);
+  });
+
+  var actions = document.createElement('div');
+  actions.className = 'print-panel-actions';
+  [['print-panel-all', 'Velg alle'], ['print-panel-none', 'Fjern alle'], ['print-selected', 'Skriv ut valgte']].forEach(function (entry) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('data-action', entry[0]);
+    button.textContent = entry[1];
+    actions.appendChild(button);
+  });
+  var count = document.createElement('span');
+  count.className = 'print-panel-count';
+  actions.appendChild(count);
+
+  var hint = document.createElement('p');
+  hint.className = 'print-panel-hint';
+  hint.textContent = 'Hver tabell skrives ut på egen side.';
+
+  panel.appendChild(list);
+  panel.appendChild(actions);
+  panel.appendChild(hint);
+  updatePrintPanel(panel);
+}
+
+function updatePrintPanel(panel) {
+  var fieldsets = panel.querySelectorAll('.print-panel-group');
+  for (var f = 0; f < fieldsets.length; f += 1) {
+    var items = fieldsets[f].querySelectorAll('input[data-print-item]');
+    var checked = 0;
+    for (var i = 0; i < items.length; i += 1) if (items[i].checked) checked += 1;
+    var groupBox = fieldsets[f].querySelector('input[data-print-group-toggle]');
+    groupBox.checked = checked === items.length;
+    groupBox.indeterminate = checked > 0 && checked < items.length;
+  }
+  var selected = selectedPrintBlocks(panel).length;
+  panel.querySelector('.print-panel-count').textContent = selected + ' valgt';
+  panel.querySelector('button[data-action="print-selected"]').disabled = selected === 0;
+}
+
+function selectedPrintBlocks(panel) {
+  var boxes = panel.querySelectorAll('input[data-print-item]');
+  var blocks = [];
+  for (var i = 0; i < boxes.length; i += 1) if (boxes[i].checked) blocks.push(boxes[i].printBlock);
+  return blocks;
+}
+
+function setAllPrintItems(panel, checked) {
+  var boxes = panel.querySelectorAll('input[data-print-item]');
+  for (var i = 0; i < boxes.length; i += 1) boxes[i].checked = checked;
+  updatePrintPanel(panel);
+}
+
+function togglePrintPanel(button) {
+  var panel = document.getElementById('print-panel');
+  if (!panel) return;
+  if (!panel.firstChild) buildPrintPanel(panel);
+  panel.hidden = !panel.hidden;
+  button.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');
+}
+
+// Covers Ctrl+P and "Skriv ut / lagre som PDF" as well as the selective prints.
+window.addEventListener('beforeprint', markFirstPrintedBlock);
 
 document.addEventListener('click', function (event) {
   var button = event.target && event.target.closest ? event.target.closest('button[data-action]') : null;
   if (!button) return;
   var action = button.getAttribute('data-action');
   var tableId = button.getAttribute('data-table');
+  var panel = document.getElementById('print-panel');
   if (action === 'print') {
     clearSinglePrint();
     window.print();
   }
   else if (action === 'print-table') printTable(tableId);
+  else if (action === 'select-tab') selectTab(button.getAttribute('data-tab'));
+  else if (action === 'toggle-print-panel') togglePrintPanel(button);
+  else if (action === 'print-panel-all' && panel) setAllPrintItems(panel, true);
+  else if (action === 'print-panel-none' && panel) setAllPrintItems(panel, false);
+  else if (action === 'print-selected' && panel) printBlocks(selectedPrintBlocks(panel));
   else if (action === 'copy-table') copyScheduleTable(button, tableId);
   else if (action === 'export-excel') exportTableToExcel(button, tableId, button.getAttribute('data-filename'));
 });
@@ -281,6 +430,15 @@ document.addEventListener('click', function (event) {
 document.addEventListener('change', function (event) {
   var checkbox = event.target;
   if (!checkbox || !checkbox.getAttribute) return;
+  var panel = checkbox.closest ? checkbox.closest('.print-panel') : null;
+  if (panel) {
+    if (checkbox.hasAttribute('data-print-group-toggle')) {
+      var items = checkbox.closest('.print-panel-group').querySelectorAll('input[data-print-item]');
+      for (var i = 0; i < items.length; i += 1) items[i].checked = checkbox.checked;
+    }
+    updatePrintPanel(panel);
+    return;
+  }
   var action = checkbox.getAttribute('data-action');
   if (action === 'toggle-anonymous') toggleAnonymous(checkbox);
   else if (action === 'toggle-collisions') toggleCollisions(checkbox);

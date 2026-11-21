@@ -359,6 +359,18 @@ describe('teacher discussion scheduling', () => {
     expect(html.match(/class="table-block"|class="sheet table-block/g)).toHaveLength(tableIds.length)
     expect(html).toContain('data-action="print">Skriv ut / lagre som PDF</button>')
     expect(html).not.toContain('renderTablePng')
+
+    expect(html).toContain('<body data-active-tab="laererliste">')
+    const tabIds = Array.from(html.matchAll(/data-action="select-tab" data-tab="([^"]+)"/g), match => match[1])
+    expect(tabIds).toEqual(['laererliste', 'tidsplan', 'laererfordeling', 'moteoversikt', 'oppsatte'])
+    expect(html.match(/class="(?:sheet )?table-block[^"]*" data-tab="/g)).toHaveLength(tableIds.length)
+  })
+
+  it('only offers the Lærerliste tab when there is no discussion schedule', () => {
+    const absences = [absence('1A', 'Anne Berg', 1)]
+    const html = buildTeacherMatrixHtml(buildTeacherMatrixSections(absences, ['1A']), null)
+    const tabIds = Array.from(html.matchAll(/data-action="select-tab" data-tab="([^"]+)"/g), match => match[1])
+    expect(tabIds).toEqual(['laererliste'])
   })
 
   it('appends per-class matrices with only the teachers assigned in the schedule', () => {
@@ -394,7 +406,7 @@ describe('teacher discussion scheduling', () => {
 
     const html = buildTeacherMatrixHtml(sections, schedule)
     expect(html).toContain('Lærerliste klasselærerråd – Oppsatte lærere – 1A')
-    expect(html.indexOf('Oppsatte lærere')).toBeGreaterThan(html.indexOf('id="teacher-meeting-table"'))
+    expect(html.indexOf('Lærerliste klasselærerråd – Oppsatte lærere')).toBeGreaterThan(html.indexOf('id="teacher-meeting-table"'))
     expect(html.slice(html.indexOf('id="assigned-matrix-table-0"'))).not.toContain('class="few"')
     expect(printWindowCss).not.toMatch(/tr\.few td\.spacer/)
   })

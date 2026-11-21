@@ -193,7 +193,75 @@ tbody tr.few th.teacher, tbody tr.few td.mark {
   font-size: 9pt;
   cursor: pointer;
 }
+/* Tabs: only the active tab's tables are shown (and printed by "Skriv ut / lagre som PDF"). */
+body[data-active-tab] .table-block[data-tab] { display: none; }
+body[data-active-tab="laererliste"] .table-block[data-tab="laererliste"],
+body[data-active-tab="tidsplan"] .table-block[data-tab="tidsplan"],
+body[data-active-tab="laererfordeling"] .table-block[data-tab="laererfordeling"],
+body[data-active-tab="moteoversikt"] .table-block[data-tab="moteoversikt"],
+body[data-active-tab="oppsatte"] .table-block[data-tab="oppsatte"] { display: block; }
+.table-block > .schedule-subtitle:first-child { margin-top: 0; }
+.no-print.tab-bar {
+  display: flex;
+  gap: 1mm;
+  margin: 4mm 0 2mm;
+  border-bottom: 1px solid #000;
+}
+.no-print.tab-bar button {
+  margin-bottom: -1px;
+  padding: 2mm 5mm;
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: transparent;
+  color: #555;
+}
+.no-print.tab-bar button:hover { color: #000; }
+.no-print.tab-bar button[aria-selected="true"] {
+  border-color: #000;
+  background: #fff;
+  color: #000;
+  font-weight: 700;
+}
 .hide-paren .paren { display: none; }
+.print-panel {
+  margin: 0 0 6mm;
+  padding: 3mm 4mm;
+  border: 1px solid #000;
+  font-size: 9pt;
+}
+.print-panel-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3mm 6mm;
+}
+.print-panel-group {
+  margin: 0;
+  padding: 1mm 3mm 2mm;
+  border: 1px solid #bbb;
+}
+.print-panel-group legend {
+  font-weight: 700;
+  padding: 0 1mm;
+}
+.print-panel label { cursor: pointer; }
+.print-panel-item {
+  display: block;
+  margin: 0.8mm 0;
+}
+.print-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 3mm;
+  margin-top: 3mm;
+}
+.print-panel-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.print-panel-hint {
+  margin: 2mm 0 0;
+  font-size: 8pt;
+}
 .meeting-table .meeting-teacher {
   width: 45mm;
   vertical-align: middle;
@@ -210,11 +278,16 @@ tbody tr.few th.teacher, tbody tr.few td.mark {
 }
 @media print {
   body { padding: 0; }
-  .no-print { display: none; }
+  /* !important: .no-print.toolbar sets display: flex with higher specificity */
+  .no-print { display: none !important; }
   .editable-label { outline: none; }
-  /* "Skriv ut tabell": only the chosen table's branch is printed, without a leading page break. */
+  /* One table per page. JS marks the first printed block (.print-first) so page 1 is not blank. */
+  .page-break { break-before: auto; page-break-before: auto; }
+  .table-block { break-before: page; page-break-before: always; }
+  .table-block.print-first { break-before: auto; page-break-before: auto; }
+  .sheet { padding-top: 0; }
+  .table-block > .schedule-subtitle { margin-top: 0; }
+  /* Selective printing: only the chosen tables' branches are printed, even from other tabs. */
   .print-hidden { display: none !important; }
-  .print-path { break-before: auto !important; page-break-before: auto !important; }
-  .sheet.print-path { padding-top: 0; }
-  .table-block.print-path > .schedule-subtitle { margin-top: 0; }
+  .table-block.print-path { display: block !important; }
 }
